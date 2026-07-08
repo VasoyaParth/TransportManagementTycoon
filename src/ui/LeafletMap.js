@@ -106,26 +106,31 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
         </View>
       )}
       <View style={st.controls}>
-        <Ctl icon="home-map-marker" onPress={() => inject('window.centerHQ()')} />
-        <Ctl icon="gas-station" onPress={() => inject('window.toggleStations()')} />
-        <Ctl icon="city-variant-outline" onPress={() => inject('window.toggleCities()')} />
+        <Ctl icon="crosshairs-gps" label="HQ" onPress={() => inject('window.centerHQ()')} />
+        <Ctl icon="gas-station" label="Fuel" onPress={() => inject('window.toggleStations()')} />
+        <Ctl icon="city-variant-outline" label="Cities" onPress={() => inject('window.toggleCities()')} />
       </View>
     </View>
   );
 }
 
-function Ctl({ icon, onPress }) {
+function Ctl({ icon, label, onPress }) {
   return (
-    <Pressable onPress={onPress} style={st.ctl}><Icon name={icon} size={20} color={C.text} /></Pressable>
+    <Pressable onPress={onPress} style={st.ctl}>
+      <Icon name={icon} size={17} color={C.text} />
+      {label ? <Text style={st.ctlTxt}>{label}</Text> : null}
+    </Pressable>
   );
 }
 
 const st = StyleSheet.create({
-  controls: { position: 'absolute', right: 12, top: 78 },
+  // Horizontal show/hide toggle row, centred just above the bottom nav.
+  controls: { position: 'absolute', left: 0, right: 0, bottom: 88, flexDirection: 'row', justifyContent: 'center', gap: 8 },
   ctl: {
-    width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.94)',
-    alignItems: 'center', justifyContent: 'center', marginBottom: 8, borderWidth: 1, borderColor: C.border,
+    flexDirection: 'row', alignItems: 'center', height: 34, paddingHorizontal: 12, borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.94)', borderWidth: 1, borderColor: C.border,
   },
+  ctlTxt: { fontSize: 11.5, fontWeight: '700', color: C.text, marginLeft: 5 },
   legend: {
     position: 'absolute', left: 12, bottom: 12, flexDirection: 'row',
     backgroundColor: 'rgba(255,255,255,0.94)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6,

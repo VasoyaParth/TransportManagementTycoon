@@ -13,7 +13,7 @@ import { haptic } from '../engine/haptics';
 export { Icon };
 
 // ---------- Animated money counter (NFR-6) ----------
-export function Money({ value, short = false, style, prefixIcon }) {
+export function Money({ value, short = false, style, prefixIcon, size }) {
   const anim = useRef(new Animated.Value(value)).current;
   const [disp, setDisp] = useState(value);
   const prev = useRef(value);
@@ -39,7 +39,7 @@ export function Money({ value, short = false, style, prefixIcon }) {
   return (
     <View style={[{ flexDirection: 'row', alignItems: 'center' }, style]}>
       {prefixIcon ? <Icon name={prefixIcon} size={14} color={C.sub} style={{ marginRight: 3 }} /> : null}
-      <Animated.Text style={[FONT.mono, { fontWeight: '700', color }]}>{short ? inrShort(disp) : inr(disp)}</Animated.Text>
+      <Animated.Text style={[FONT.mono, { fontWeight: '700', color }, size ? { fontSize: size } : null]}>{short ? inrShort(disp) : inr(disp)}</Animated.Text>
       {delta > 0 && (
         <Animated.Text pointerEvents="none" style={{
           position: 'absolute', right: 0, top: 0, fontSize: 11, fontWeight: '800', color: C.green,

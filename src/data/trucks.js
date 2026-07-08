@@ -178,7 +178,6 @@ export const POWERUPS = [
   { id: 'repair', name: 'Instant Repair', gold: 15, icon: 'wrench', desc: 'Instantly fix a broken truck.' },
   { id: 'double', name: 'Double Revenue', gold: 20, icon: 'cash-multiple', desc: 'Doubles the payout of your next completed delivery.' },
   { id: 'skipbuild', name: 'Skip Build Time', gold: 30, icon: 'fast-forward', desc: 'Instantly finish a truck under construction.' },
-  { id: 'goldpack', name: 'Buy Gold Pack', cash: 500000, goldGain: 100, icon: 'gold', desc: 'Convert ₹5,00,000 into 100 Gold.' },
 ];
 
 export const CONTRACT_FLAVORS = [

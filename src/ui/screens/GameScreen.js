@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Pressable, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native';
 import { C, FONT, SHADOW, RADIUS } from '../theme';
-import { IconBtn, Icon, Money, Sheet, useToast, Pill } from '../components';
+import { IconBtn, Icon, Money, Sheet, useToast, Row } from '../components';
 import MapContainer from '../MapContainer';
 import { useGame, modelById, GAME_HOUR_MS } from '../../store/gameStore';
 import { cityById } from '../../engine/routing';
@@ -95,6 +95,12 @@ export default function GameScreen() {
 
   const narrow = width < 420;
 
+  // Live real-world weekday/date/time shown under the game day (updates each 1s tick).
+  const _now = new Date();
+  const _days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const _mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const realClock = `${_days[_now.getDay()]}, ${_now.getDate()} ${_mon[_now.getMonth()]} · ${String(_now.getHours()).padStart(2, '0')}:${String(_now.getMinutes()).padStart(2, '0')}`;
+
   // Real-world time of day → day/night phase (map tint + indicator icon).
   const rh = clock ? new Date().getHours() : 12;
   const phase = rh < 6 ? { icon: 'weather-night', color: C.blue, label: 'Night', tint: 0.30 }
@@ -105,24 +111,19 @@ export default function GameScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
-      {/* ---- Header ---- */}
+      {/* ---- Header: prominent balance + action icons ---- */}
       <View style={st.header}>
-        <Pressable style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}
-          onPress={() => { haptic('light'); setModal({ kind: 'settings', tab: 'profile' }); }}>
-          <View style={st.logoCircle}><Icon name={company?.logo || 'truck'} size={18} color={C.blue} /></View>
-          <View style={{ marginLeft: 8, flexShrink: 1 }}>
-            <Text style={[FONT.h3, { fontSize: 14 }]} numberOfLines={1}>{company?.name}</Text>
-            <Text style={FONT.tiny} numberOfLines={1}>{hq?.name}, {hq?.state}</Text>
-          </View>
-        </Pressable>
+        <View style={{ flex: 1 }}>
+          <Text style={[FONT.tiny, { marginBottom: 1 }]}>BALANCE</Text>
+          <Row style={{ alignItems: 'center' }}>
+            <Money value={balance} short size={22} />
+            <Pressable onPress={() => { haptic('light'); setModal({ kind: 'powerups' }); }} style={st.goldChip}>
+              <Icon name="gold" size={13} color={C.gold} />
+              <Text style={[FONT.tiny, { fontWeight: '800', color: C.gold, marginLeft: 3 }]}>{gold}</Text>
+            </Pressable>
+          </Row>
+        </View>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <View style={{ alignItems: 'flex-end', marginRight: 4 }}>
-            <Money value={balance} short />
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Icon name="gold" size={12} color={C.gold} />
-              <Text style={[FONT.tiny, { fontWeight: '800', color: C.gold, marginLeft: 2 }]}>{gold}</Text>
-            </View>
-          </View>
           <IconBtn name="garage" onPress={() => setModal({ kind: 'hubs' })} size={20} />
           <IconBtn name="star-four-points" onPress={() => setModal({ kind: 'powerups' })} color={C.gold} size={20} />
           <IconBtn name="file-document-outline" onPress={() => setModal({ kind: 'contracts' })} size={20} />
@@ -144,15 +145,27 @@ export default function GameScreen() {
         {phase.tint > 0 && (
           <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: '#0A1A3A', opacity: phase.tint }]} />
         )}
-        {/* Floating frosted clock capsule with day/night indicator */}
+        {/* Floating frosted clock capsule: game day + real weekday/date/time */}
         <View style={st.clockCap}>
-          <Icon name={phase.icon} size={16} color={phase.color} />
-          <Text style={[FONT.tiny, { marginLeft: 6, fontWeight: '800' }]}>Day {clock.day}</Text>
-          <Text style={[FONT.tiny, { marginLeft: 6, color: C.sub }]}>{phase.label}</Text>
+          <Row style={{ alignItems: 'center' }}>
+            <Icon name={phase.icon} size={16} color={phase.color} />
+            <Text style={[FONT.tiny, { marginLeft: 6, fontWeight: '800' }]}>Day {clock.day}</Text>
+            <Text style={[FONT.tiny, { marginLeft: 6, color: C.sub }]}>{phase.label}</Text>
+          </Row>
+          <Text style={[FONT.tiny, { marginTop: 2, color: C.sub }]}>{realClock}</Text>
         </View>
-        {/* Floating fleet-manager button (opens left sidebar) */}
-        <Pressable style={[st.mgrBtn, SHADOW.pop]} onPress={() => { haptic('light'); setSidebar(true); }}>
-          <Icon name="view-dashboard-outline" size={20} color={C.blue} />
+        {/* Floating company profile capsule (opens Settings → Profile) */}
+        <Pressable style={st.profileCap} onPress={() => { haptic('light'); setModal({ kind: 'settings', tab: 'profile' }); }}>
+          <View style={st.logoCircle}><Icon name={company?.logo || 'truck'} size={16} color={C.blue} /></View>
+          <View style={{ marginLeft: 7, flexShrink: 1 }}>
+            <Text style={[FONT.tiny, { fontWeight: '800' }]} numberOfLines={1}>{company?.name}</Text>
+            <Text style={[FONT.tiny, { color: C.sub }]} numberOfLines={1}>{hq?.name}, {hq?.state}</Text>
+          </View>
+        </Pressable>
+        {/* Left-edge fleet-manager strip with arrow (opens sidebar) */}
+        <Pressable style={[st.mgrStrip, SHADOW.pop]} onPress={() => { haptic('light'); setSidebar(true); }}>
+          <Icon name="truck" size={18} color={C.blue} />
+          <Icon name="chevron-right" size={18} color={C.sub} />
         </Pressable>
         {/* Compact vertical delivery action */}
         <Pressable style={[st.fab, SHADOW.pop]} onPress={() => { haptic('medium'); openNewDelivery(); }}>
@@ -230,12 +243,30 @@ const st = StyleSheet.create({
     width: 34, height: 34, borderRadius: 17, backgroundColor: C.blueSoft,
     alignItems: 'center', justifyContent: 'center',
   },
-  // Floating frosted clock capsule on the map (below the header).
+  // Floating frosted clock capsule on the map (top-left).
   clockCap: {
-    position: 'absolute', top: 12, left: 12, flexDirection: 'row', alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.82)', paddingHorizontal: 12, paddingVertical: 7,
-    borderRadius: 30, borderWidth: 1, borderColor: 'rgba(255,255,255,0.7)',
+    position: 'absolute', top: 12, left: 12,
+    backgroundColor: 'rgba(255,255,255,0.9)', paddingHorizontal: 12, paddingVertical: 7,
+    borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.7)',
     shadowColor: '#0B0F14', shadowOpacity: 0.12, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 4,
+  },
+  // Gold chip beside the balance.
+  goldChip: {
+    flexDirection: 'row', alignItems: 'center', marginLeft: 10,
+    backgroundColor: C.bgSoft, paddingHorizontal: 9, paddingVertical: 3, borderRadius: 14,
+  },
+  // Floating company profile capsule (top-left, under the clock).
+  profileCap: {
+    position: 'absolute', top: 64, left: 12, maxWidth: 210, flexDirection: 'row', alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.9)', paddingLeft: 6, paddingRight: 12, paddingVertical: 5,
+    borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.7)',
+    shadowColor: '#0B0F14', shadowOpacity: 0.12, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 4,
+  },
+  // Left-edge fleet-manager strip tab with arrow.
+  mgrStrip: {
+    position: 'absolute', left: 0, top: '46%', flexDirection: 'row', alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.94)', paddingLeft: 8, paddingRight: 4, paddingVertical: 12,
+    borderTopRightRadius: 18, borderBottomRightRadius: 18, borderWidth: 1, borderLeftWidth: 0, borderColor: 'rgba(255,255,255,0.7)',
   },
   // Floating pill navigation (Samsung-style) — not edge-to-edge, frosted glass.
   nav: {
@@ -246,12 +277,6 @@ const st = StyleSheet.create({
   },
   navItem: { flex: 1, alignItems: 'center', gap: 2, paddingVertical: 2 },
   navTxt: { fontSize: 9.5, fontWeight: '700', color: C.sub },
-  // Floating fleet-manager button on the map (top-right, under header).
-  mgrBtn: {
-    position: 'absolute', top: 10, right: 12, width: 40, height: 40, borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.9)', alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.7)',
-  },
   // Compact vertical delivery action (small icon + tiny label), above the nav.
   fab: {
     position: 'absolute', right: 14, bottom: 84, backgroundColor: C.text, borderRadius: 18,
