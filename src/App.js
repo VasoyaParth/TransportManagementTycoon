@@ -6,6 +6,7 @@ import { View, Text, StatusBar, ActivityIndicator, PermissionsAndroid, Platform 
 import { useGame } from './store/gameStore';
 import { useAuth } from './store/authStore';
 import { api } from './net/api';
+import { hydrateConfig } from './net/config';
 import { ToastProvider, Skeleton } from './ui/components';
 import { C, FONT } from './ui/theme';
 import Splash from './ui/screens/Splash';
@@ -64,6 +65,9 @@ export default function App() {
     if (authStatus !== 'authed') { setCloudLoaded(false); return; }
     let alive = true;
     (async () => {
+      // 1) Pull all game catalogs (cities, trucks, cargo, staff, logos…) from the cloud.
+      try { await hydrateConfig(); } catch { /* keep bundled fallback */ }
+      // 2) Load this account's authoritative game state from the cloud.
       try {
         const { state } = await api.getState();
         if (!alive) return;
