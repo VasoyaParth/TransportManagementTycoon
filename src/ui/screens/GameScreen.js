@@ -122,6 +122,13 @@ export default function GameScreen() {
               <Text style={[FONT.tiny, { fontWeight: '800', color: C.gold, marginLeft: 3 }]}>{gold}</Text>
             </Pressable>
           </Row>
+          {/* Day + live date/time (moved out of the map to save space) */}
+          <Row style={{ alignItems: 'center', marginTop: 2 }}>
+            <Icon name={phase.icon} size={11} color={phase.color} />
+            <Text style={[FONT.tiny, { fontWeight: '800', marginLeft: 3 }]}>Day {clock.day}</Text>
+            <Text style={[FONT.tiny, { color: C.faint, marginHorizontal: 4 }]}>·</Text>
+            <Text style={[FONT.tiny, { color: C.sub }]}>{realClock}</Text>
+          </Row>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
           <IconBtn name="garage" onPress={() => setModal({ kind: 'hubs' })} size={20} />
@@ -145,15 +152,6 @@ export default function GameScreen() {
         {phase.tint > 0 && (
           <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: '#0A1A3A', opacity: phase.tint }]} />
         )}
-        {/* Floating frosted clock capsule: game day + real weekday/date/time */}
-        <View style={st.clockCap}>
-          <Row style={{ alignItems: 'center' }}>
-            <Icon name={phase.icon} size={16} color={phase.color} />
-            <Text style={[FONT.tiny, { marginLeft: 6, fontWeight: '800' }]}>Day {clock.day}</Text>
-            <Text style={[FONT.tiny, { marginLeft: 6, color: C.sub }]}>{phase.label}</Text>
-          </Row>
-          <Text style={[FONT.tiny, { marginTop: 2, color: C.sub }]}>{realClock}</Text>
-        </View>
         {/* Floating company profile capsule (opens Settings → Profile) */}
         <Pressable style={st.profileCap} onPress={() => { haptic('light'); setModal({ kind: 'settings', tab: 'profile' }); }}>
           <View style={st.logoCircle}><Icon name={company?.logo || 'truck'} size={16} color={C.blue} /></View>
@@ -167,10 +165,9 @@ export default function GameScreen() {
           <Icon name="truck" size={18} color={C.blue} />
           <Icon name="chevron-right" size={18} color={C.sub} />
         </Pressable>
-        {/* Compact vertical delivery action */}
-        <Pressable style={[st.fab, SHADOW.pop]} onPress={() => { haptic('medium'); openNewDelivery(); }}>
-          <Icon name="truck-plus" size={22} color="#fff" />
-          <Text style={st.fabTxt}>Deliver</Text>
+        {/* Delivery action — matches the map toggle buttons (same size/style) */}
+        <Pressable style={st.fab} onPress={() => { haptic('medium'); openNewDelivery(); }}>
+          <Icon name="truck-plus" size={19} color={C.text} />
         </Pressable>
       </View>
 
@@ -243,21 +240,14 @@ const st = StyleSheet.create({
     width: 34, height: 34, borderRadius: 17, backgroundColor: C.blueSoft,
     alignItems: 'center', justifyContent: 'center',
   },
-  // Floating frosted clock capsule on the map (top-left).
-  clockCap: {
-    position: 'absolute', top: 12, left: 12,
-    backgroundColor: 'rgba(255,255,255,0.9)', paddingHorizontal: 12, paddingVertical: 7,
-    borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.7)',
-    shadowColor: '#0B0F14', shadowOpacity: 0.12, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 4,
-  },
   // Gold chip beside the balance.
   goldChip: {
     flexDirection: 'row', alignItems: 'center', marginLeft: 10,
     backgroundColor: C.bgSoft, paddingHorizontal: 9, paddingVertical: 3, borderRadius: 14,
   },
-  // Floating company profile capsule (top-left, under the clock).
+  // Floating company profile capsule (top-left).
   profileCap: {
-    position: 'absolute', top: 64, left: 12, maxWidth: 210, flexDirection: 'row', alignItems: 'center',
+    position: 'absolute', top: 12, left: 12, maxWidth: 210, flexDirection: 'row', alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.9)', paddingLeft: 6, paddingRight: 12, paddingVertical: 5,
     borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.7)',
     shadowColor: '#0B0F14', shadowOpacity: 0.12, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 4,
@@ -277,10 +267,10 @@ const st = StyleSheet.create({
   },
   navItem: { flex: 1, alignItems: 'center', gap: 2, paddingVertical: 2 },
   navTxt: { fontSize: 9.5, fontWeight: '700', color: C.sub },
-  // Compact vertical delivery action (small icon + tiny label), above the nav.
+  // Delivery button — identical chrome to the map toggle buttons (one right-column set).
   fab: {
-    position: 'absolute', right: 14, bottom: 84, backgroundColor: C.text, borderRadius: 18,
-    alignItems: 'center', justifyContent: 'center', paddingHorizontal: 12, paddingVertical: 10, gap: 3,
+    position: 'absolute', right: 14, bottom: 84, width: 40, height: 40, borderRadius: 20,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.94)', borderWidth: 1, borderColor: C.border,
   },
-  fabTxt: { color: '#fff', fontWeight: '800', fontSize: 10 },
 });
