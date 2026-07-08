@@ -7,7 +7,9 @@ import * as Cities from '../data/cities';
 import * as Trucks from '../data/trucks';
 import * as Staff from '../data/staffNames';
 import * as Stations from '../engine/stations';
+import * as Highways from '../data/highways';
 import { setEconomy } from '../engine/economy';
+import { rebuildGraph } from '../engine/routing';
 
 // Fetch every page of a paginated collection into one array.
 async function fetchAll(collection) {
@@ -65,16 +67,33 @@ export async function hydrateConfig() {
       failed.push(name);
     }
   }));
-  // Staff name pools come as a {m:[],f:[]} document under "staffNames".
+  // Staff name pools arrive as a flat, paginated list of {name, gender}.
   try {
-    const res = await api.config('staffNames', '', 5);
-    const doc = res && res.items && res.items[0];
-    if (doc && (doc.m || doc.f)) {
-      if (Array.isArray(doc.m)) { Staff.STAFF_NAMES.m.length = 0; Staff.STAFF_NAMES.m.push(...doc.m); }
-      if (Array.isArray(doc.f)) { Staff.STAFF_NAMES.f.length = 0; Staff.STAFF_NAMES.f.push(...doc.f); }
-      loaded.staffNames = (doc.m?.length || 0) + (doc.f?.length || 0);
+    const rows = await fetchAll('staffNames');
+    if (rows.length) {
+      const m = rows.filter(r => r.gender === 'm').map(r => r.name);
+      const f = rows.filter(r => r.gender === 'f').map(r => r.name);
+      if (m.length) { Staff.STAFF_NAMES.m.length = 0; Staff.STAFF_NAMES.m.push(...m); }
+      if (f.length) { Staff.STAFF_NAMES.f.length = 0; Staff.STAFF_NAMES.f.push(...f); }
+      loaded.staffNames = m.length + f.length;
     }
   } catch { failed.push('staffNames'); }
+
+  // Highway graph: road nodes ({key,lat,lng}), road edges & ferry edges.
+  try {
+    const [nodes, edges, ferries] = await Promise.all([
+      fetchAll('roadNodes'), fetchAll('roadEdges'), fetchAll('ferryEdges'),
+    ]);
+    let touched = false;
+    if (nodes.length) {
+      for (const k in Highways.ROAD_NODES) delete Highways.ROAD_NODES[k];
+      for (const n of nodes) if (n.key) Highways.ROAD_NODES[n.key] = { lat: n.lat, lng: n.lng };
+      loaded.roadNodes = nodes.length; touched = true;
+    }
+    if (replaceArr(Highways.ROAD_EDGES, edges)) { loaded.roadEdges = edges.length; touched = true; }
+    if (replaceArr(Highways.FERRY_EDGES, ferries)) { loaded.ferryEdges = ferries.length; touched = true; }
+    if (touched) rebuildGraph(); // recompute Dijkstra adjacency from cloud data
+  } catch { failed.push('highways'); }
 
   // Economy constants (rates, fuel prices, tolls) — applied live so DB edits take effect.
   try {
