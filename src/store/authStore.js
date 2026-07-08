@@ -2,7 +2,7 @@
 // Kept separate from the game store so the auth gate can render before the
 // (cloud-loaded) game state exists.
 import { create } from 'zustand';
-import { api, loadToken, setToken, getToken } from '../net/api';
+import { api, loadToken, setToken, getToken, setUnauthorizedHandler } from '../net/api';
 
 export const useAuth = create((set, get) => ({
   status: 'checking', // checking | guest | authed
@@ -12,6 +12,8 @@ export const useAuth = create((set, get) => ({
 
   // Restore a saved session on launch (auto-login).
   async bootstrap() {
+    // If any request gets a 401 (expired/invalid token), drop to the login screen.
+    setUnauthorizedHandler(() => { setToken(null); set({ status: 'guest', user: null, error: 'Session expired — please log in again.' }); });
     try {
       const t = await loadToken();
       if (!t) { set({ status: 'guest' }); return; }

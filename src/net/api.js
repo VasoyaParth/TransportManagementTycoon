@@ -1,14 +1,19 @@
 // Cloud API client. Talks to the Truck Empire Node/MongoDB backend.
 //
-// BASE URL: on the Android emulator, the host machine's localhost is reachable
-// at 10.0.2.2. On a physical device, replace this with your computer's LAN IP
-// (e.g. http://192.168.1.20:4000/api) or your deployed server URL.
+// BASE URL — the deployed cloud backend. This is the ONE place to change the
+// server URL; everything in the app goes through it. For local dev against a
+// server on your machine, use http://10.0.2.2:4000/api (Android emulator).
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export const API_BASE = 'http://10.0.2.2:4000/api';
+export const API_BASE = 'https://truck-manager-backend.vercel.app/api';
 const TOKEN_KEY = 'te-auth-token';
 
 let _token = null;
+let _onUnauthorized = null;
+
+// Register a callback fired when the server rejects our token (401) — the auth
+// store uses this to log the user out so they can sign back in.
+export function setUnauthorizedHandler(fn) { _onUnauthorized = fn; }
 
 export async function loadToken() {
   if (_token) return _token;
@@ -41,7 +46,10 @@ async function req(path, { method = 'GET', body, auth = true, timeout = 12000 } 
   clearTimeout(t);
   let data = null;
   try { data = await res.json(); } catch { /* non-json */ }
-  if (!res.ok) throw new Error((data && (data.error || data.message)) || `Request failed (${res.status})`);
+  if (!res.ok) {
+    if (res.status === 401 && auth && _token && _onUnauthorized) { try { _onUnauthorized(); } catch {} }
+    throw new Error((data && (data.error || data.message)) || `Request failed (${res.status})`);
+  }
   return data;
 }
 

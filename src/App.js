@@ -2,7 +2,7 @@
 // Cloud-only: the player must log in; game state is loaded from and synced to
 // the Node/MongoDB backend.
 import React, { useEffect, useState } from 'react';
-import { View, Text, StatusBar, ActivityIndicator, PermissionsAndroid, Platform } from 'react-native';
+import { View, Text, StatusBar, ActivityIndicator, AppState, PermissionsAndroid, Platform } from 'react-native';
 import { useGame } from './store/gameStore';
 import { useAuth } from './store/authStore';
 import { api } from './net/api';
@@ -81,22 +81,36 @@ export default function App() {
     return () => { alive = false; };
   }, [authStatus]);
 
-  // Push local changes up to the cloud (debounced) for multi-device sync.
+  // Push local changes up to the cloud for multi-device sync. Debounced during
+  // play, but flushed IMMEDIATELY when the app is backgrounded/closed so no
+  // progress is lost when you switch apps or phones.
   useEffect(() => {
     if (authStatus !== 'authed' || !cloudLoaded) return undefined;
     let timer = null;
     let version = 0;
-    const push = () => {
-      clearTimeout(timer);
-      timer = setTimeout(async () => {
-        try {
-          const r = await api.putState(useGame.getState().cloudSnapshot(), version);
-          if (r && typeof r.version === 'number') version = r.version;
-        } catch { /* retried on next change */ }
-      }, 1500);
+    let dirty = false;
+    let saving = false;
+
+    const save = async () => {
+      if (saving) return;
+      saving = true; dirty = false;
+      try {
+        const r = await api.putState(useGame.getState().cloudSnapshot(), version);
+        if (r && typeof r.version === 'number') version = r.version;
+      } catch {
+        dirty = true; // keep dirty so a later trigger retries
+      } finally {
+        saving = false;
+      }
     };
-    const unsub = useGame.subscribe(push);
-    return () => { clearTimeout(timer); unsub(); };
+    const scheduleSave = () => { dirty = true; clearTimeout(timer); timer = setTimeout(save, 1500); };
+    const flush = () => { clearTimeout(timer); if (dirty || saving) save(); };
+
+    const unsub = useGame.subscribe(scheduleSave);
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'background' || s === 'inactive') flush();
+    });
+    return () => { clearTimeout(timer); unsub(); sub.remove(); flush(); };
   }, [authStatus, cloudLoaded]);
 
   if (!hydrated || authStatus === 'checking') {
