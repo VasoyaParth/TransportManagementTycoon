@@ -16,6 +16,7 @@ import {
 import { haptic } from '../../engine/haptics';
 import Tutorial from './Tutorial';
 import FleetSidebar from './FleetSidebar';
+import { CloudModal } from './CloudModal';
 
 const TABS = [
   { id: 'fleet', icon: 'truck', label: 'Fleet' },
@@ -131,9 +132,6 @@ export default function GameScreen() {
           </Row>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <IconBtn name="garage" onPress={() => setModal({ kind: 'hubs' })} size={20} />
-          <IconBtn name="star-four-points" onPress={() => setModal({ kind: 'powerups' })} color={C.gold} size={20} />
-          <IconBtn name="file-document-outline" onPress={() => setModal({ kind: 'contracts' })} size={20} />
           <IconBtn name="bell-outline" badge={unread} onPress={() => setModal({ kind: 'notifications' })} size={20} />
           <IconBtn name="cog-outline" onPress={() => setModal({ kind: 'settings' })} size={20} />
         </View>
@@ -160,6 +158,21 @@ export default function GameScreen() {
             <Text style={[FONT.tiny, { color: C.sub }]} numberOfLines={1}>{hq?.name}, {hq?.state}</Text>
           </View>
         </Pressable>
+        {/* Right-side action stack — moved out of the header for a clean menu bar */}
+        <View style={st.actionStack}>
+          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'hubs' }); }}>
+            <Icon name="garage" size={19} color={C.text} />
+          </Pressable>
+          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'contracts' }); }}>
+            <Icon name="file-document-outline" size={19} color={C.text} />
+          </Pressable>
+          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'powerups' }); }}>
+            <Icon name="star-four-points" size={19} color={C.gold} />
+          </Pressable>
+          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'cloud' }); }}>
+            <Icon name="cloud-check-outline" size={19} color={C.blue} />
+          </Pressable>
+        </View>
         {/* Left-edge fleet-manager strip with arrow (opens sidebar) */}
         <Pressable style={[st.mgrStrip, SHADOW.pop]} onPress={() => { haptic('light'); setSidebar(true); }}>
           <Icon name="truck" size={18} color={C.blue} />
@@ -213,6 +226,7 @@ export default function GameScreen() {
       <PowerupsModal visible={modal?.kind === 'powerups'} onClose={() => setModal(null)} />
       <NotificationsModal visible={modal?.kind === 'notifications'} onClose={() => setModal(null)} />
       <HubsModal visible={modal?.kind === 'hubs'} onClose={() => setModal(null)} onShowOnMap={(f) => { setModal(null); setFocus(f); }} />
+      <CloudModal visible={modal?.kind === 'cloud'} onClose={() => setModal(null)} />
       <SettingsModal visible={modal?.kind === 'settings'} onClose={() => setModal(null)} initialTab={modal?.tab} />
 
       {/* Left fleet-management drawer */}
@@ -239,6 +253,12 @@ const st = StyleSheet.create({
   logoCircle: {
     width: 34, height: 34, borderRadius: 17, backgroundColor: C.blueSoft,
     alignItems: 'center', justifyContent: 'center',
+  },
+  // Right-side vertical action stack (hubs / contracts / power-ups / cloud).
+  actionStack: { position: 'absolute', top: 12, right: 12, gap: 8 },
+  actionBtn: {
+    width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.94)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.7)',
   },
   // Gold chip beside the balance.
   goldChip: {

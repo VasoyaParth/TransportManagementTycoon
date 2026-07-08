@@ -1,16 +1,35 @@
 // Economy engine — authoritative revenue/cost formulas (FR-6.11).
 // The preview and the completed payout use exactly this code path (NFR-7).
 
+// Economy is driven by a mutable config object so the values can be loaded
+// from (and changed in) the cloud DB and take effect live. The exported
+// consts remain as the bundled defaults / initial values.
 export const BASE_RATE = 4.5; // ₹ per km per ton (realistic Indian full-load freight)
 export const DIESEL_PRICE = 92; // ₹ / litre
 export const KWH_PRICE = 9; // ₹ / kWh
 
+export const ECON = {
+  baseRate: BASE_RATE,
+  dieselPrice: DIESEL_PRICE,
+  kwhPrice: KWH_PRICE,
+  tollPerKm: 2.2,
+  realSecPerGameHour: 3600,
+};
+
+// Apply a cloud economyConfig document over the defaults (only known keys).
+export function setEconomy(cfg) {
+  if (!cfg || typeof cfg !== 'object') return;
+  for (const k of ['baseRate', 'dieselPrice', 'kwhPrice', 'tollPerKm', 'realSecPerGameHour']) {
+    if (typeof cfg[k] === 'number') ECON[k] = cfg[k];
+  }
+}
+
 export function fuelCost(model, distanceKm) {
   if (model.propulsion === 'electric') {
     const kwhPerKm = model.battery / model.range;
-    return distanceKm * kwhPerKm * KWH_PRICE;
+    return distanceKm * kwhPerKm * ECON.kwhPrice;
   }
-  return (distanceKm / model.eff) * DIESEL_PRICE;
+  return (distanceKm / model.eff) * ECON.dieselPrice;
 }
 
 export function maintenanceCost(model, distanceKm) {
@@ -21,14 +40,14 @@ export function maintenanceCost(model, distanceKm) {
 export const TOLL_PER_KM = 2.2; // ₹ / km baseline (light truck)
 export function tollCost(model, distanceKm) {
   const axleFactor = 0.6 + (model.cargo / 34) * 0.9; // ~0.6 (mini) .. 1.5 (super-heavy)
-  return distanceKm * TOLL_PER_KM * axleFactor;
+  return distanceKm * ECON.tollPerKm * axleFactor;
 }
 
 // Full realistic P&L for a delivery. Revenue is cargo-driven (rate = ₹/km/ton
 // for THIS cargo type) and truck-driven: a higher-rated truck earns a small
 // handling premium, while a bigger truck pays more fuel/maintenance/tolls.
 // boosts: { marketing: 0..0.5, doubleNext: bool }
-export function deliveryEconomics({ model, distanceKm, cargoTons, rate = BASE_RATE, boosts = {} }) {
+export function deliveryEconomics({ model, distanceKm, cargoTons, rate = ECON.baseRate, boosts = {} }) {
   const marketing = 1 + (boosts.marketing || 0);
   const revBoost = boosts.doubleNext ? 2 : 1;
   // Better-rated trucks command a slightly higher freight rate (client trust).
@@ -54,7 +73,7 @@ export function deliveryEconomics({ model, distanceKm, cargoTons, rate = BASE_RA
 export const REAL_SEC_PER_GAME_HOUR = 3600; // 1 game hour = 1 real hour (true real-life time; offline progress finishes long trips)
 export function tripDurationSec(model, distanceKm, speedBoost = 1) {
   const drivingHours = distanceKm / model.speed;
-  const sec = (drivingHours * REAL_SEC_PER_GAME_HOUR) / speedBoost;
+  const sec = (drivingHours * ECON.realSecPerGameHour) / speedBoost;
   return Math.max(20, Math.round(sec));
 }
 

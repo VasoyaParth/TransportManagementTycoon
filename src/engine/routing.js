@@ -32,21 +32,28 @@ function edgeKm(edge) {
   return km * ROAD_FACTOR;
 }
 
-for (const e of ROAD_EDGES) {
-  if (!ROAD_NODES[e.a] || !ROAD_NODES[e.b]) continue;
-  const km = edgeKm(e);
-  addAdj(e.a, e.b, km, e, false, false);
-  addAdj(e.b, e.a, km, e, true, false);
-}
-for (const f of FERRY_EDGES) {
-  if (!ROAD_NODES[f.a] || !ROAD_NODES[f.b]) continue;
-  const km = edgeKm(f) * 1.05;
-  addAdj(f.a, f.b, km, f, false, true);
-  addAdj(f.b, f.a, km, f, true, true);
+// Build (or rebuild, after cloud hydration) the adjacency graph from the
+// current ROAD_NODES / ROAD_EDGES / FERRY_EDGES contents.
+export function rebuildGraph() {
+  for (const k in adj) delete adj[k];
+  for (const k in nearestNodeCache) delete nearestNodeCache[k];
+  for (const e of ROAD_EDGES) {
+    if (!ROAD_NODES[e.a] || !ROAD_NODES[e.b]) continue;
+    const km = edgeKm(e);
+    addAdj(e.a, e.b, km, e, false, false);
+    addAdj(e.b, e.a, km, e, true, false);
+  }
+  for (const f of FERRY_EDGES) {
+    if (!ROAD_NODES[f.a] || !ROAD_NODES[f.b]) continue;
+    const km = edgeKm(f) * 1.05;
+    addAdj(f.a, f.b, km, f, false, true);
+    addAdj(f.b, f.a, km, f, true, true);
+  }
 }
 
 // ---- City -> nearest road node -----------------------------------------
 const nearestNodeCache = {};
+rebuildGraph(); // initial build from bundled data
 export function nearestRoadNode(lat, lng) {
   const key = lat.toFixed(3) + ',' + lng.toFixed(3);
   if (nearestNodeCache[key]) return nearestNodeCache[key];
