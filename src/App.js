@@ -134,7 +134,7 @@ export default function App() {
       {authStatus !== 'authed' ? (
         <Auth />
       ) : !cloudLoaded ? (
-        <Loading label="Syncing your empire…" />
+        <Loading label="Setting up your profile…" />
       ) : phase === 'game' && company ? (
         <GameScreen />
       ) : phase === 'onboarding' ? (

@@ -48,8 +48,8 @@ export default function Splash({ onNew, onContinue, hasSave }) {
           <Icon name="map-marker" size={13} color={C.faint} />
           <Text style={[FONT.tiny, { marginLeft: 4 }]}>Made in India</Text>
           <Text style={[FONT.tiny, { marginHorizontal: 8 }]}>·</Text>
-          <Icon name="wifi-off" size={13} color={C.faint} />
-          <Text style={[FONT.tiny, { marginLeft: 4 }]}>Offline Ready</Text>
+          <Icon name="cloud-check-outline" size={13} color={C.faint} />
+          <Text style={[FONT.tiny, { marginLeft: 4 }]}>Cloud Synced</Text>
         </Row>
       </Animated.View>
     </SafeAreaView>
