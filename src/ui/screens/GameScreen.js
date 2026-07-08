@@ -16,6 +16,7 @@ import {
 import { haptic } from '../../engine/haptics';
 import Tutorial from './Tutorial';
 import FleetSidebar from './FleetSidebar';
+import { CloudModal } from './CloudModal';
 
 const TABS = [
   { id: 'fleet', icon: 'truck', label: 'Fleet' },
@@ -131,6 +132,7 @@ export default function GameScreen() {
           </Row>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <IconBtn name="cloud-check-outline" onPress={() => setModal({ kind: 'cloud' })} color={C.blue} size={20} />
           <IconBtn name="garage" onPress={() => setModal({ kind: 'hubs' })} size={20} />
           <IconBtn name="star-four-points" onPress={() => setModal({ kind: 'powerups' })} color={C.gold} size={20} />
           <IconBtn name="file-document-outline" onPress={() => setModal({ kind: 'contracts' })} size={20} />
@@ -213,6 +215,7 @@ export default function GameScreen() {
       <PowerupsModal visible={modal?.kind === 'powerups'} onClose={() => setModal(null)} />
       <NotificationsModal visible={modal?.kind === 'notifications'} onClose={() => setModal(null)} />
       <HubsModal visible={modal?.kind === 'hubs'} onClose={() => setModal(null)} onShowOnMap={(f) => { setModal(null); setFocus(f); }} />
+      <CloudModal visible={modal?.kind === 'cloud'} onClose={() => setModal(null)} />
       <SettingsModal visible={modal?.kind === 'settings'} onClose={() => setModal(null)} initialTab={modal?.tab} />
 
       {/* Left fleet-management drawer */}
