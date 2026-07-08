@@ -37,10 +37,13 @@ function useTick(active, ms = 1000) {
   }, [active]);
 }
 
+// Human-readable duration: "2h 21m", "34m 10s", "45s".
 function fmtDur(sec) {
   sec = Math.max(0, Math.round(sec));
-  const m = Math.floor(sec / 60), s = sec % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
 }
 
 // Pseudo-random live driving speed around the model's top speed, changing
@@ -251,8 +254,24 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
                 <Row style={{ justifyContent: 'space-between', marginTop: 8 }}>
                   <PreviewStat icon="highway" label="Distance" value={`${preview.route.roadKm} km`} />
                   <PreviewStat icon="clock-outline" label="Duration" value={fmtDur(preview.durationSec)} />
-                  <PreviewStat icon="gas-station" label="Stops" value={preview.stops.length} />
+                  <PreviewStat icon="gas-station" label="Refuels" value={preview.refuelCount || 0} />
                 </Row>
+                {/* Fuel range check — warn if the trip is longer than the current tank */}
+                {preview.refuelCount > 0 ? (
+                  <Row style={{ marginTop: 10, backgroundColor: C.amberSoft, borderRadius: RADIUS.md, padding: 10 }}>
+                    <Icon name="fuel" size={16} color={C.amber} />
+                    <Text style={[FONT.tiny, { marginLeft: 8, flex: 1, color: C.text }]}>
+                      Trip is {preview.route.roadKm} km but your fuel only lasts ~{preview.startRangeKm} km ({preview.startFuelPct}% tank). The truck will auto-refuel {preview.refuelCount}× en route (+{preview.refuelCount}h). It will not get stranded.
+                    </Text>
+                  </Row>
+                ) : (
+                  <Row style={{ marginTop: 10, backgroundColor: C.greenSoft, borderRadius: RADIUS.md, padding: 10 }}>
+                    <Icon name="check-circle" size={16} color={C.green} />
+                    <Text style={[FONT.tiny, { marginLeft: 8, flex: 1, color: C.text }]}>
+                      In range — reaches {preview.to.name} on the current tank (~{preview.startRangeKm} km) with no refuel stop.
+                    </Text>
+                  </Row>
+                )}
                 <View style={{ height: 1, backgroundColor: C.border, marginVertical: 10 }} />
                 <Row style={{ justifyContent: 'space-between' }}><Text style={FONT.sub}>Freight revenue</Text><Text style={FONT.mono}>{inr(preview.econ.gross)}</Text></Row>
                 <Row style={{ justifyContent: 'space-between' }}><Text style={FONT.sub}>Fuel / charge</Text><Text style={[FONT.mono, { color: C.red }]}>-{inr(preview.econ.fuel)}</Text></Row>
@@ -390,7 +409,9 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
           {m.propulsion === 'electric'
             ? <SpecRow icon="battery-high" label="Battery" value={`${m.battery} kWh`} />
             : <SpecRow icon="fuel" label="Fuel tank" value={`${m.tank} L`} />}
-          <SpecRow icon="map-marker-distance" label="Range" value={`${m.range} km`} />
+          <SpecRow icon="map-marker-distance" label="Full range" value={`${m.range} km`} />
+          <SpecRow icon="fuel" label={m.propulsion === 'electric' ? 'Charge now' : 'Fuel now'}
+            value={`${Math.round(truck.fuelPct)}% · ~${Math.round((truck.fuelPct / 100) * m.range)} km left`} />
           <SpecRow icon="wrench" label="Maintenance" value={`${inr(m.maint)}/km`} />
           <SpecRow icon="cash" label="Purchase price" value={inr(m.price)} />
         </Card>

@@ -25,8 +25,11 @@ function useNow(active = true) {
 
 const clampPct = v => Math.max(0, Math.min(100, v));
 const mmss = ms => {
-  const s = Math.max(0, Math.ceil(ms / 1000));
-  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  const sec = Math.max(0, Math.ceil(ms / 1000));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
 };
 const fuelColor = pct => (pct > 50 ? C.green : pct > 20 ? C.amber : C.red);
 

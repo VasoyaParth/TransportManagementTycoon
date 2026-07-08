@@ -394,7 +394,10 @@ export const useGame = create(
         const speedBoost = s.boosts.speedUntil > Date.now() ? 2 : 1;
         // Each auto-refuel stop costs ~1 in-game hour of real time.
         const durationSec = tripDurationSec(model, route.roadKm, speedBoost) + refuelCount * 60;
-        return { route, stops, econ, durationSec, tons, model, to, arriveFuelPct, refuelCount };
+        return {
+          route, stops, econ, durationSec, tons, model, to, arriveFuelPct, refuelCount,
+          startRangeKm: Math.round(startRangeKm), fullRangeKm: R, startFuelPct: Math.round(startFuel),
+        };
       },
 
       startDelivery(truckId, toCityId, cargoType, cargoTons, contractId = null) {
