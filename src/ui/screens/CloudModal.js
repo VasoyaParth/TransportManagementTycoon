@@ -1,12 +1,14 @@
-// Cloud account panel — shows the signed-in user, a Logout action, and a
-// server-backed city list demonstrating lazy loading / infinite scroll
-// (pages come from GET /api/config/cities?cursor=...).
-import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, FlatList, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
-import { C, FONT, RADIUS } from '../theme';
-import { Sheet, Card, Btn, Row, Icon, useToast } from '../components';
+// Cloud account + backup panel. Shows the signed-in user, when the game last
+// backed up to the cloud, and exactly WHAT is synced (with live counts), plus
+// a "Sync now" action and Logout.
+import React from 'react';
+import { View, Text, ScrollView, StyleSheet } from 'react-native';
+import { C, FONT } from '../theme';
+import { Sheet, Card, Btn, Row, Icon, useToast, relTime } from '../components';
 import { useAuth } from '../../store/authStore';
-import { api } from '../../net/api';
+import { useSync } from '../../store/syncStore';
+import { useGame } from '../../store/gameStore';
+import { inrShort } from '../../engine/economy';
 import { haptic } from '../../engine/haptics';
 
 export function CloudModal({ visible, onClose }) {
@@ -14,35 +16,11 @@ export function CloudModal({ visible, onClose }) {
   const user = useAuth(s => s.user);
   const logout = useAuth(s => s.logout);
 
-  const [items, setItems] = useState([]);
-  const [cursor, setCursor] = useState('');
-  const [done, setDone] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState(null);
+  const status = useSync(s => s.status);
+  const lastSyncedAt = useSync(s => s.lastSyncedAt);
+  const flush = useSync(s => s.flush);
 
-  const loadMore = useCallback(async (reset = false) => {
-    if (loading) return;
-    if (done && !reset) return;
-    setLoading(true); setErr(null);
-    try {
-      const cur = reset ? '' : cursor;
-      const { items: page, nextCursor } = await api.config('cities', cur, 20);
-      setItems(prev => (reset ? page : [...prev, ...page]));
-      setCursor(nextCursor == null ? '' : String(nextCursor));
-      setDone(nextCursor == null);
-    } catch (e) {
-      setErr(e.message);
-    } finally {
-      setLoading(false);
-    }
-  }, [loading, done, cursor]);
-
-  // (Re)load the first page whenever the sheet opens.
-  useEffect(() => {
-    if (!visible) return;
-    setItems([]); setCursor(''); setDone(false); setErr(null);
-    loadMore(true);
-  }, [visible]);
+  const g = useGame();
 
   const doLogout = async () => {
     haptic('warn');
@@ -51,70 +29,90 @@ export function CloudModal({ visible, onClose }) {
     toast('Logged out', 'info');
   };
 
+  const syncNow = () => { haptic('light'); flush(); toast('Backing up to cloud…', 'info'); };
+
+  // What gets backed up — live counts straight from the game state.
+  const items = [
+    { icon: 'domain', label: 'Company profile', value: g.company?.name || '—' },
+    { icon: 'cash', label: 'Balance (money)', value: inrShort(g.balance || 0) },
+    { icon: 'gold', label: 'Gold', value: String(g.gold || 0) },
+    { icon: 'truck', label: 'Trucks owned', value: (g.trucks || []).length },
+    { icon: 'account-group', label: 'Staff & drivers', value: (g.staff || []).length },
+    { icon: 'garage', label: 'Hubs & garages', value: (g.hubs || []).length },
+    { icon: 'map-marker-path', label: 'Explored routes', value: (g.corridors || []).length },
+    { icon: 'truck-fast', label: 'Active deliveries', value: (g.deliveries || []).length },
+    { icon: 'history', label: 'Delivery history', value: (g.history || []).length },
+    { icon: 'file-document-outline', label: 'Contracts', value: (g.contracts || []).length },
+    { icon: 'bell-outline', label: 'Notifications', value: (g.notifications || []).length },
+    { icon: 'cog-outline', label: 'Settings & preferences', value: 'Saved' },
+  ];
+
+  const meta = status === 'syncing' ? { icon: 'cloud-sync', color: C.blue, text: 'Backing up…' }
+    : status === 'error' ? { icon: 'cloud-alert', color: C.red, text: 'Last backup failed — will retry' }
+      : lastSyncedAt ? { icon: 'cloud-check', color: C.green, text: `Backed up ${relTime(lastSyncedAt)}` }
+        : { icon: 'cloud-outline', color: C.sub, text: 'Waiting for first backup…' };
+
   return (
-    <Sheet visible={visible} onClose={onClose} title="Cloud Account" height="86%">
-      <Card style={{ marginBottom: 12 }}>
-        <Row style={{ justifyContent: 'space-between' }}>
-          <Row style={{ flex: 1 }}>
-            <View style={st.avatar}><Icon name="account-circle" size={26} color={C.blue} /></View>
-            <View style={{ marginLeft: 10, flex: 1 }}>
-              <Text style={[FONT.body, { fontWeight: '800' }]} numberOfLines={1}>{user?.name || 'Player'}</Text>
-              <Text style={FONT.tiny} numberOfLines={1}>{user?.email}</Text>
-            </View>
+    <Sheet visible={visible} onClose={onClose} title="Cloud Backup" height="86%">
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+        {/* Account */}
+        <Card style={{ marginBottom: 12 }}>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <Row style={{ flex: 1 }}>
+              <View style={st.avatar}><Icon name="account-circle" size={26} color={C.blue} /></View>
+              <View style={{ marginLeft: 10, flex: 1 }}>
+                <Text style={[FONT.body, { fontWeight: '800' }]} numberOfLines={1}>{user?.name || 'Player'}</Text>
+                <Text style={FONT.tiny} numberOfLines={1}>{user?.email}</Text>
+              </View>
+            </Row>
+            <Btn title="Logout" kind="danger" small icon="logout" onPress={doLogout} />
           </Row>
-          <Btn title="Logout" kind="danger" small icon="logout" onPress={doLogout} />
-        </Row>
-        <Row style={{ marginTop: 10 }}>
-          <Icon name="cloud-check" size={14} color={C.green} />
+        </Card>
+
+        {/* Backup status */}
+        <Card style={{ marginBottom: 12 }}>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <Row style={{ flex: 1 }}>
+              <Icon name={meta.icon} size={22} color={meta.color} />
+              <View style={{ marginLeft: 10, flex: 1 }}>
+                <Text style={[FONT.body, { fontWeight: '800', color: meta.color }]}>{meta.text}</Text>
+                <Text style={FONT.tiny}>Auto-syncs on every change and when you leave the app.</Text>
+              </View>
+            </Row>
+            <Btn title="Sync now" kind="soft" small icon="cloud-upload-outline" onPress={syncNow} />
+          </Row>
+        </Card>
+
+        <Text style={[FONT.tiny, { fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6, marginLeft: 2 }]}>
+          What's backed up to the cloud
+        </Text>
+        <Card style={{ paddingVertical: 4 }}>
+          {items.map((it, i) => (
+            <Row key={it.label} style={[{ justifyContent: 'space-between', paddingVertical: 10, paddingHorizontal: 4 }, i > 0 && st.divider]}>
+              <Row style={{ flex: 1 }}>
+                <Icon name={it.icon} size={17} color={C.sub} />
+                <Text style={[FONT.body, { marginLeft: 10 }]}>{it.label}</Text>
+              </Row>
+              <Row>
+                <Text style={[FONT.body, { fontWeight: '800', marginRight: 8 }]} numberOfLines={1}>{String(it.value)}</Text>
+                <Icon name="check-circle" size={15} color={C.green} />
+              </Row>
+            </Row>
+          ))}
+        </Card>
+
+        <Row style={{ marginTop: 12, paddingHorizontal: 4 }}>
+          <Icon name="shield-check" size={14} color={C.green} />
           <Text style={[FONT.tiny, { marginLeft: 6, color: C.sub, flex: 1 }]}>
-            Your empire auto-syncs to the cloud — log in on any device to continue.
+            Everything above is stored on your cloud account. Log in on any device to restore it exactly.
           </Text>
         </Row>
-      </Card>
-
-      <Row style={{ justifyContent: 'space-between', marginBottom: 8 }}>
-        <Text style={FONT.h3}>Cities Directory</Text>
-        <Text style={FONT.tiny}>{items.length} loaded</Text>
-      </Row>
-
-      <FlatList
-        data={items}
-        keyExtractor={(it, i) => `${it.name || 'c'}-${i}`}
-        showsVerticalScrollIndicator={false}
-        onEndReachedThreshold={0.4}
-        onEndReached={() => loadMore(false)}
-        contentContainerStyle={{ paddingBottom: 30 }}
-        renderItem={({ item }) => (
-          <Card style={{ marginBottom: 6, padding: 12 }}>
-            <Row style={{ justifyContent: 'space-between' }}>
-              <Row style={{ flex: 1 }}>
-                <Icon name="map-marker" size={16} color={C.blue} />
-                <Text style={[FONT.body, { marginLeft: 8, flex: 1 }]} numberOfLines={1}>{item.name}</Text>
-              </Row>
-              {item.tier != null && <Text style={FONT.tiny}>Tier {item.tier}</Text>}
-            </Row>
-          </Card>
-        )}
-        ListFooterComponent={
-          err ? (
-            <Pressable onPress={() => loadMore(false)} style={st.footer}>
-              <Icon name="alert-circle-outline" size={16} color={C.red} />
-              <Text style={{ color: C.red, marginLeft: 6, fontWeight: '700' }}>{err} · Tap to retry</Text>
-            </Pressable>
-          ) : loading ? (
-            <View style={st.footer}><ActivityIndicator color={C.blue} /></View>
-          ) : done && items.length > 0 ? (
-            <Text style={[FONT.tiny, { textAlign: 'center', paddingVertical: 14 }]}>— end of list —</Text>
-          ) : !loading && items.length === 0 ? (
-            <Text style={[FONT.sub, { textAlign: 'center', paddingVertical: 20 }]}>No cloud data yet. Seed the server (`npm run seed`).</Text>
-          ) : null
-        }
-      />
+      </ScrollView>
     </Sheet>
   );
 }
 
 const st = StyleSheet.create({
   avatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: C.blueSoft, alignItems: 'center', justifyContent: 'center' },
-  footer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 16 },
+  divider: { borderTopWidth: 1, borderTopColor: C.border },
 });

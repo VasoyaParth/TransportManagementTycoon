@@ -867,7 +867,7 @@ export function SettingsModal({ visible, onClose, initialTab }) {
               <Icon name="truck-fast" size={40} color={C.blue} />
               <Text style={[FONT.h2, { marginTop: 8 }]}>Truck Empire Tycoon</Text>
               <Text style={FONT.sub}>Version 1.1</Text>
-              <Text style={[FONT.sub, { textAlign: 'center', marginTop: 10 }]}>Build and run your own Indian trucking empire. Real highways, real cities, real-time hauls, fully offline. Made in India.</Text>
+              <Text style={[FONT.sub, { textAlign: 'center', marginTop: 10 }]}>Build and run your own Indian trucking empire. Real highways, real cities, real-time hauls, cloud-synced across devices. Made in India.</Text>
             </Card>
             <Btn title="Replay Tutorial" kind="soft" icon="school-outline" style={{ marginTop: 12 }}
               onPress={() => { saveSettings({ tutorialSeen: false }); toast('Tutorial will show on the map', 'info'); onClose(); }} />

@@ -7,6 +7,7 @@ import { useGame } from './store/gameStore';
 import { useAuth } from './store/authStore';
 import { api } from './net/api';
 import { hydrateConfig } from './net/config';
+import { useSync } from './store/syncStore';
 import { ToastProvider, Skeleton } from './ui/components';
 import { C, FONT } from './ui/theme';
 import Splash from './ui/screens/Splash';
@@ -94,18 +95,22 @@ export default function App() {
     const save = async () => {
       if (saving) return;
       saving = true; dirty = false;
+      useSync.getState().markSyncing();
       try {
         const r = await api.putState(useGame.getState().cloudSnapshot(), version);
         if (r && typeof r.version === 'number') version = r.version;
-      } catch {
+        useSync.getState().markSaved(Date.now());
+      } catch (e) {
         dirty = true; // keep dirty so a later trigger retries
+        useSync.getState().markError(e && e.message);
       } finally {
         saving = false;
       }
     };
     const scheduleSave = () => { dirty = true; clearTimeout(timer); timer = setTimeout(save, 1500); };
-    const flush = () => { clearTimeout(timer); if (dirty || saving) save(); };
+    const flush = () => { clearTimeout(timer); save(); };
 
+    useSync.getState().registerFlush(flush);
     const unsub = useGame.subscribe(scheduleSave);
     const sub = AppState.addEventListener('change', (s) => {
       if (s === 'background' || s === 'inactive') flush();
@@ -129,7 +134,7 @@ export default function App() {
       {authStatus !== 'authed' ? (
         <Auth />
       ) : !cloudLoaded ? (
-        <Loading label="Syncing your empire…" />
+        <Loading label="Setting up your profile…" />
       ) : phase === 'game' && company ? (
         <GameScreen />
       ) : phase === 'onboarding' ? (
