@@ -112,7 +112,7 @@ export default function GameScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
-      {/* ---- Map (full height; header floats over it as frosted pills) ---- */}
+      {/* ---- Map (full height; header floats over it as one frosted pill) ---- */}
       <View style={{ flex: 1 }}>
         <MapContainer
           pickingMode={!!picking}
@@ -125,8 +125,7 @@ export default function GameScreen() {
         {phase.tint > 0 && (
           <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: '#0A1A3A', opacity: phase.tint }]} />
         )}
-        {/* Single floating frosted header pill — balance/gold/time on the left,
-            notifications + settings on the right (Samsung-style glass). */}
+        {/* Single floating frosted header pill — balance/gold/time left, bell+settings right */}
         <View style={st.hdrPill}>
           <View style={{ flex: 1 }}>
             <Row style={{ alignItems: 'center' }}>
@@ -145,6 +144,18 @@ export default function GameScreen() {
           </View>
           <IconBtn name="bell-outline" badge={unread} onPress={() => setModal({ kind: 'notifications' })} size={20} />
           <IconBtn name="cog-outline" onPress={() => setModal({ kind: 'settings' })} size={20} />
+        </View>
+        {/* Right-side action stack (garage / contracts / power-ups) */}
+        <View style={st.actionStack}>
+          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'hubs' }); }}>
+            <Icon name="garage" size={19} color={C.text} />
+          </Pressable>
+          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'contracts' }); }}>
+            <Icon name="file-document-outline" size={19} color={C.text} />
+          </Pressable>
+          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'powerups' }); }}>
+            <Icon name="star-four-points" size={19} color={C.gold} />
+          </Pressable>
         </View>
         {/* Floating company profile capsule (opens Settings → Profile) */}
         <Pressable style={st.profileCap} onPress={() => { haptic('light'); setModal({ kind: 'settings', tab: 'profile' }); }}>
@@ -254,7 +265,7 @@ const st = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.7)',
     shadowColor: '#0B0F14', shadowOpacity: 0.16, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 8,
   },
-  // Right-side vertical action stack (hubs / contracts / power-ups / cloud).
+  // Right-side vertical action stack (garage / contracts / power-ups).
   actionStack: { position: 'absolute', top: 76, right: 12, gap: 8 },
   actionBtn: {
     width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
