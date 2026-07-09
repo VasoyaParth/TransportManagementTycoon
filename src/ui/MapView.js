@@ -14,7 +14,7 @@ import { project, WORLD_W, WORLD_H, pointAlong } from '../engine/geo';
 import { C } from './theme';
 import { useGame, modelById } from '../store/gameStore';
 import { cityById } from '../engine/routing';
-import { TruckTopShapes, truckShapes, bodyTypeFor, defaultBodyColor, headlightFor, isNightHour } from './truckArt';
+import { TruckTopShapes, truckShapes, bodyTypeFor, defaultBodyColor, headlightFor, isNightHour, FerryTopShape } from './truckArt';
 
 // Darken/lighten a #rrggbb colour by pct (-1..1) for pseudo-3D shading.
 function shade(hex, pct) {
@@ -157,10 +157,18 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
 
   const truckPos = (t) => {
     const d = deliveries.find(x => x.truckId === t.id);
-    if (!d) return { lat: t.lat, lng: t.lng, heading: 0 };
+    if (!d) return { lat: t.lat, lng: t.lng, heading: 0, ferryOn: false, ferryLoading: false };
     const now = Date.now();
     const prog = Math.min(1, Math.max(0, (now - d.startedAt) / (d.endsAt - d.startedAt)));
-    return pointAlong(d.route.points, d.route.cum, prog);
+    const pos = pointAlong(d.route.points, d.route.cum, prog);
+    const fs = d.route.ferrySegment;
+    let ferryOn = false, ferryLoading = false;
+    if (fs && prog >= fs.startFrac && prog <= fs.endFrac) {
+      ferryOn = true;
+      const loadWin = Math.min((fs.endFrac - fs.startFrac) * 0.25, 0.015);
+      ferryLoading = prog <= fs.startFrac + loadWin;
+    }
+    return { ...pos, ferryOn, ferryLoading, incident: d.incident || null };
   };
 
   const zoomBy = (f) => {
@@ -288,6 +296,41 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
               const sz = (bt === 'semi' ? 2.1 : bt === 'rigid' ? 1.7 : bt === 'box' ? 1.45 : 1.2) * inv;
               const { bodyH } = truckShapes(bt, body, accent, { lights });
               const k = sz * 0.32; // art units -> map units
+              // Damage/theft badge — small colored dot with a glyph, offset
+              // above the truck, shown regardless of ferry state.
+              const incidentBadge = p.incident ? (
+                <G transform={`translate(${q.x + 5 * sz}, ${q.y - 5 * sz})`}>
+                  <Circle r={3.2 * sz} fill={p.incident.type === 'accident' ? C.red : '#7D3C98'} stroke="#fff" strokeWidth={0.8 * sz} />
+                  <SvgText x={0} y={1.2 * sz} fontSize={4.2 * sz} fontWeight="700" fill="#fff" textAnchor="middle">
+                    {p.incident.type === 'accident' ? '!' : '$'}
+                  </SvgText>
+                </G>
+              ) : null;
+              if (p.ferryOn && !p.ferryLoading) {
+                // Crossing the sea hop — swap the truck art for a ferry icon.
+                return (
+                  <G key={t.id}>
+                    <Ellipse cx={q.x + 1.2 * sz} cy={q.y + 2 * sz} rx={6.4 * sz} ry={3.4 * sz} fill="rgba(11,15,20,0.20)" />
+                    <G transform={`translate(${q.x}, ${q.y}) rotate(${p.heading + 180}) scale(${k}) translate(-20, -18)`}>
+                      <FerryTopShape />
+                    </G>
+                    {incidentBadge}
+                  </G>
+                );
+              }
+              if (p.ferryLoading) {
+                // Brief loading state at the ferry dock — truck fades/shrinks with a pulsing dot.
+                const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 260);
+                return (
+                  <G key={t.id}>
+                    <Circle cx={q.x} cy={q.y} r={(7 + 5 * pulse) * sz} fill={C.blue} opacity={0.18} />
+                    <G opacity={0.55} transform={`translate(${q.x}, ${q.y}) rotate(${p.heading + 180}) scale(${k * 0.8}) translate(-20, ${-bodyH / 2})`}>
+                      <TruckTopShapes type={bt} body={body} accent={accent} lights={lights} />
+                    </G>
+                    {incidentBadge}
+                  </G>
+                );
+              }
               return (
                 <G key={t.id}>
                   {/* soft ground shadow (kept flat, not rotated) */}
@@ -295,6 +338,7 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
                   <G transform={`translate(${q.x}, ${q.y}) rotate(${p.heading + 180}) scale(${k}) translate(-20, ${-bodyH / 2})`}>
                     <TruckTopShapes type={bt} body={body} accent={accent} lights={lights} />
                   </G>
+                  {incidentBadge}
                 </G>
               );
             })}

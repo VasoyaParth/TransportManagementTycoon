@@ -12,7 +12,7 @@ import { C } from './theme';
 import { useGame, modelById } from '../store/gameStore';
 import { cityById } from '../engine/routing';
 import { statusMeta } from './components';
-import { truckSvgString, truckShapes, bodyTypeFor, defaultBodyColor, headlightFor, isNightHour } from './truckArt';
+import { truckSvgString, truckShapes, bodyTypeFor, defaultBodyColor, headlightFor, isNightHour, ferrySvgString } from './truckArt';
 
 const CITY_DATA = CITIES.map(c => ({ id: c.id, name: c.name, state: c.state, lat: c.lat, lng: c.lng, tier: c.tier, country: c.country || 'IN' }));
 const STATION_DATA = STATIONS.map(s => ({ lat: s.lat, lng: s.lng, type: s.type, price: s.price, name: s.name }));
@@ -40,11 +40,17 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
     const now = Date.now();
     const tk = trucks.map(t => {
       const d = deliveries.find(x => x.truckId === t.id);
-      let lat = t.lat, lng = t.lng, heading = 0;
+      let lat = t.lat, lng = t.lng, heading = 0, ferryOn = false, ferryLoading = false;
       if (d) {
         const prog = Math.min(1, Math.max(0, (now - d.startedAt) / (d.endsAt - d.startedAt)));
         const p = pointAlong(d.route.points, d.route.cum, prog);
         lat = p.lat; lng = p.lng; heading = p.heading;
+        const fs = d.route.ferrySegment;
+        if (fs && prog >= fs.startFrac && prog <= fs.endFrac) {
+          ferryOn = true;
+          const loadWin = Math.min((fs.endFrac - fs.startFrac) * 0.25, 0.015);
+          ferryLoading = prog <= fs.startFrac + loadWin;
+        }
       }
       const meta = statusMeta[t.status] || statusMeta.parked;
       const model = modelById(t.modelId);
@@ -58,6 +64,7 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
       const dims = truckShapes(bt, color, accent, { lights });
       return { id: t.id, lat, lng, heading, status: t.status, statusLabel: meta.label, color,
         art: truckSvgString(bt, color, accent, { lights }), artW: dims.w, artH: dims.h, bodyH: dims.bodyH,
+        ferryArt: ferrySvgString(), ferryOn, ferryLoading, incidentType: (d && d.incident && d.incident.type) || null,
         fuelPct: Math.round(t.fuelPct), name: t.customName || model.name };
     });
     const routes = deliveries.map(d => ({ id: d.id, points: d.route.points, stops: d.stops || [] }));

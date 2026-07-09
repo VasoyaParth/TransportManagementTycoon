@@ -4,11 +4,31 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, Animated, ScrollView, Dimensions } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import Svg from 'react-native-svg';
 import { C, FONT, SHADOW } from '../theme';
 import { useGame, modelById } from '../../store/gameStore';
 import { cityById } from '../../engine/routing';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
+import { TruckTopShapes, truckShapes, bodyTypeFor, defaultBodyColor, sizeScaleFor } from '../truckArt';
+
+// Small side/3-quarter truck thumbnail for a fleet row — same renderer as the
+// map/showroom (never a generic icon) so each model reads as its real shape,
+// scaled up for bigger models so tonnage differences are visible at a glance.
+const ROW_ICON = 46;
+function RowTruckArt({ model, color }) {
+  const bt = bodyTypeFor(model);
+  const body = color || defaultBodyColor(model);
+  const { w, h } = truckShapes(bt, body, '#9DB2D6');
+  const scale = ((ROW_ICON - 6) / h) * sizeScaleFor(model);
+  return (
+    <View style={{ width: ROW_ICON, height: ROW_ICON, alignItems: 'center', justifyContent: 'center' }}>
+      <Svg width={w * scale} height={h * scale} viewBox={`0 0 ${w} ${h}`}>
+        <TruckTopShapes type={bt} body={body} accent="#9DB2D6" />
+      </Svg>
+    </View>
+  );
+}
 
 const W = Math.min(300, Dimensions.get('window').width * 0.82);
 
@@ -26,10 +46,31 @@ function statusLabel(t) {
   return t.status;
 }
 
+// Color-coded condition bar with a tap-to-service wrench when it's running low.
+function ConditionBar({ truck, onService }) {
+  const cond = Math.round(truck.condition == null ? 100 : truck.condition);
+  const color = cond >= 70 ? C.green : cond >= 40 ? C.amber : C.red;
+  const low = cond < 55 && truck.status !== 'delivering';
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+      <View style={st.condTrack}>
+        <View style={[st.condFill, { width: `${cond}%`, backgroundColor: color }]} />
+      </View>
+      <Text style={[FONT.tiny, { color, marginLeft: 6, width: 30 }]}>{cond}%</Text>
+      {low && (
+        <Pressable style={st.condBtn} onPress={onService}>
+          <Icon name="wrench" size={11} color="#fff" />
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
 export default function FleetSidebar({ visible, onClose, onTruckPress, onToast }) {
   const trucks = useGame(s => s.trucks);
   const deliveries = useGame(s => s.deliveries);
   const departAll = useGame(s => s.departAll);
+  const serviceTruck = useGame(s => s.serviceTruck);
   const slide = useRef(new Animated.Value(-W)).current;
   const fade = useRef(new Animated.Value(0)).current;
   const [mounted, setMounted] = useState(visible);
@@ -51,6 +92,13 @@ export default function FleetSidebar({ visible, onClose, onTruckPress, onToast }
     haptic('medium');
     const r = departAll();
     if (r.ok) { play('start', 0.7); onToast && onToast(`Dispatched ${r.dispatched} truck${r.dispatched > 1 ? 's' : ''}`, 'success'); onClose(); }
+    else onToast && onToast(r.err, 'error');
+  };
+
+  const doService = (t) => {
+    haptic('medium');
+    const r = serviceTruck(t.id);
+    if (r.ok) { play('coin', 0.6); onToast && onToast('Truck serviced — condition restored', 'success'); }
     else onToast && onToast(r.err, 'error');
   };
 
@@ -111,11 +159,12 @@ export default function FleetSidebar({ visible, onClose, onTruckPress, onToast }
               return (
                 <Pressable key={t.id} style={st.row} onPress={() => { haptic('light'); onTruckPress(t); onClose(); }}>
                   <View style={[st.rowIcon, { backgroundColor: g.color + '18' }]}>
-                    <Icon name={model.icon} size={18} color={g.color} />
+                    <RowTruckArt model={model} color={t.color} />
                   </View>
                   <View style={{ flex: 1, marginLeft: 10 }}>
                     <Text style={[FONT.body, { fontWeight: '700' }]} numberOfLines={1}>{t.customName || model.name}</Text>
                     <Text style={FONT.tiny} numberOfLines={1}>{statusLabel(t)}{to ? ` · ${to.name}` : ''}</Text>
+                    <ConditionBar truck={t} onService={() => doService(t)} />
                   </View>
                   <Icon name="chevron-right" size={18} color={C.faint} />
                 </Pressable>
@@ -156,5 +205,11 @@ const st = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center', paddingVertical: 9, paddingHorizontal: 8,
     borderRadius: 18, backgroundColor: C.bgSoft, marginBottom: 6,
   },
-  rowIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  rowIcon: { width: ROW_ICON + 6, height: ROW_ICON + 6, borderRadius: (ROW_ICON + 6) / 2, alignItems: 'center', justifyContent: 'center' },
+  condTrack: { flex: 1, height: 5, borderRadius: 3, backgroundColor: C.border, overflow: 'hidden' },
+  condFill: { height: 5, borderRadius: 3 },
+  condBtn: {
+    marginLeft: 6, width: 20, height: 20, borderRadius: 10, backgroundColor: C.blue,
+    alignItems: 'center', justifyContent: 'center',
+  },
 });

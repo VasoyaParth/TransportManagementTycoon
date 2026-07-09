@@ -24,6 +24,7 @@ export function buildLeafletHtml(initial) {
   .leaflet-popup-content b{color:#0B0F14}
   @keyframes dash{to{stroke-dashoffset:-1000}}
   .animated-route{animation:dash 30s linear infinite}
+  @keyframes pulseDot{from{transform:scale(0.7);opacity:.45}to{transform:scale(1.3);opacity:.05}}
 </style>
 </head><body>
 <div id="map"></div>
@@ -39,16 +40,19 @@ else { boot(); }
 function shade(hex,pct){var h=(hex||'#3A5A8C').replace('#','');var n=parseInt(h,16);var f=pct<0?0:255,p=Math.abs(pct);
   var r=(n>>16)&255,g=(n>>8)&255,b=n&255;function t(v){return Math.round((f-v)*p+v);}
   return '#'+((1<<24)+(t(r)<<16)+(t(g)<<8)+t(b)).toString(16).slice(1);}
-// Same pseudo-3D truck as the offline map: shadow + extruded body + cab + wheels.
+// Same pseudo-3D truck as the offline map: shadow + extruded body + cab +
+// wheels, with a three-tone shade (roof lighter, side/body mid, shadow
+// darker) and a slight skew on the top faces for an isometric 2.5D read.
 function truck3d(color,accent,heading){
-  var dark=shade(color,-0.28);
+  var dark=shade(color,-0.28), roof=shade(color,0.18);
   return '<div style="transform:perspective(150px) rotateX(34deg)">'
    +'<div class="truck3d" style="transform:rotate('+((heading||0)+180)+'deg);width:40px;height:48px">'
    +'<svg width="40" height="48" viewBox="0 0 40 48">'
    +'<ellipse cx="22" cy="42" rx="13" ry="5" fill="rgba(0,0,0,0.22)"/>'
    +'<rect x="9" y="5" width="24" height="30" rx="5" fill="'+dark+'"/>'
    +'<rect x="8" y="3" width="24" height="26" rx="5" fill="'+color+'" stroke="#fff" stroke-width="2"/>'
-   +'<rect x="12" y="6" width="16" height="7" rx="2" fill="'+accent+'"/>'
+   +'<rect x="12" y="6" width="16" height="7" rx="2" fill="'+roof+'" transform="skewX(-6)"/>'
+   +'<rect x="12" y="6" width="16" height="7" rx="2" fill="'+accent+'" opacity="0.55"/>'
    +'<rect x="10" y="29" width="20" height="14" rx="4" fill="'+color+'" stroke="#fff" stroke-width="2"/>'
    +'<rect x="13" y="32" width="14" height="7" rx="2" fill="#DCE7FA"/>'
    +'<rect x="4" y="13" width="4" height="9" rx="2" fill="#181B20"/><rect x="32" y="13" width="4" height="9" rx="2" fill="#181B20"/>'
@@ -113,14 +117,33 @@ function boot(){
     var accent = t.status==='delivering'?'#0E9F5B':t.status==='building'?'#D97706':t.status==='broken'?'#DC3D43':'#9DB2D6';
     var color = t.color || '#3A5A8C';
     var html, w=40, h=48, anchorY=24;
-    if(t.art){
-      // Detailed per-model artwork pre-rendered on the RN side (truckArt.js).
-      w=t.artW||40; h=t.artH||48; anchorY=(t.bodyH||h)/2;
+    if(t.ferryOn && !t.ferryLoading && t.ferryArt){
+      // Crossing the sea hop — swap the truck art for a ferry icon.
+      w=40; h=36; anchorY=18;
       html='<div style="transform:perspective(170px) rotateX(30deg)">'
         +'<div class="truck3d" style="transform:rotate('+((t.heading||0)+180)+'deg);width:'+w+'px;height:'+h+'px;transform-origin:'+(w/2)+'px '+anchorY+'px">'
+        +t.ferryArt+'</div></div>';
+    } else if(t.art){
+      // Detailed per-model artwork pre-rendered on the RN side (truckArt.js).
+      w=t.artW||40; h=t.artH||48; anchorY=(t.bodyH||h)/2;
+      var loadStyle = t.ferryLoading ? 'opacity:.55;transform-origin:'+(w/2)+'px '+anchorY+'px;' : '';
+      html='<div style="transform:perspective(170px) rotateX(30deg)">'
+        +'<div class="truck3d" style="'+loadStyle+'transform:rotate('+((t.heading||0)+180)+'deg)'+(t.ferryLoading?' scale(0.8)':'')+';width:'+w+'px;height:'+h+'px;transform-origin:'+(w/2)+'px '+anchorY+'px">'
         +t.art+'</div></div>';
+      if(t.ferryLoading){
+        html='<div style="position:relative">'+html
+          +'<div style="position:absolute;left:50%;top:50%;width:24px;height:24px;margin:-12px;border-radius:50%;background:rgba(37,99,235,.5);animation:pulseDot 1s ease-in-out infinite alternate"></div></div>';
+      }
     } else {
       html=truck3d(color,accent,t.heading);
+    }
+    if(t.incidentType){
+      // Damage/theft badge — small colored dot, offset to the corner.
+      var badgeColor = t.incidentType==='accident' ? '#DC3D43' : '#7D3C98';
+      html='<div style="position:relative">'+html
+        +'<div style="position:absolute;right:2px;top:0;width:15px;height:15px;border-radius:50%;'
+        +'background:'+badgeColor+';border:1.5px solid #fff;color:#fff;font-size:10px;font-weight:700;'
+        +'line-height:15px;text-align:center">'+(t.incidentType==='accident'?'!':'$')+'</div></div>';
     }
     var icon=L.divIcon({className:'',html:html,iconSize:[w,h],iconAnchor:[w/2,anchorY]});
     if(truckMarkers[t.id]){ truckMarkers[t.id].setIcon(icon); truckMarkers[t.id].setLatLng([t.lat,t.lng]); }

@@ -51,10 +51,39 @@ const SCRATCH_RULES = [
   { id: 'pick', label: 'One lucky tile', calc: t => t[Math.floor(Math.random() * 6)] },
 ];
 const clampGold = v => Math.max(0, Math.min(5, Math.round(v))); // scratch caps at 5
+// Slot Machine — 3 independent reels, weighted so rare symbols pay bigger.
+export const SLOT_SYMBOLS = [
+  { id: 'cherry', icon: 'fruit-cherries', weight: 30 },
+  { id: 'lemon', icon: 'fruit-citrus', weight: 26 },
+  { id: 'bell', icon: 'bell-ring', weight: 18 },
+  { id: 'clover', icon: 'clover', weight: 14 },
+  { id: 'gem', icon: 'diamond-stone', weight: 8 },
+  { id: 'seven', icon: 'numeric-7-circle', weight: 4 },
+];
+const SLOT_JACKPOT = { cherry: 2, lemon: 3, bell: 4, clover: 6, gem: 10, seven: 20 };
+const clampSlot = v => Math.max(0, Math.min(25, Math.round(v))); // jackpot can exceed scratch's 5 cap
+function rollSlotSymbol() {
+  const total = SLOT_SYMBOLS.reduce((a, x) => a + x.weight, 0);
+  let roll = Math.random() * total;
+  for (const sym of SLOT_SYMBOLS) { roll -= sym.weight; if (roll <= 0) return sym; }
+  return SLOT_SYMBOLS[0];
+}
 // International customs charged per border crossing (v1.4.0 expansion).
 const CUSTOMS_FEE_BASE = 15000;   // ₹ paperwork/duty per crossing
 const CUSTOMS_FEE_PER_TON = 800;  // ₹ per ton per crossing
 const CUSTOMS_HOURS = 3;          // game-hours of inspection time per crossing
+
+// Truck condition & on-road incidents (v1.5.0). Condition degrades with km
+// driven and gets knocked down by accidents; low condition slows the truck
+// down (never destroys anything). Incidents are a partial cash+time hit on an
+// in-progress delivery, resolved either slowly on their own or faster by
+// paying for a mechanic to come out.
+const CONDITION_WEAR_PER_KM = 0.0018; // ~55% condition lost over 300,000km of hard use
+const CONDITION_MIN_SPEED_FACTOR = 0.65; // speed floor at 0 condition (never fully stalls)
+const SERVICE_COST_PCT = 0.05;    // service cost as a % of the model's price
+const INCIDENT_INTERVAL_MS = { rare: 22 * 60 * 1000, sometimes: 10 * 60 * 1000 };
+const INCIDENT_CHANCE = { rare: 0.16, sometimes: 0.3 };
+const MECHANIC_DELAY_CUT = 0.6; // mechanic call-out shaves this fraction off the remaining delay
 
 let idSeq = 1;
 const uid = p => `${p}-${Date.now().toString(36)}-${(idSeq++).toString(36)}`;
@@ -137,9 +166,9 @@ const initialState = {
   company: null, // {name, ceo, logo, avatar, hqCityId, code, createdAt}
   balance: 0,
   gold: 0,
-  games: { day: 0, scratchUsed: 0, spinUsed: 0, diceUsed: 0 }, // daily free gold mini-games
-  trucks: [], // {id, modelId, status, lat, lng, cityId, fuelPct, buildEndsAt, buildTotalSec, km, deliveries, driverId, brokenSince}
-  deliveries: [], // active: {id, truckId, fromCityId, toCityId, cargoType, cargoTons, route:{points,cum,roadKm,usesFerry}, stops, startedAt, endsAt, econ, contractId}
+  games: { day: 0, scratchUsed: 0, spinUsed: 0, diceUsed: 0, slotUsed: 0 }, // daily free gold mini-games
+  trucks: [], // {id, modelId, status, lat, lng, cityId, fuelPct, buildEndsAt, buildTotalSec, km, deliveries, driverId, brokenSince, condition}
+  deliveries: [], // active: {id, truckId, fromCityId, toCityId, cargoType, cargoTons, route:{points,cum,roadKm,usesFerry,ferrySegment}, stops, startedAt, endsAt, econ, contractId, incident:{type,startedAt,resolveAt,penalty,mechanicCalled}|null}
   history: [], // completed deliveries (most recent first, capped)
   staff: [],
   candidates: [],
@@ -156,6 +185,7 @@ const initialState = {
   lastContractDay: 0,
   nextContractAt: 0, // real ms of the next 2–4h contract-board refresh
   lastEventAt: 0, // real ms of the last random-event roll
+  lastIncidentAt: 0, // real ms of the last delivery-incident roll
   mapEvents: [], // recent world events with a location, highlighted on the map
   pricing: {}, // per-cargo ₹/km/t overrides; empty => each cargo uses its own default rate
   settings: {
@@ -209,7 +239,7 @@ export const useGame = create(
           id: uid('t'), modelId: model.id, status: 'building',
           lat: hq.lat, lng: hq.lng, cityId: hq.id, fuelPct: 100,
           buildEndsAt: Date.now() + model.build * 1000, buildTotalSec: model.build,
-          km: 0, deliveries: 0, driverId: null,
+          km: 0, deliveries: 0, driverId: null, condition: 100,
         };
         set({
           phase: 'game',
@@ -325,6 +355,26 @@ export const useGame = create(
             get().rollRandomEvent();
           }
         }
+        // In-progress delivery incidents (accident/theft) — separate, rarer
+        // cadence from the world events above; only ever a partial hit.
+        if (freq !== 'off') {
+          const iIntervalMs = INCIDENT_INTERVAL_MS[freq] || INCIDENT_INTERVAL_MS.rare;
+          if (now - (s.lastIncidentAt || 0) > iIntervalMs) {
+            set({ lastIncidentAt: now });
+            get().rollDeliveryIncident();
+          }
+        }
+        // Resolve incidents whose delay has run out (mechanic-assisted or not).
+        const dueIncidents = s.deliveries.filter(d => d.incident && d.incident.resolveAt <= now);
+        if (dueIncidents.length) {
+          set({
+            deliveries: get().deliveries.map(d => dueIncidents.some(x => x.id === d.id) ? { ...d, incident: null } : d),
+          });
+          dueIncidents.forEach(d => {
+            const t = get().trucks.find(x => x.id === d.truckId);
+            get().notify('truck', 'check-decagram', `${t ? (t.customName || modelById(t.modelId).name) : 'Truck'} is back underway after the ${d.incident.type}.`);
+          });
+        }
       },
 
       // Rare world events (goods stolen, accident, fuel spike, windfall).
@@ -381,6 +431,70 @@ export const useGame = create(
         pool[Math.floor(Math.random() * pool.length)]();
       },
 
+      // In-progress delivery incidents — an 'accident' or 'theft' on a truck
+      // that's actively driving. Unlike rollRandomEvent's breakdown (which
+      // pulls the truck off the road entirely), this only ever costs a partial
+      // cut of that delivery's earnings plus a delay; the delivery, contract
+      // and cargo all survive. Resolves on its own once incident.resolveAt
+      // passes (see dailyTick), or faster if the player calls a mechanic.
+      rollDeliveryIncident() {
+        const s = get();
+        const freq = s.settings.events || 'rare';
+        const chance = INCIDENT_CHANCE[freq] || 0;
+        if (chance <= 0 || Math.random() > chance) return;
+        const now = Date.now();
+        // Only deliveries with real road left ahead of them (skip ones about
+        // to arrive, and ones already mid-incident).
+        const active = s.deliveries.filter(d => !d.incident && d.endsAt - now > 3 * 60 * 1000
+          && (now - d.startedAt) < (d.endsAt - d.startedAt) * 0.85);
+        if (!active.length) return;
+        const d = active[Math.floor(Math.random() * active.length)];
+        const t = s.trucks.find(x => x.id === d.truckId);
+        if (!t) return;
+        const type = Math.random() < 0.5 ? 'accident' : 'theft';
+        const delaySec = Math.round(600 + Math.random() * 1800); // 10–40 min real-time delay
+        const penaltyPct = 0.04 + Math.random() * 0.08; // 4%–12% of the delivery's gross — partial, never total
+        const penalty = Math.min(s.balance, Math.round((d.econ.gross || d.econ.net || 0) * penaltyPct));
+        const incident = { type, startedAt: now, resolveAt: now + delaySec * 1000, penalty, mechanicCalled: false };
+        set({
+          balance: s.balance - penalty,
+          deliveries: s.deliveries.map(x => x.id === d.id ? { ...x, incident, endsAt: x.endsAt + delaySec * 1000 } : x),
+          trucks: type === 'accident'
+            ? s.trucks.map(x => x.id === t.id ? { ...x, condition: Math.max(10, (x.condition == null ? 100 : x.condition) - (8 + Math.random() * 10)) } : x)
+            : s.trucks,
+        });
+        const name = t.customName || modelById(t.modelId).name;
+        get().notify('truck', type === 'accident' ? 'car-brake-alert' : 'shield-alert',
+          type === 'accident' ? `Accident! ${name} was clipped on the road — ${inr(penalty)} in damage and a delay.`
+            : `Theft! Bandits grabbed part of ${name}'s cargo — lost ${inr(penalty)}.`);
+        pushNow(type === 'accident' ? 'Accident on the road!' : 'Cargo theft in transit!',
+          type === 'accident' ? `${name} needs a mechanic — ${inr(penalty)} in damage so far.`
+            : `${name} lost ${inr(penalty)} of cargo to thieves.`);
+      },
+
+      // Pay to have a mechanic come out to a delivery mid-incident, cutting
+      // the remaining delay short instead of waiting it out for free.
+      callMechanic(deliveryId) {
+        const s = get();
+        const d = s.deliveries.find(x => x.id === deliveryId);
+        if (!d || !d.incident) return { ok: false, err: 'No active incident on this delivery' };
+        if (d.incident.mechanicCalled) return { ok: false, err: 'Mechanic already on the way' };
+        const cost = Math.round(30000 + Math.random() * 40000);
+        if (s.balance < cost) return { ok: false, err: 'Insufficient funds' };
+        const now = Date.now();
+        const remaining = Math.max(0, d.incident.resolveAt - now);
+        const cut = Math.round(remaining * MECHANIC_DELAY_CUT);
+        set({
+          balance: s.balance - cost,
+          deliveries: s.deliveries.map(x => x.id === deliveryId ? {
+            ...x, endsAt: x.endsAt - cut,
+            incident: { ...x.incident, mechanicCalled: true, resolveAt: x.incident.resolveAt - cut },
+          } : x),
+        });
+        get().notify('truck', 'wrench', `Mechanic dispatched for ${inr(cost)} — delay cut short.`);
+        return { ok: true, cost };
+      },
+
       // ---------- fleet ----------
       buyTruck(modelId) {
         const s = get();
@@ -391,7 +505,7 @@ export const useGame = create(
           id: uid('t'), modelId, status: 'building',
           lat: hq.lat, lng: hq.lng, cityId: hq.id, fuelPct: 100,
           buildEndsAt: Date.now() + model.build * 1000, buildTotalSec: model.build,
-          km: 0, deliveries: 0, driverId: null,
+          km: 0, deliveries: 0, driverId: null, condition: 100,
         };
         set({ balance: s.balance - model.price, trucks: [...s.trucks, truck] });
         get().notify('truck', 'factory', `${model.name} ordered — building at HQ (${model.build}s).`);
@@ -427,6 +541,25 @@ export const useGame = create(
         set({ trucks: get().trucks.map(x => x.id === truckId ? { ...x, status: 'parked' } : x) });
         get().notify('truck', 'wrench-check', `${modelById(t.modelId).name} repaired and back in service.`);
         return { ok: true };
+      },
+
+      // Paid service that restores condition (engine/tyres/body wear, not the
+      // same as repairTruck's 'broken' status) back to 100.
+      serviceTruck(truckId) {
+        const s = get();
+        const t = s.trucks.find(x => x.id === truckId);
+        if (!t) return { ok: false, err: 'Truck not found' };
+        if (t.status === 'delivering') return { ok: false, err: 'Truck is out on delivery' };
+        const cond = t.condition == null ? 100 : t.condition;
+        if (cond >= 99) return { ok: false, err: 'Already in top condition' };
+        const cost = Math.round(modelById(t.modelId).price * SERVICE_COST_PCT);
+        if (s.balance < cost) return { ok: false, err: 'Insufficient funds for service' };
+        set({
+          balance: s.balance - cost,
+          trucks: s.trucks.map(x => x.id === truckId ? { ...x, condition: 100 } : x),
+        });
+        get().notify('truck', 'wrench', `${t.customName || modelById(t.modelId).name} serviced — back to full condition.`);
+        return { ok: true, cost };
       },
 
       // Resale value: depreciates with distance driven & deliveries (old age).
@@ -558,7 +691,12 @@ export const useGame = create(
           const lastLeg = after - (refuelCount - 1) * usableLeg;
           arriveFuelPct = Math.max(4, Math.round(100 - (lastLeg / R) * 100));
         }
-        const speedBoost = s.boosts.speedUntil > Date.now() ? 2 : 1;
+        // A run-down truck (low condition) drives slower — folded into the
+        // same speedBoost knob tripDurationSec already divides by, floored so
+        // it never fully stalls.
+        const condition = t.condition == null ? 100 : t.condition;
+        const conditionFactor = CONDITION_MIN_SPEED_FACTOR + (1 - CONDITION_MIN_SPEED_FACTOR) * (condition / 100);
+        const speedBoost = (s.boosts.speedUntil > Date.now() ? 2 : 1) * conditionFactor;
         // ----- Driver fatigue: legally/physically a driver can't drive forever.
         // A sleep break (~2h) after every ~8.5h driving, plus short ~5min breaks
         // every ~2.5h. These pauses extend the real delivery time.
@@ -687,6 +825,7 @@ export const useGame = create(
             ...x, status: 'parked', lat: to.lat, lng: to.lng, cityId: to.id,
             fuelPct: d.arriveFuelPct != null ? d.arriveFuelPct : Math.max(4, (x.fuelPct || 100) - 15),
             km: x.km + d.route.roadKm, deliveries: x.deliveries + 1,
+            condition: Math.max(5, (x.condition == null ? 100 : x.condition) - d.route.roadKm * CONDITION_WEAR_PER_KM),
             log: [{ ...logEntry, truckName: modelById(x.modelId).name }, ...(x.log || [])].slice(0, 20),
           } : x),
           // Accumulate the driver's career stats (hours driven, sleep, deliveries).
@@ -852,19 +991,20 @@ export const useGame = create(
       gamesToday() {
         const s = get();
         const day = get().gameDay().day;
-        const g = s.games && s.games.day === day ? s.games : { day, scratchUsed: 0, spinUsed: 0, diceUsed: 0 };
+        const g = s.games && s.games.day === day ? s.games : { day, scratchUsed: 0, spinUsed: 0, diceUsed: 0, slotUsed: 0 };
         return {
           day,
           scratchLeft: Math.max(0, DAILY_PLAYS - g.scratchUsed),
           spinLeft: Math.max(0, DAILY_PLAYS - g.spinUsed),
           diceLeft: Math.max(0, DAILY_PLAYS - (g.diceUsed || 0)),
-          scratchUsed: g.scratchUsed, spinUsed: g.spinUsed, diceUsed: g.diceUsed || 0,
+          slotLeft: Math.max(0, DAILY_PLAYS - (g.slotUsed || 0)),
+          scratchUsed: g.scratchUsed, spinUsed: g.spinUsed, diceUsed: g.diceUsed || 0, slotUsed: g.slotUsed || 0,
         };
       },
       _bumpGame(kind) {
         const day = get().gameDay().day;
         const s = get();
-        const g = s.games && s.games.day === day ? { ...s.games } : { day, scratchUsed: 0, spinUsed: 0, diceUsed: 0 };
+        const g = s.games && s.games.day === day ? { ...s.games } : { day, scratchUsed: 0, spinUsed: 0, diceUsed: 0, slotUsed: 0 };
         g[kind] = (g[kind] || 0) + 1;
         set({ games: g });
       },
@@ -914,6 +1054,24 @@ export const useGame = create(
         if (reward > 0) { set({ gold: get().gold + reward }); play('coin', 0.8); }
         get().notify('system', 'dice-multiple', `Dice roll: ${d1} & ${d2} → +${reward} Gold.`);
         return { ok: true, d1, d2, doubles, reward, left: t.diceLeft - 1 };
+      },
+
+      // Slot Machine: 3 independent reels — 3-of-a-kind is the jackpot (payout
+      // depends on which symbol, rarer = richer), a pair pays a token amount.
+      playSlot() {
+        const t = get().gamesToday();
+        if (t.slotLeft <= 0) return { ok: false, err: 'No slot spins left today — come back tomorrow!' };
+        const reels = [rollSlotSymbol(), rollSlotSymbol(), rollSlotSymbol()].map(x => x.id);
+        const isJackpot = reels[0] === reels[1] && reels[1] === reels[2];
+        const pairId = !isJackpot ? reels.find((v, i) => reels.indexOf(v) !== i) : null;
+        const reward = isJackpot ? clampSlot(SLOT_JACKPOT[reels[0]]) : pairId ? 1 : 0;
+        get()._bumpGame('slotUsed');
+        if (reward > 0) { set({ gold: get().gold + reward }); play('coin', 0.8); }
+        get().notify('system', 'slot-machine',
+          isJackpot ? `Slot Machine JACKPOT! ${reels[0]} ×3 → +${reward} Gold!`
+            : reward > 0 ? `Slot Machine: pair of ${pairId} → +${reward} Gold.`
+              : 'Slot Machine: no match — try again!');
+        return { ok: true, reels, isJackpot, reward, left: t.slotLeft - 1 };
       },
 
       // ---------- gold exchange ----------
