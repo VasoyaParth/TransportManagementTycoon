@@ -733,6 +733,22 @@ export const useGame = create(
       endPartner(code) { set({ partners: get().partners.filter(p => p.code !== code) }); },
 
       setPhase(phase) { set({ phase }); },
+
+      // ---------- cloud sync ----------
+      // Replace local state with the authoritative copy loaded from the server.
+      applyCloudState(data) {
+        if (!data || typeof data !== 'object') return;
+        const out = {};
+        for (const k in data) if (typeof data[k] !== 'function') out[k] = data[k];
+        set(out);
+      },
+      // Plain, function-free snapshot of current state for pushing to the server.
+      cloudSnapshot() {
+        const s = get();
+        const out = {};
+        for (const k in s) if (typeof s[k] !== 'function') out[k] = s[k];
+        return out;
+      },
     }),
     {
       name: 'truck-empire-save-v2',
