@@ -63,7 +63,7 @@ function boot(){
   var INDIA=L.latLngBounds([6.0,67.5],[37.6,98.0]);
   var map = L.map('map',{center:[DATA.hq.lat,DATA.hq.lng],zoom:6,zoomControl:false,
     attributionControl:false,minZoom:4,maxBounds:INDIA,maxBoundsViscosity:1.0});
-  L.control.zoom({position:'topright'}).addTo(map);
+  // No on-screen zoom buttons — pinch-to-zoom keeps the map corners clean.
   var tiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
     {maxZoom:19,subdomains:'abcd'});
   var tileErrors = 0;
