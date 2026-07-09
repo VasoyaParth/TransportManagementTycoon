@@ -17,6 +17,13 @@ import { setHapticsEnabled } from '../engine/haptics';
 export const GAME_HOUR_MS = 3600000; // 1 in-game hour = 1 real minute -> 1 day = 24 min
 const SALARY_EVERY_DAYS = 30;
 const CONTRACTS_PER_DAY = 6;
+// Fresh contracts land on the board every ~2–4 hours (not just at day rollover).
+const CONTRACT_REFRESH_MIN_MS = 2 * 3600 * 1000;
+const CONTRACT_REFRESH_MAX_MS = 4 * 3600 * 1000;
+const nextRefreshDelay = () =>
+  CONTRACT_REFRESH_MIN_MS + Math.random() * (CONTRACT_REFRESH_MAX_MS - CONTRACT_REFRESH_MIN_MS);
+// Gold → cash exchange rate (₹ per Gold). Gold is premium, so it converts rich.
+export const GOLD_TO_CASH = 50000;
 
 let idSeq = 1;
 const uid = p => `${p}-${Date.now().toString(36)}-${(idSeq++).toString(36)}`;
@@ -54,8 +61,11 @@ function randomContracts(dayNumber, count = CONTRACTS_PER_DAY) {
       : flavor.id === 'island' ? CITIES.filter(c => c.state.includes('Andaman') || c.state === 'Lakshadweep')
         : CITIES.filter(c => c.tier <= 2);
     const dest = pool[Math.floor(Math.random() * pool.length)];
-    const cargoTons = 5 + Math.floor(Math.random() * 16);
-    const expiresAt = Date.now() + (12 + Math.random() * 36) * 3600 * 1000;
+    // Small last-mile loads (1–5 t) that suit the mini/light trucks the player
+    // actually owns; bulk/mining flavours skew a little heavier.
+    const heavy = flavor.id === 'bulk' || flavor.id === 'mining';
+    const cargoTons = 1 + Math.floor(Math.random() * (heavy ? 6 : 4)) + (heavy ? 2 : 0);
+    const expiresAt = Date.now() + (4 + Math.random() * 8) * 3600 * 1000;
     out.push({
       id: uid('c'), flavorId: flavor.id, day: dayNumber,
       destCityId: dest.id, cargoTons, mult: flavor.mult,
@@ -111,6 +121,7 @@ const initialState = {
   clockStart: 0, // real ms when day 1 hour 0 began
   lastSalaryDay: 0,
   lastContractDay: 0,
+  nextContractAt: 0, // real ms of the next 2–4h contract-board refresh
   lastEventAt: 0, // real ms of the last random-event roll
   mapEvents: [], // recent world events with a location, highlighted on the map
   pricing: {}, // per-cargo ₹/km/t overrides; empty => each cargo uses its own default rate
@@ -178,6 +189,7 @@ export const useGame = create(
           corridors: [],
           clockStart: Date.now(),
           lastSalaryDay: 0, lastContractDay: 0,
+          nextContractAt: Date.now() + nextRefreshDelay(),
           contracts: randomContracts(1),
           candidates: randomCandidates(),
           notifications: [makeNotification('system', 'rocket-launch',
@@ -250,6 +262,18 @@ export const useGame = create(
               get().notify('system', icon, msg);
             }
           }
+        }
+        // Fresh contracts flow onto the board every ~2–4 hours of real time,
+        // independent of the day rollover, so the board keeps churning quickly.
+        if (now >= (s.nextContractAt || 0)) {
+          const cur = get();
+          const kept = cur.contracts.filter(c => c.status !== 'available' || c.expiresAt > now);
+          const fresh = randomContracts(day, 4);
+          set({
+            contracts: [...fresh, ...kept].slice(0, 24),
+            nextContractAt: now + nextRefreshDelay(),
+          });
+          if (s.nextContractAt) get().notify('system', 'file-document-multiple', 'Fresh contracts just landed on the board.');
         }
         // Random events on a REAL-TIME cadence (independent of the day rollover),
         // so they happen noticeably often during play.
@@ -674,6 +698,19 @@ export const useGame = create(
         if (c.expiresAt < Date.now()) return { ok: false, err: 'Contract expired' };
         if (!s.trucks.some(t => t.status === 'parked')) return { ok: false, err: 'You need a parked truck to accept a contract' };
         return { ok: true, contract: c };
+      },
+
+      // ---------- gold exchange ----------
+      // Cash out premium Gold into spendable ₹ (₹50,000 per Gold).
+      convertGoldToCash(goldAmount) {
+        const s = get();
+        const amt = Math.floor(goldAmount);
+        if (!amt || amt <= 0) return { ok: false, err: 'Choose how much Gold to exchange' };
+        if (s.gold < amt) return { ok: false, err: 'Not enough Gold' };
+        const cash = amt * GOLD_TO_CASH;
+        set({ gold: s.gold - amt, balance: s.balance + cash });
+        get().notify('system', 'cash-plus', `Exchanged ${amt} Gold for ${inr(cash)} cash.`);
+        return { ok: true, cash };
       },
 
       // ---------- power-ups ----------

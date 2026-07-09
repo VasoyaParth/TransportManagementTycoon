@@ -5,9 +5,10 @@ import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Swi
 import Svg, { Polyline, Circle, Path } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS } from '../../store/gameStore';
-import { cityById, suggestDestinations } from '../../engine/routing';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH } from '../../store/gameStore';
+import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
 import { CITIES } from '../../data/cities';
+import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
 import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, TRUCK_COLORS, TRUCK_LOGOS } from '../../data/trucks';
 import { inr, inrShort } from '../../engine/economy';
 
@@ -104,6 +105,81 @@ function TrackerStep({ icon, color, title, sub, done, active, line }) {
   );
 }
 
+// Build the full A→Z journey for a live delivery: origin, every city the
+// corridor passes through, fuel/charge halts, sleep breaks (~2h) and short
+// breaks (~5m) — all placed at their real distance-along-route and marked
+// reached / current / upcoming against how far the truck has actually driven.
+function buildJourney(d, model, now = Date.now()) {
+  const total = d.route.roadKm;
+  const dur = d.endsAt - d.startedAt;
+  const prog = dur > 0 ? Math.min(1, Math.max(0, (now - d.startedAt) / dur)) : 0;
+  const kmNow = total * prog;
+  const speed = model.speed || 60;
+  const wp = [];
+  wp.push({ type: 'origin', atKm: 0, title: `Picked up · ${cityById(d.fromCityId)?.name || 'Origin'}`, sub: 'Departed origin', icon: 'package-variant-closed', color: C.green });
+  try {
+    for (const rc of routeCities(d.route)) {
+      wp.push({ type: 'city', atKm: rc.atKm, title: rc.city.name, sub: `${rc.city.state} · on route`, icon: 'map-marker', color: C.blue });
+    }
+  } catch (e) { /* routing edge cases — skip cities */ }
+  (d.stops || []).forEach((s, i) => {
+    wp.push({ type: 'fuel', atKm: s.atKm, title: s.station?.name || `Fuel stop ${i + 1}`,
+      sub: model.propulsion === 'electric' ? 'Charging halt' : 'Refuel halt', icon: 'gas-station', color: C.amber });
+  });
+  for (let i = 1; i <= (d.sleepBreaks || 0); i++) {
+    wp.push({ type: 'sleep', atKm: Math.round(i * 8.5 * speed), title: `Sleep break ${i}`, sub: '~2h mandatory rest', icon: 'sleep', color: C.blue });
+  }
+  for (let j = 1; j <= (d.shortBreaks || 0); j++) {
+    const atKm = Math.round(j * 2.5 * speed);
+    if (wp.some(w => w.type === 'sleep' && Math.abs(w.atKm - atKm) < speed * 0.6)) continue;
+    wp.push({ type: 'short', atKm, title: `Short break ${j}`, sub: '~5 min stop', icon: 'coffee-outline', color: C.sub });
+  }
+  wp.push({ type: 'dest', atKm: total, title: `Deliver to ${cityById(d.toCityId)?.name || 'Destination'}`, sub: prog >= 1 ? 'Arrived' : 'Pending arrival', icon: 'map-marker-check', color: C.green });
+
+  const waypoints = wp.filter(w => w.atKm >= 0 && w.atKm <= total).sort((a, b) => a.atKm - b.atKm);
+  waypoints.forEach(w => { w.passed = w.atKm <= kmNow + 0.5; });
+  const nextIdx = waypoints.findIndex(w => !w.passed);
+  const lastReached = [...waypoints].reverse().find(w => w.passed);
+  const nextBreak = waypoints.find(w => !w.passed && (w.type === 'sleep' || w.type === 'short' || w.type === 'fuel'));
+  return { total, prog, kmNow: Math.round(kmNow), waypoints, nextIdx, lastReached, nextBreak, speed };
+}
+
+// Renders the buildJourney() waypoints as the vertical shipment timeline, with
+// the truck's live position highlighted between reached and upcoming stops.
+function JourneyTracker({ delivery, model }) {
+  const j = buildJourney(delivery, model);
+  const eta = fmtDur((delivery.endsAt - Date.now()) / 1000);
+  return (
+    <View>
+      {/* Live "where is it now" banner */}
+      <Row style={{ backgroundColor: C.blueSoft, borderRadius: RADIUS.md, padding: 10, marginBottom: 10 }}>
+        <Icon name="truck-fast" size={18} color={C.blue} />
+        <View style={{ flex: 1, marginLeft: 8 }}>
+          <Text style={[FONT.sub, { fontWeight: '800', color: C.text }]}>
+            {j.kmNow} / {j.total} km · {Math.round(j.prog * 100)}%
+          </Text>
+          <Text style={FONT.tiny}>
+            {j.lastReached ? `Last reached ${j.lastReached.title.replace(/^Picked up · /, '')}` : 'Just departed'}
+            {j.nextBreak ? ` · next ${j.nextBreak.type === 'fuel' ? 'fuel stop' : j.nextBreak.type === 'sleep' ? 'sleep break' : 'short break'} in ${Math.max(0, j.nextBreak.atKm - j.kmNow)} km` : ` · ETA ${eta}`}
+          </Text>
+        </View>
+      </Row>
+      {j.waypoints.map((w, i) => (
+        <TrackerStep
+          key={`${w.type}-${i}`}
+          icon={w.icon}
+          color={w.color}
+          done={w.passed}
+          active={i === j.nextIdx}
+          title={w.title}
+          sub={`${w.sub || ''}${w.type !== 'origin' && w.type !== 'dest' ? ` · ${w.atKm} km` : ''}`.replace(/^ · /, '')}
+          line={i < j.waypoints.length - 1}
+        />
+      ))}
+    </View>
+  );
+}
+
 function SpecRow({ icon, label, value }) {
   return (
     <Row style={{ justifyContent: 'space-between', paddingVertical: 5 }}>
@@ -128,6 +204,7 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
   const trucks = useGame(s => s.trucks);
   const startDelivery = useGame(s => s.startDelivery);
   const previewDelivery = useGame(s => s.previewDelivery);
+  const pricing = useGame(s => s.pricing);
   const parked = trucks.filter(t => t.status === 'parked');
   const [truckId, setTruckId] = useState(presetTruckId);
   const [dest, setDest] = useState(presetDest);
@@ -245,12 +322,17 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
             {(() => {
               const ct = cargoById(cargo);
               if (!ct) return null;
+              const effRate = pricing[ct.id] != null ? pricing[ct.id] : ct.rate;
+              const custom = pricing[ct.id] != null && pricing[ct.id] !== ct.rate;
               return (
                 <Row style={{ marginTop: 8, backgroundColor: C.bgSoft, borderRadius: RADIUS.md, padding: 10 }}>
                   <Icon name={ct.icon} size={18} color={C.blue} />
                   <View style={{ flex: 1, marginLeft: 8 }}>
-                    <Text style={[FONT.sub, { fontWeight: '700' }]}>{ct.name} · ₹{ct.rate}/km per ton</Text>
-                    <Text style={FONT.tiny}>{ct.desc}</Text>
+                    <Row style={{ alignItems: 'center', flexWrap: 'wrap' }}>
+                      <Text style={[FONT.sub, { fontWeight: '700' }]}>{ct.name} · ₹{effRate}/km per ton</Text>
+                      {custom ? <View style={{ marginLeft: 6 }}><Pill text="Your price" icon="tune" color={C.green} bg={C.greenSoft} /></View> : null}
+                    </Row>
+                    <Text style={FONT.tiny}>{custom ? `Custom rate applied (default ₹${ct.rate}). ` : ''}{ct.desc}</Text>
                   </View>
                 </Row>
               );
@@ -422,16 +504,15 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
         {/* Amazon-style route tracker */}
         {truck.status === 'delivering' && d && (
           <Card style={{ marginBottom: 12 }}>
-            <Text style={[FONT.h3, { marginBottom: 10 }]}>Shipment Tracking</Text>
-            <TrackerStep icon="package-variant-closed" color={C.green} done
-              title={`Picked up · ${cityById(d.fromCityId)?.name}`} sub="Departed origin" line />
-            <TrackerStep icon="gas-station" color={prog > 15 ? C.green : C.amber} done={prog > 15}
-              title={`${d.refuelCount ? d.refuelCount : 0} fuel stop${(d.refuelCount || 0) === 1 ? '' : 's'} en route`}
-              sub={d.sleepBreaks ? `${d.sleepBreaks} sleep break${d.sleepBreaks === 1 ? '' : 's'} · ${d.shortBreaks || 0} short breaks` : 'No rest breaks needed'} line />
-            <TrackerStep icon="truck-fast" color={C.blue} done={false} active
-              title={`In transit — ${kmCovered} km covered`} sub={`${Math.round(prog)}% · ETA ${eta}`} line />
-            <TrackerStep icon="map-marker-check" color={prog >= 100 ? C.green : C.faint} done={prog >= 100}
-              title={`Deliver to ${cityById(d.toCityId)?.name}`} sub={prog >= 100 ? 'Arrived' : 'Pending arrival'} />
+            <Row style={{ justifyContent: 'space-between', marginBottom: 10 }}>
+              <Text style={FONT.h3}>Shipment Tracking</Text>
+              <Row style={{ gap: 10 }}>
+                <Row><Icon name="sleep" size={13} color={C.blue} /><Text style={[FONT.tiny, { marginLeft: 3 }]}>{d.sleepBreaks || 0} sleep</Text></Row>
+                <Row><Icon name="coffee-outline" size={13} color={C.sub} /><Text style={[FONT.tiny, { marginLeft: 3 }]}>{d.shortBreaks || 0} short</Text></Row>
+                <Row><Icon name="gas-station" size={13} color={C.amber} /><Text style={[FONT.tiny, { marginLeft: 3 }]}>{d.refuelCount || (d.stops || []).length || 0} fuel</Text></Row>
+              </Row>
+            </Row>
+            <JourneyTracker delivery={d} model={m} />
           </Card>
         )}
         {truck.status === 'building' && (
@@ -724,7 +805,15 @@ export function PowerupsModal({ visible, onClose }) {
   const gold = useGame(s => s.gold);
   const trucks = useGame(s => s.trucks);
   const buyPowerup = useGame(s => s.buyPowerup);
+  const convertGoldToCash = useGame(s => s.convertGoldToCash);
   const [expand, setExpand] = useState(null);
+  const [xGold, setXGold] = useState(5);
+  useEffect(() => { if (visible) setXGold(g => Math.min(Math.max(1, g), Math.max(1, gold))); }, [visible]);
+  const xClamp = Math.min(Math.max(1, xGold), Math.max(1, gold));
+  const exchange = () => {
+    const r = convertGoldToCash(xClamp);
+    toast(r.ok ? `Exchanged for ${inr(r.cash)}` : r.err, r.ok ? 'success' : 'error');
+  };
 
   const eligible = (pid) => {
     if (pid === 'refuel') return trucks;
@@ -753,6 +842,31 @@ export function PowerupsModal({ visible, onClose }) {
           <Text style={[FONT.h2, { color: C.gold }]}>{gold}</Text>
         </Row>
       </Card>
+
+      {/* Gold → Cash exchange */}
+      <Card style={{ marginBottom: 12 }}>
+        <Row style={{ justifyContent: 'space-between' }}>
+          <Row style={{ flex: 1 }}>
+            <View style={[cs.heroIcon, { width: 44, height: 44, backgroundColor: C.greenSoft }]}><Icon name="cash-sync" size={22} color={C.green} /></View>
+            <View style={{ marginLeft: 12, flex: 1 }}>
+              <Text style={FONT.h3}>Exchange Gold for Cash</Text>
+              <Text style={FONT.tiny}>Convert premium Gold into spendable ₹ at {inrShort(GOLD_TO_CASH)} per Gold.</Text>
+            </View>
+          </Row>
+        </Row>
+        <Row style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+          <Row>
+            <IconBtn name="minus-circle-outline" color={xClamp <= 1 ? C.faint : C.text} onPress={() => setXGold(Math.max(1, xClamp - 1))} />
+            <View style={{ alignItems: 'center', width: 74 }}>
+              <Row><Icon name="gold" size={15} color={C.gold} /><Text style={[FONT.h3, { color: C.gold, marginLeft: 4 }]}>{xClamp}</Text></Row>
+              <Text style={FONT.tiny}>= {inr(xClamp * GOLD_TO_CASH)}</Text>
+            </View>
+            <IconBtn name="plus-circle-outline" color={xClamp >= gold ? C.faint : C.text} onPress={() => setXGold(Math.min(gold, xClamp + 1))} />
+          </Row>
+          <Btn title="Exchange" kind="green" small icon="cash-plus" disabled={gold < 1} onPress={exchange} />
+        </Row>
+      </Card>
+
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
         {POWERUPS.map(p => {
           const isCash = !!p.cash;
@@ -787,6 +901,94 @@ export function PowerupsModal({ visible, onClose }) {
             </Card>
           );
         })}
+      </ScrollView>
+    </Sheet>
+  );
+}
+
+// ============ Driver Detail ============
+// Tap a driver → full A→Z picture: profile, current delivery, live route with
+// where they've reached, next break, ETA and career stats.
+export function DriverDetailModal({ visible, onClose, staffId, onShowOnMap }) {
+  const staff = useGame(s => s.staff);
+  const trucks = useGame(s => s.trucks);
+  const deliveries = useGame(s => s.deliveries);
+  const member = staff.find(x => x.id === staffId);
+  const truck = member && member.truckId ? trucks.find(t => t.id === member.truckId) : null;
+  const d = truck ? deliveries.find(x => x.truckId === truck.id) : null;
+  useTick(visible && !!d);
+  if (!member) return <Sheet visible={visible} onClose={onClose} title="Driver" height="40%"><View /></Sheet>;
+
+  const role = STAFF_ROLES.find(r => r.id === member.role);
+  const level = STAFF_LEVELS.find(l => l.id === member.level);
+  const avatar = STAFF_AVATAR[`${member.role}:${member.gender}`] || 'account';
+  const m = truck ? modelById(truck.modelId) : null;
+  const now = Date.now();
+  const prog = d ? Math.min(100, ((now - d.startedAt) / (d.endsAt - d.startedAt)) * 100) : 0;
+  const eta = d ? fmtDur((d.endsAt - now) / 1000) : null;
+
+  return (
+    <Sheet visible={visible} onClose={onClose} title={member.name} height="88%">
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+        <Row style={{ marginBottom: 12 }}>
+          <View style={[cs.heroIcon, { backgroundColor: C.blueSoft }]}><Icon name={avatar} size={34} color={C.blue} /></View>
+          <View style={{ marginLeft: 12, flex: 1 }}>
+            <Text style={FONT.h2}>{member.name}</Text>
+            <Row style={{ marginTop: 4 }}>
+              <Pill text={`${level ? level.name : member.level} ${role ? role.name : member.role}`} icon={role ? role.icon : 'account'} />
+            </Row>
+            <Row style={{ marginTop: 6 }}>
+              <Icon name="star" size={13} color={C.amber} />
+              <Text style={[FONT.tiny, { marginLeft: 4 }]}>Skill {member.skill}/100 · {inrShort(member.salary)}/mo</Text>
+            </Row>
+          </View>
+        </Row>
+
+        {/* Current delivery */}
+        {d && m ? (
+          <>
+            <Card style={{ marginBottom: 12 }}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Text style={FONT.h3}>{cityById(d.fromCityId)?.name} → {cityById(d.toCityId)?.name}</Text>
+                <Text style={[FONT.mono, { color: C.blue }]}>ETA {eta}</Text>
+              </Row>
+              <Row style={{ marginTop: 4 }}>
+                <Icon name={m.icon} size={14} color={C.sub} />
+                <Text style={[FONT.tiny, { marginLeft: 4 }]}>{truck.customName || m.name} · {d.cargoTons} t · {cargoById(d.cargoType)?.name}</Text>
+              </Row>
+              <Progress pct={prog} color={C.green} style={{ marginTop: 8 }} />
+              <Row style={{ justifyContent: 'space-between', marginTop: 4 }}>
+                <Text style={FONT.tiny}>{Math.round(d.route.roadKm * prog / 100)} / {d.route.roadKm} km</Text>
+                <Text style={FONT.tiny}>{Math.round(prog)}%</Text>
+              </Row>
+            </Card>
+            <Card style={{ marginBottom: 12 }}>
+              <Text style={[FONT.h3, { marginBottom: 10 }]}>Live Route</Text>
+              <JourneyTracker delivery={d} model={m} />
+            </Card>
+          </>
+        ) : (
+          <Card style={{ marginBottom: 12, alignItems: 'center', padding: 20 }}>
+            <Icon name="steering" size={30} color={C.faint} />
+            <Text style={[FONT.sub, { marginTop: 8, textAlign: 'center' }]}>
+              {truck ? `Assigned to ${truck.customName || m?.name} — currently ${truck.status}. No active delivery.` : 'Not assigned to a truck yet. Assign this driver from the Staff panel.'}
+            </Text>
+          </Card>
+        )}
+
+        {/* Career */}
+        <Card>
+          <Text style={[FONT.h3, { marginBottom: 4 }]}>Career</Text>
+          <SpecRow icon="steering" label="Hours driven" value={`${member.hoursDriven || 0} h`} />
+          <SpecRow icon="sleep" label="Sleep hours" value={`${member.sleepHours || 0} h`} />
+          <SpecRow icon="package-variant-closed-check" label="Deliveries" value={member.deliveries || 0} />
+          <SpecRow icon="map-marker-distance" label="Distance driven" value={`${Math.round(member.kmDriven || 0).toLocaleString('en-IN')} km`} />
+        </Card>
+
+        {truck && (
+          <Btn title="Show truck on map" kind="soft" icon="crosshairs-gps" style={{ marginTop: 12 }}
+            onPress={() => { onShowOnMap && onShowOnMap(truck); }} />
+        )}
       </ScrollView>
     </Sheet>
   );

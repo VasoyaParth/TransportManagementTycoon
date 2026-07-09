@@ -162,6 +162,34 @@ export function planFuelStops(route, model) {
   return stops;
 }
 
+// Cities the route physically passes through/near — e.g. a Jaipur → Ahmedabad
+// haul really rolls past Ajmer, Udaipur, Himatnagar… Each city is projected
+// onto the polyline and returned with its distance-along-route (atKm, on the
+// road-adjusted scale), ordered origin→destination, endpoints excluded.
+export function routeCities(route, corridorKm = 45, max = 8) {
+  if (!route || !route.points || route.points.length < 2) return [];
+  const pts = route.points, cum = route.cum;
+  const total = route.roadKm;
+  const out = [];
+  for (const c of CITIES) {
+    let bestD = Infinity, bestIdx = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const d = haversine(c.lat, c.lng, pts[i].lat, pts[i].lng);
+      if (d < bestD) { bestD = d; bestIdx = i; }
+    }
+    if (bestD > corridorKm) continue;
+    const atKm = Math.round(cum[bestIdx] * ROAD_FACTOR);
+    if (atKm < total * 0.06 || atKm > total * 0.94) continue; // skip endpoints
+    out.push({ city: c, atKm, offsetKm: Math.round(bestD) });
+  }
+  // one entry per city (closest pass), sorted along the route
+  const seen = new Set();
+  return out
+    .sort((a, b) => a.atKm - b.atKm || a.offsetKm - b.offsetKm)
+    .filter(x => (seen.has(x.city.id) ? false : (seen.add(x.city.id), true)))
+    .slice(0, max);
+}
+
 // Suggested destinations for a truck: nearby, reachable, profitable (FR-6.4).
 export function suggestDestinations(fromLat, fromLng, count = 5) {
   const scored = CITIES
