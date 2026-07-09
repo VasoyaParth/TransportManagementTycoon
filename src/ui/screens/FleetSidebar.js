@@ -9,6 +9,7 @@ import { useGame, modelById } from '../../store/gameStore';
 import { cityById } from '../../engine/routing';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
+import { AdBanner } from '../../ads';
 
 const W = Math.min(300, Dimensions.get('window').width * 0.82);
 
@@ -122,6 +123,7 @@ export default function FleetSidebar({ visible, onClose, onTruckPress, onToast }
               );
             });
           })()}
+          <AdBanner style={{ marginTop: 12 }} />
         </ScrollView>
       </Animated.View>
     </View>

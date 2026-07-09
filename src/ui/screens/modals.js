@@ -13,6 +13,7 @@ import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, 
 import { inr, inrShort } from '../../engine/economy';
 import { APP_VERSION, checkForUpdate, downloadApk, openInstaller, fmtMB, cmpVer } from '../../net/updates';
 import { COUNTRIES, COUNTRY_BY_CODE } from '../../data/expansion';
+import { AdBanner, showRewarded } from '../../ads';
 
 const propMeta = {
   diesel: { color: C.amber, bg: C.amberSoft, icon: 'gas-station', label: 'Diesel' },
@@ -229,7 +230,10 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
   const truck = trucks.find(t => t.id === truckId);
   const model = truck ? modelById(truck.modelId) : null;
   const maxTons = model ? model.cargo : 20;
-  const clampTons = Math.min(tons || 1, maxTons);
+  // A contract fixes the destination, cargo weight and type — you can't tweak
+  // them to inflate the bonus. Only the truck is yours to choose.
+  const locked = !!contract;
+  const clampTons = locked ? Math.min(contract.cargoTons, maxTons) : Math.min(tons || 1, maxTons);
 
   const results = useMemo(() => {
     if (!query.trim()) return [];
@@ -284,6 +288,14 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
 
             {/* Destination */}
             <Text style={cs.section}>Destination</Text>
+            {locked ? (
+              <Row style={{ backgroundColor: C.greenSoft, borderRadius: RADIUS.md, padding: 10 }}>
+                <Icon name="file-lock" size={16} color={C.green} />
+                <Text style={[FONT.sub, { marginLeft: 8, flex: 1, color: C.text }]}>
+                  Contract destination: <Text style={{ fontWeight: '800' }}>{destCity ? `${destCity.name}, ${destCity.state}` : '—'}</Text> · locked
+                </Text>
+              </Row>
+            ) : (
             <Row style={{ gap: 8 }}>
               <View style={{ flex: 1 }}>
                 <TextInput value={query} onChangeText={t => { setQuery(t); setDest(null); }}
@@ -291,7 +303,8 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
               </View>
               <Btn title="Map" icon="map-marker" kind="soft" small onPress={onPickOnMap} />
             </Row>
-            {results.map(c => (
+            )}
+            {!locked && results.map(c => (
               <Pressable key={c.id} onPress={() => { setDest(c.id); setQuery(c.name); }} style={cs.resRow}>
                 <Icon name="map-marker" size={16} color={(c.country || 'IN') === 'IN' ? C.blue : C.amber} />
                 <View style={{ marginLeft: 8, flex: 1 }}>
@@ -314,13 +327,13 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
                 </Row>
               </>
             )}
-            {destCity && <Text style={[FONT.sub, { marginTop: 6 }]}>To: <Text style={{ fontWeight: '800' }}>{destCity.name}, {destCity.state}</Text></Text>}
+            {!locked && destCity && <Text style={[FONT.sub, { marginTop: 6 }]}>To: <Text style={{ fontWeight: '800' }}>{destCity.name}, {destCity.state}</Text></Text>}
 
             {/* Cargo */}
-            <Text style={cs.section}>Cargo type</Text>
+            <Text style={cs.section}>Cargo type{locked ? ' · fixed by contract' : ''}</Text>
             <Row style={{ flexWrap: 'wrap', gap: 6 }}>
               {CARGO_TYPES.map(ct => (
-                <Chip key={ct.id} label={ct.name} icon={ct.icon} active={cargo === ct.id} onPress={() => setCargo(ct.id)} />
+                <Chip key={ct.id} label={ct.name} icon={ct.icon} active={cargo === ct.id} onPress={() => { if (!locked) setCargo(ct.id); }} />
               ))}
             </Row>
             {(() => {
@@ -342,12 +355,16 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
               );
             })()}
             <Row style={{ marginTop: 12, justifyContent: 'space-between' }}>
-              <Text style={FONT.sub}>Cargo weight</Text>
+              <Text style={FONT.sub}>Cargo weight{locked ? ' · fixed by contract' : ''}</Text>
+              {locked ? (
+                <Text style={[FONT.h3, { width: 90, textAlign: 'right' }]}>{clampTons} t</Text>
+              ) : (
               <Row>
                 <IconBtn name="minus-circle-outline" onPress={() => setTons(Math.max(1, clampTons - 1))} />
                 <Text style={[FONT.h3, { width: 60, textAlign: 'center' }]}>{clampTons} t</Text>
                 <IconBtn name="plus-circle-outline" onPress={() => setTons(Math.min(maxTons, clampTons + 1))} />
               </Row>
+              )}
             </Row>
 
             {/* Preview */}
@@ -465,7 +482,21 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
   const customizeTruck = useGame(s => s.customizeTruck);
   const sellTruck = useGame(s => s.sellTruck);
   const truckResale = useGame(s => s.truckResale);
+  const boostDeliveryWithAd = useGame(s => s.boostDeliveryWithAd);
+  const adRepairTruck = useGame(s => s.adRepairTruck);
+  const adSkipBuild = useGame(s => s.adSkipBuild);
   const [confirmSell, setConfirmSell] = useState(false);
+  const [boosting, setBoosting] = useState(false);
+  const watchThenDo = async (unit, action, okMsg) => {
+    if (boosting) return;
+    setBoosting(true);
+    try {
+      const r = await showRewarded(unit);
+      if (r.earned) { const res = action(); toast(res && res.ok === false ? res.err : okMsg, res && res.ok === false ? 'error' : 'success'); }
+      else if (r.unavailable) toast('Ads are not available right now', 'warn');
+      else toast('Watch the full ad first', 'info');
+    } finally { setBoosting(false); }
+  };
   useEffect(() => { if (!visible) setConfirmSell(false); }, [visible]);
   const truck = trucks.find(t => t.id === truckId);
   useTick(visible && !!truck && (truck.status === 'delivering' || truck.status === 'building'));
@@ -473,6 +504,16 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
   const m = modelById(truck.modelId);
   const meta = statusMeta[truck.status];
   const d = deliveries.find(x => x.truckId === truck.id);
+  const watchToSpeedUp = async () => {
+    if (boosting || !d) return;
+    setBoosting(true);
+    try {
+      const r = await showRewarded('rewardedDelivery');
+      if (r.earned) { const b = boostDeliveryWithAd(d.id); toast(b.completed ? 'Delivery completed!' : 'Sped up 25%!', 'success'); }
+      else if (r.unavailable) toast('Ads are not available right now', 'warn');
+      else toast('Watch the full ad to speed up', 'info');
+    } finally { setBoosting(false); }
+  };
   const now = Date.now();
   const prog = d ? Math.min(100, ((now - d.startedAt) / (d.endsAt - d.startedAt)) * 100) : 0;
   const eta = d ? fmtDur((d.endsAt - now) / 1000) : null;
@@ -534,10 +575,23 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
             <JourneyTracker delivery={d} model={m} />
           </Card>
         )}
+        {truck.status === 'delivering' && d && (
+          <Card style={{ marginBottom: 12, backgroundColor: C.greenSoft }}>
+            <Row>
+              <Icon name="fast-forward" size={18} color={C.green} />
+              <Text style={[FONT.sub, { marginLeft: 6, flex: 1, fontWeight: '700', color: C.text }]}>In a hurry? Watch an ad to cut 25% off the remaining time. Watch a few to finish instantly.</Text>
+            </Row>
+            <Btn title={boosting ? 'Loading ad…' : 'Watch ad → 25% faster'} kind="green" icon="play-circle"
+              style={{ marginTop: 10 }} disabled={boosting} onPress={watchToSpeedUp} />
+          </Card>
+        )}
         {truck.status === 'building' && (
           <Card style={{ marginBottom: 12 }}>
             <Row style={{ justifyContent: 'space-between' }}><Text style={FONT.h3}>Building...</Text><Text style={FONT.mono}>{Math.ceil(buildLeft)}s</Text></Row>
             <Progress pct={buildPct} color={C.amber} style={{ marginTop: 8 }} />
+            <Btn title={boosting ? 'Loading ad…' : 'Watch ad → finish build now'} kind="green" icon="play-circle"
+              style={{ marginTop: 10 }} disabled={boosting}
+              onPress={() => watchThenDo('rewardedDelivery', () => adSkipBuild(truck.id), 'Build finished!')} />
           </Card>
         )}
         {truck.status === 'broken' && (
@@ -547,6 +601,9 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
               <Btn title={`Repair ${inr(fee)}`} kind="soft" small onPress={() => doRepair(false)} style={{ flex: 1 }} />
               <Btn title="Repair · 15 Gold" kind="blue" small onPress={() => doRepair(true)} style={{ flex: 1 }} />
             </Row>
+            <Btn title={boosting ? 'Loading ad…' : 'Repair free · Watch ad'} kind="green" small icon="play-circle"
+              style={{ marginTop: 8 }} disabled={boosting}
+              onPress={() => watchThenDo('rewardedDelivery', () => adRepairTruck(truck.id), 'Repaired!')} />
           </Card>
         )}
 
@@ -674,6 +731,7 @@ export function BuyTruckModal({ visible, onClose }) {
       <FlatList
         data={list} keyExtractor={m => m.id} showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 30 }}
+        ListFooterComponent={<AdBanner style={{ marginTop: 8 }} />}
         renderItem={({ item: m }) => {
           const pm = propMeta[m.propulsion];
           const afford = balance >= m.price;
@@ -739,6 +797,7 @@ export function ContractsModal({ visible, onClose, onAccept }) {
       <FlatList
         data={sorted} keyExtractor={c => c.id} showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 30 }}
+        ListFooterComponent={<AdBanner style={{ marginTop: 8 }} />}
         ListHeaderComponent={
           <Text style={[FONT.sub, { marginBottom: 10 }]}>
             Contracts pay a <Text style={{ fontWeight: '800', color: C.green }}>bonus on top</Text> of normal delivery profit. Accept one, then dispatch a parked truck to fulfil it before it expires.
@@ -825,8 +884,24 @@ export function PowerupsModal({ visible, onClose }) {
   const trucks = useGame(s => s.trucks);
   const buyPowerup = useGame(s => s.buyPowerup);
   const convertGoldToCash = useGame(s => s.convertGoldToCash);
+  const grantAdGold = useGame(s => s.grantAdGold);
+  const adGoldCount = useGame(s => s.adGoldCount || 0);
+  const [watchingAd, setWatchingAd] = useState(false);
   const [expand, setExpand] = useState(null);
   const [xGold, setXGold] = useState(5);
+
+  const watchForGold = async () => {
+    if (watchingAd) return;
+    setWatchingAd(true);
+    try {
+      const r = await showRewarded('rewardedGold');
+      if (r.earned) { const g = grantAdGold(); toast(`+${g.amount} Gold!`, 'success'); }
+      else if (r.unavailable) toast('Ads are not available right now', 'warn');
+      else toast('Watch the full ad to earn Gold', 'info');
+    } finally { setWatchingAd(false); }
+  };
+  // Payout tier hint based on ads watched so far.
+  const tierText = adGoldCount >= 10 ? '30–40 Gold' : adGoldCount >= 5 ? '20–30 Gold (30–40 after 10)' : '10–20 Gold (rises after 5 & 10)';
   useEffect(() => { if (visible) setXGold(g => Math.min(Math.max(1, g), Math.max(1, gold))); }, [visible, gold]);
   const xClamp = Math.min(Math.max(1, xGold), Math.max(1, gold));
   const exchange = () => {
@@ -859,6 +934,13 @@ export function PowerupsModal({ visible, onClose }) {
         <Row style={{ justifyContent: 'space-between' }}>
           <Row><Icon name="gold" size={20} color={C.gold} /><Text style={[FONT.h3, { marginLeft: 6 }]}>Your Gold</Text></Row>
           <Text style={[FONT.h2, { color: C.gold }]}>{gold}</Text>
+        </Row>
+        {/* Free Gold by watching a rewarded ad — payout tier grows as you watch more. */}
+        <Btn title={watchingAd ? 'Loading ad…' : 'Watch ad → free Gold'} kind="green" icon="play-circle" small={false}
+          style={{ marginTop: 10 }} disabled={watchingAd} onPress={watchForGold} />
+        <Row style={{ marginTop: 6 }}>
+          <Icon name="information-outline" size={12} color={C.sub} />
+          <Text style={[FONT.tiny, { marginLeft: 4, flex: 1 }]}>Earn {tierText}. Watched {adGoldCount} ad{adGoldCount === 1 ? '' : 's'}.</Text>
         </Row>
       </Card>
 
@@ -920,6 +1002,7 @@ export function PowerupsModal({ visible, onClose }) {
             </Card>
           );
         })}
+        <AdBanner style={{ marginTop: 8 }} />
       </ScrollView>
     </Sheet>
   );
@@ -1382,6 +1465,7 @@ function AboutTab({ onReplayTutorial }) {
         ))}
       </Card>
 
+      <AdBanner style={{ marginTop: 14 }} />
       <Btn title="Replay Tutorial" kind="soft" icon="school-outline" style={{ marginTop: 14 }} onPress={onReplayTutorial} />
       <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 12 }]}>Made with ♥ in India · {APP_VERSION}</Text>
     </>
@@ -1535,6 +1619,7 @@ export function HubsModal({ visible, onClose, onShowOnMap }) {
             );
           })}
         </View>
+        <AdBanner style={{ marginTop: 4, marginBottom: 20 }} />
       </ScrollView>
     </Sheet>
   );
@@ -1620,6 +1705,7 @@ export function CountriesModal({ visible, onClose }) {
             </Card>
           );
         })}
+        <AdBanner style={{ marginTop: 8 }} />
       </ScrollView>
     </Sheet>
   );

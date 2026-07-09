@@ -185,11 +185,18 @@ export function ToastProvider({ children }) {
   return (
     <ToastCtx.Provider value={push}>
       {children}
-      {/* Non-blocking top overlay: pointerEvents="none" so the WHOLE screen stays
-          touchable while a toast is visible (never traps taps behind it). */}
-      <View pointerEvents="none" style={st.toastWrap}>
-        {toasts.map(t => <ToastItem key={t.id} {...t} />)}
-      </View>
+      {/* Toasts float in a transparent modal so they sit ABOVE open bottom
+          sheets/drawers (which are native modals). The modal only mounts while a
+          toast exists; its root is pointerEvents="box-none" and the toast strip
+          is pointerEvents="none", so taps pass straight through the empty area —
+          only the small toast region is drawn, nothing blocks the screen. */}
+      <RNModal visible={toasts.length > 0} transparent statusBarTranslucent animationType="none" onRequestClose={() => {}}>
+        <View pointerEvents="box-none" style={{ flex: 1 }}>
+          <View pointerEvents="none" style={st.toastWrap}>
+            {toasts.map(t => <ToastItem key={t.id} {...t} />)}
+          </View>
+        </View>
+      </RNModal>
     </ToastCtx.Provider>
   );
 }
