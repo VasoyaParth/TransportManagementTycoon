@@ -202,7 +202,10 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
   const buyHub = useGame(s => s.buyHub);
 
   const cityVisible = c => (c.tier === 1) || (c.tier === 2 && view.scale > 2.2) || view.scale > 4.5;
-  const inv = 1 / view.scale;
+  // Partial (not full) zoom compensation — HQ/hub/truck icons, roads and city
+  // labels still shrink somewhat when zoomed out instead of staying pinned
+  // at a constant, oversized screen size at every zoom level.
+  const inv = 1 / Math.sqrt(view.scale);
 
   // Static layer (land, highways, unlocked corridors, stations, cities, HQ,
   // hubs) — only recomputed when the camera or toggles change, NOT every truck
