@@ -377,7 +377,7 @@ export const CITIES = [
   { id: 'morbi', name: 'Morbi', state: 'Gujarat', lat: 22.82, lng: 70.84, pop: 210000, tier: 3 },
   { id: 'upleta', name: 'Upleta', state: 'Gujarat', lat: 21.74, lng: 70.28, pop: 60000, tier: 3 },
   // Near Jamnagar (Gujarat)
-  { id: 'kalavad', name: 'Kalavad', state: 'Gujarat', lat: 22.13, lng: 70.38, pop: 30000, tier: 3 },
+  { id: 'kalavad', name: 'Kalavad', state: 'Gujarat', lat: 22.20, lng: 70.38, pop: 30000, tier: 3 },
   { id: 'dhrol', name: 'Dhrol', state: 'Gujarat', lat: 22.57, lng: 70.42, pop: 33000, tier: 3 },
   { id: 'jamjodhpur', name: 'Jamjodhpur', state: 'Gujarat', lat: 21.90, lng: 70.02, pop: 40000, tier: 3 },
   { id: 'khambhalia', name: 'Khambhalia', state: 'Gujarat', lat: 22.20, lng: 69.66, pop: 55000, tier: 3 },

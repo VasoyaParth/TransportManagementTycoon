@@ -78,8 +78,9 @@ export default function FleetSidebar({ visible, onClose, onTruckPress, onToast }
           <Text style={st.departTxt}>Depart All ({parkedCount})</Text>
         </Pressable>
 
-        {/* 3 tabs — Running / Parked / Pending */}
-        <View style={st.tabBar}>
+        {/* 3 tabs — Running / Parked / Pending (horizontal scroll, no overlap) */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}
+          style={{ flexGrow: 0 }} contentContainerStyle={st.tabBar}>
           {GROUPS.map(g => {
             const count = trucks.filter(g.match).length;
             const on = tab === g.key;
@@ -94,7 +95,7 @@ export default function FleetSidebar({ visible, onClose, onTruckPress, onToast }
               </Pressable>
             );
           })}
-        </View>
+        </ScrollView>
 
         <ScrollView contentContainerStyle={{ paddingBottom: 30, paddingTop: 12 }} showsVerticalScrollIndicator={false}>
           {(() => {
@@ -143,10 +144,10 @@ const st = StyleSheet.create({
     backgroundColor: C.green, paddingVertical: 13, borderRadius: 26,
   },
   departTxt: { color: '#fff', fontWeight: '800', fontSize: 14 },
-  tabBar: { flexDirection: 'row', gap: 6, marginTop: 4 },
+  tabBar: { flexDirection: 'row', gap: 6, marginTop: 4, paddingRight: 4 },
   tab: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
-    paddingVertical: 9, borderRadius: 16, backgroundColor: C.bgSoft,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
+    paddingVertical: 9, paddingHorizontal: 14, borderRadius: 16, backgroundColor: C.bgSoft,
   },
   tabTxt: { fontSize: 11, fontWeight: '800' },
   grpHead: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
