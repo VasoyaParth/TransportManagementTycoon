@@ -126,9 +126,15 @@ export function FleetTab({ onTruckPress, onBuyTruck }) {
     const meta = statusMeta[t.status] || statusMeta.parked;
     let livePct = null;
     let buildLeft = null;
+    let curFuel = Math.round(t.fuelPct);
     if (t.status === 'delivering') {
       const d = deliveries.find(x => x.truckId === t.id);
-      if (d) livePct = clampPct(((now - d.startedAt) / (d.endsAt - d.startedAt)) * 100);
+      if (d) {
+        livePct = clampPct(((now - d.startedAt) / (d.endsAt - d.startedAt)) * 100);
+        const sf = d.startFuelPct != null ? d.startFuelPct : t.fuelPct;
+        const af = d.arriveFuelPct != null ? d.arriveFuelPct : sf;
+        curFuel = Math.max(3, Math.round(sf + (af - sf) * (livePct / 100)));
+      }
     } else if (t.status === 'building' && t.buildEndsAt) {
       buildLeft = Math.max(0, Math.ceil((t.buildEndsAt - now) / 1000));
     }
@@ -149,9 +155,9 @@ export function FleetTab({ onTruckPress, onBuyTruck }) {
         <View style={{ marginTop: 12 }}>
           <Row style={{ justifyContent: 'space-between', marginBottom: 4 }}>
             <Text style={FONT.tiny}>FUEL</Text>
-            <Text style={[FONT.tiny, { color: fuelColor(t.fuelPct) }]}>{Math.round(t.fuelPct)}%</Text>
+            <Text style={[FONT.tiny, { color: fuelColor(curFuel) }]}>{curFuel}%</Text>
           </Row>
-          <Progress pct={t.fuelPct} color={fuelColor(t.fuelPct)} />
+          <Progress pct={curFuel} color={fuelColor(curFuel)} />
         </View>
         {livePct != null ? (
           <View style={{ marginTop: 10 }}>
@@ -289,6 +295,16 @@ export function RoutesTab({ onTrack, onNewDelivery }) {
 }
 
 // ============================== 3. STAFF ==============================
+function DriverStat({ icon, label, value }) {
+  return (
+    <View style={{ flex: 1, alignItems: 'center' }}>
+      <Icon name={icon} size={15} color={C.sub} />
+      <Text style={[FONT.body, { fontWeight: '800', marginTop: 2 }]}>{value}</Text>
+      <Text style={FONT.tiny}>{label}</Text>
+    </View>
+  );
+}
+
 function StaffCard({ member, trucks, onAssign, onFire }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [confirmFire, setConfirmFire] = useState(false);
@@ -340,6 +356,15 @@ function StaffCard({ member, trucks, onAssign, onFire }) {
         </Row>
         <Progress pct={member.skill} color={C.blue} />
       </View>
+      {/* Driver career profile — hours driven, sleep taken, deliveries, distance */}
+      {member.role === 'driver' && (member.deliveries || member.hoursDriven) ? (
+        <Row style={{ marginTop: 10, backgroundColor: C.bgSoft, borderRadius: RADIUS.md, paddingVertical: 8 }}>
+          <DriverStat icon="steering" label="Drive hrs" value={`${member.hoursDriven || 0}h`} />
+          <DriverStat icon="sleep" label="Sleep hrs" value={`${member.sleepHours || 0}h`} />
+          <DriverStat icon="package-variant-closed-check" label="Trips" value={String(member.deliveries || 0)} />
+          <DriverStat icon="map-marker-distance" label="Distance" value={`${Math.round((member.kmDriven || 0) / 1000)}k km`} />
+        </Row>
+      ) : null}
       <Row style={{ justifyContent: 'space-between', marginTop: 10 }}>
         <Text style={FONT.sub}>{inrShort(member.salary)}/month</Text>
         {member.role === 'driver' ? (

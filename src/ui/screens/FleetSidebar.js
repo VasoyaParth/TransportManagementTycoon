@@ -33,6 +33,7 @@ export default function FleetSidebar({ visible, onClose, onTruckPress, onToast }
   const slide = useRef(new Animated.Value(-W)).current;
   const fade = useRef(new Animated.Value(0)).current;
   const [mounted, setMounted] = useState(visible);
+  const [tab, setTab] = useState('running');
 
   useEffect(() => {
     if (visible) setMounted(true);
@@ -77,44 +78,50 @@ export default function FleetSidebar({ visible, onClose, onTruckPress, onToast }
           <Text style={st.departTxt}>Depart All ({parkedCount})</Text>
         </Pressable>
 
-        <ScrollView contentContainerStyle={{ paddingBottom: 30 }} showsVerticalScrollIndicator={false}>
+        {/* 3 tabs — Running / Parked / Pending (horizontal scroll, no overlap) */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}
+          style={{ flexGrow: 0 }} contentContainerStyle={st.tabBar}>
           {GROUPS.map(g => {
-            const items = trucks.filter(g.match);
+            const count = trucks.filter(g.match).length;
+            const on = tab === g.key;
             return (
-              <View key={g.key} style={{ marginTop: 16 }}>
-                <View style={st.grpHead}>
-                  <Icon name={g.icon} size={15} color={g.color} />
-                  <Text style={[FONT.tiny, { marginLeft: 6, fontWeight: '800', color: g.color, letterSpacing: 0.5 }]}>
-                    {g.title.toUpperCase()}
-                  </Text>
-                  <View style={[st.countPill, { backgroundColor: g.color + '22' }]}>
-                    <Text style={{ fontSize: 10, fontWeight: '800', color: g.color }}>{items.length}</Text>
-                  </View>
+              <Pressable key={g.key} style={[st.tab, on && { backgroundColor: g.color }]}
+                onPress={() => { haptic('light'); setTab(g.key); }}>
+                <Icon name={g.icon} size={15} color={on ? '#fff' : g.color} />
+                <Text style={[st.tabTxt, { color: on ? '#fff' : C.sub }]}>{g.title}</Text>
+                <View style={[st.countPill, { backgroundColor: on ? 'rgba(255,255,255,0.25)' : g.color + '22' }]}>
+                  <Text style={{ fontSize: 10, fontWeight: '800', color: on ? '#fff' : g.color }}>{count}</Text>
                 </View>
-                {items.length === 0 ? (
-                  <Text style={[FONT.tiny, { color: C.faint, paddingVertical: 6, paddingLeft: 2 }]}>None</Text>
-                ) : items.map(t => {
-                  const model = modelById(t.modelId);
-                  const d = deliveries.find(x => x.truckId === t.id);
-                  const to = d ? cityById(d.toCityId) : cityById(t.cityId);
-                  return (
-                    <Pressable key={t.id} style={st.row} onPress={() => { haptic('light'); onTruckPress(t); onClose(); }}>
-                      <View style={[st.rowIcon, { backgroundColor: g.color + '18' }]}>
-                        <Icon name={model.icon} size={18} color={g.color} />
-                      </View>
-                      <View style={{ flex: 1, marginLeft: 10 }}>
-                        <Text style={[FONT.body, { fontWeight: '700' }]} numberOfLines={1}>{t.customName || model.name}</Text>
-                        <Text style={FONT.tiny} numberOfLines={1}>
-                          {statusLabel(t)}{to ? ` · ${to.name}` : ''}
-                        </Text>
-                      </View>
-                      <Icon name="chevron-right" size={18} color={C.faint} />
-                    </Pressable>
-                  );
-                })}
-              </View>
+              </Pressable>
             );
           })}
+        </ScrollView>
+
+        <ScrollView contentContainerStyle={{ paddingBottom: 30, paddingTop: 12 }} showsVerticalScrollIndicator={false}>
+          {(() => {
+            const g = GROUPS.find(x => x.key === tab);
+            const items = trucks.filter(g.match);
+            if (items.length === 0) {
+              return <Text style={[FONT.tiny, { color: C.faint, paddingVertical: 20, textAlign: 'center' }]}>No {g.title.toLowerCase()} trucks.</Text>;
+            }
+            return items.map(t => {
+              const model = modelById(t.modelId);
+              const d = deliveries.find(x => x.truckId === t.id);
+              const to = d ? cityById(d.toCityId) : cityById(t.cityId);
+              return (
+                <Pressable key={t.id} style={st.row} onPress={() => { haptic('light'); onTruckPress(t); onClose(); }}>
+                  <View style={[st.rowIcon, { backgroundColor: g.color + '18' }]}>
+                    <Icon name={model.icon} size={18} color={g.color} />
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text style={[FONT.body, { fontWeight: '700' }]} numberOfLines={1}>{t.customName || model.name}</Text>
+                    <Text style={FONT.tiny} numberOfLines={1}>{statusLabel(t)}{to ? ` · ${to.name}` : ''}</Text>
+                  </View>
+                  <Icon name="chevron-right" size={18} color={C.faint} />
+                </Pressable>
+              );
+            });
+          })()}
         </ScrollView>
       </Animated.View>
     </View>
@@ -137,6 +144,12 @@ const st = StyleSheet.create({
     backgroundColor: C.green, paddingVertical: 13, borderRadius: 26,
   },
   departTxt: { color: '#fff', fontWeight: '800', fontSize: 14 },
+  tabBar: { flexDirection: 'row', gap: 6, marginTop: 4, paddingRight: 4 },
+  tab: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
+    paddingVertical: 9, paddingHorizontal: 14, borderRadius: 16, backgroundColor: C.bgSoft,
+  },
+  tabTxt: { fontSize: 11, fontWeight: '800' },
   grpHead: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   countPill: { marginLeft: 8, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12, minWidth: 22, alignItems: 'center' },
   row: {

@@ -10,7 +10,7 @@ import { TRUCK_MODELS, CARGO_TYPES, CAMPAIGNS, POWERUPS, CONTRACT_FLAVORS } from
 import { STAFF_NAMES, STAFF_LEVELS } from '../data/staffNames';
 import { CITIES } from '../data/cities';
 import { computeRoute, planFuelStops, cityById } from '../engine/routing';
-import { deliveryEconomics, tripDurationSec, inr } from '../engine/economy';
+import { deliveryEconomics, tripDurationSec, inr, REAL_SEC_PER_GAME_HOUR } from '../engine/economy';
 import { play, setSoundEnabled } from '../engine/sound';
 import { setHapticsEnabled } from '../engine/haptics';
 
@@ -23,6 +23,24 @@ const uid = p => `${p}-${Date.now().toString(36)}-${(idSeq++).toString(36)}`;
 
 export const modelById = id => TRUCK_MODELS.find(m => m.id === id);
 export const cargoById = id => CARGO_TYPES.find(c => c.id === id);
+
+// ---------- Garage / hub economics (price & upkeep vary by city) ----------
+const HUB_BASE_COST = { 1: 25000000, 2: 12000000, 3: 6000000 }; // ₹ by tier
+const HUB_MONTHLY_MAINT = { 1: 150000, 2: 80000, 3: 40000 };     // ₹/month by tier
+// Deterministic ±10% wobble per city so every city has its own distinct price.
+function cityWobble(id) {
+  let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return (h % 21 - 10) / 100;
+}
+export function hubCostForCity(city) {
+  if (!city) return 0;
+  const base = HUB_BASE_COST[city.tier] || 6000000;
+  return Math.round((base * (1 + cityWobble(city.id))) / 100000) * 100000;
+}
+export function hubMaintForCity(city) {
+  if (!city) return 0;
+  return HUB_MONTHLY_MAINT[city.tier] || 40000;
+}
 
 function makeNotification(type, icon, message) {
   return { id: uid('n'), type, icon, message, ts: Date.now(), read: false };
@@ -93,6 +111,8 @@ const initialState = {
   clockStart: 0, // real ms when day 1 hour 0 began
   lastSalaryDay: 0,
   lastContractDay: 0,
+  lastEventAt: 0, // real ms of the last random-event roll
+  mapEvents: [], // recent world events with a location, highlighted on the map
   pricing: {}, // per-cargo ₹/km/t overrides; empty => each cargo uses its own default rate
   settings: {
     speed: 1, autosave: true, sound: true, haptics: true, showStations: true,
@@ -197,14 +217,19 @@ export const useGame = create(
       dailyTick() {
         const s = get();
         if (s.phase !== 'game') return;
+        const now = Date.now();
         const { day } = get().gameDay();
-        // salaries every 30 in-game days
-        if (day - s.lastSalaryDay >= SALARY_EVERY_DAYS && s.staff.length) {
-          const total = s.staff.reduce((a, x) => a + x.salary, 0);
-          set({ balance: s.balance - total, lastSalaryDay: day });
-          get().notify('system', 'cash-minus', `Monthly salaries paid: ${inr(total)} to ${s.staff.length} staff.`);
-        } else if (day - s.lastSalaryDay >= SALARY_EVERY_DAYS) {
-          set({ lastSalaryDay: day });
+        // Monthly running costs: staff salaries + garage maintenance (non-HQ).
+        if (day - s.lastSalaryDay >= SALARY_EVERY_DAYS) {
+          const salaries = s.staff.reduce((a, x) => a + x.salary, 0);
+          const upkeep = (s.hubs || []).filter(h => !h.hq).reduce((a, h) => a + (h.maint || hubMaintForCity(cityById(h.cityId))), 0);
+          const total = salaries + upkeep;
+          if (total > 0) {
+            set({ balance: s.balance - total, lastSalaryDay: day });
+            get().notify('system', 'cash-minus', `Monthly costs: ${inr(salaries)} salaries + ${inr(upkeep)} garage upkeep = ${inr(total)}.`);
+          } else {
+            set({ lastSalaryDay: day });
+          }
         }
         // fresh contracts each day + flavor event
         if (day > s.lastContractDay) {
@@ -224,7 +249,15 @@ export const useGame = create(
               const [icon, msg] = flavor[Math.floor(Math.random() * flavor.length)];
               get().notify('system', icon, msg);
             }
-            // Rare, impactful random events — frequency configurable in Settings.
+          }
+        }
+        // Random events on a REAL-TIME cadence (independent of the day rollover),
+        // so they happen noticeably often during play.
+        const freq = s.settings.events || 'rare';
+        if (freq !== 'off') {
+          const intervalMs = freq === 'sometimes' ? 12 * 60 * 1000 : 25 * 60 * 1000;
+          if (now - (s.lastEventAt || 0) > intervalMs) {
+            set({ lastEventAt: now });
             get().rollRandomEvent();
           }
         }
@@ -235,25 +268,37 @@ export const useGame = create(
       rollRandomEvent() {
         const s = get();
         const freq = s.settings.events || 'rare';
-        const chance = freq === 'off' ? 0 : freq === 'sometimes' ? 0.12 : 0.05;
+        const chance = freq === 'off' ? 0 : freq === 'sometimes' ? 0.6 : 0.35;
         if (Math.random() > chance) return;
+        // Push a located event so the map can highlight it (kept short, capped).
+        const pushMapEvent = (kind, icon, color, lat, lng, label) => {
+          if (lat == null || lng == null) return;
+          set({ mapEvents: [{ id: uid('ev'), kind, icon, color, lat, lng, label, ts: Date.now() },
+            ...(get().mapEvents || [])].slice(0, 6) });
+        };
+        const anyCity = () => {
+          const h = (s.hubs || [])[Math.floor(Math.random() * Math.max(1, (s.hubs || []).length))];
+          return h ? cityById(h.cityId) : cityById(s.company?.hqCityId);
+        };
         const pool = [];
         // Goods stolen — lose a small sum if you have cash.
         if (s.balance > 100000) pool.push(() => {
           const loss = Math.min(s.balance, Math.round(50000 + Math.random() * 200000));
+          const c = anyCity();
           set({ balance: s.balance - loss });
-          get().notify('system', 'shield-alert', `Cargo theft! Bandits stole goods worth ${inr(loss)} from a depot.`);
+          if (c) pushMapEvent('theft', 'shield-alert', '#C0392B', c.lat, c.lng, 'Cargo theft');
+          get().notify('system', 'shield-alert', `Cargo theft! Bandits stole goods worth ${inr(loss)} near ${c ? c.name : 'a depot'}.`);
         });
         // Accident — a random on-road truck breaks down.
         const onRoad = s.trucks.filter(t => t.status === 'delivering' || t.status === 'parked');
         if (onRoad.length) pool.push(() => {
           const t = onRoad[Math.floor(Math.random() * onRoad.length)];
-          // cancel its delivery if any, then mark broken
           const d = s.deliveries.find(x => x.truckId === t.id);
           set({
             deliveries: d ? s.deliveries.filter(x => x.id !== d.id) : s.deliveries,
             trucks: get().trucks.map(x => x.id === t.id ? { ...x, status: 'broken' } : x),
           });
+          pushMapEvent('accident', 'car-brake-alert', '#E67E22', t.lat, t.lng, 'Breakdown');
           get().notify('truck', 'car-brake-alert', `Accident! ${modelById(t.modelId).name} broke down and needs repair.`);
         });
         // Fuel price spike — informational.
@@ -261,8 +306,10 @@ export const useGame = create(
         // Windfall — small bonus.
         pool.push(() => {
           const bonus = Math.round(40000 + Math.random() * 120000);
+          const c = anyCity();
           set({ balance: get().balance + bonus });
-          get().notify('system', 'gift', `Loyal client bonus! You received ${inr(bonus)}.`);
+          if (c) pushMapEvent('windfall', 'gift', '#12A150', c.lat, c.lng, 'Client bonus');
+          get().notify('system', 'gift', `Loyal client bonus! You received ${inr(bonus)}${c ? ` in ${c.name}` : ''}.`);
         });
         pool[Math.floor(Math.random() * pool.length)]();
       },
@@ -344,19 +391,56 @@ export const useGame = create(
         set({ trucks: get().trucks.map(t => t.id === truckId ? { ...t, ...patch } : t) });
       },
 
-      // Buy a regional hub/garage in a city — a new base for your operations.
-      HUB_COST: 1500000,
+      // Buy a regional garage in a city — price & upkeep depend on the city tier.
       buyHub(cityId) {
         const s = get();
-        if (s.hubs.some(h => h.cityId === cityId)) return { ok: false, err: 'You already have a hub here' };
-        if (s.balance < 1500000) return { ok: false, err: 'Insufficient funds (need ₹15,00,000)' };
+        if (s.hubs.some(h => h.cityId === cityId)) return { ok: false, err: 'You already have a garage here' };
         const city = cityById(cityId);
+        const cost = hubCostForCity(city);
+        if (s.balance < cost) return { ok: false, err: `Insufficient funds (need ${inr(cost)})` };
         set({
-          balance: s.balance - 1500000,
-          hubs: [...s.hubs, { cityId, name: city.name + ' Hub', hq: false, since: Date.now() }],
+          balance: s.balance - cost,
+          hubs: [...s.hubs, {
+            cityId, name: city.name + ' Garage', hq: false, since: Date.now(),
+            tier: city.tier, cost, maint: hubMaintForCity(city),
+          }],
         });
-        get().notify('system', 'garage', `New hub opened in ${city.name}! Your network is growing.`);
+        get().notify('system', 'garage', `New garage opened in ${city.name} for ${inr(cost)}! Free refuelling + fast-travel here.`);
         return { ok: true };
+      },
+
+      // Free refuel for a truck parked at any of your garages/HQ.
+      refuelAtHub(truckId) {
+        const s = get();
+        const t = s.trucks.find(x => x.id === truckId);
+        if (!t) return { ok: false, err: 'Truck not found' };
+        if (t.status !== 'parked') return { ok: false, err: 'Truck must be parked to refuel' };
+        if (!s.hubs.some(h => h.cityId === t.cityId)) return { ok: false, err: 'No garage in this city — free refuel only at your garages' };
+        if ((t.fuelPct || 0) >= 100) return { ok: false, err: 'Tank is already full' };
+        set({ trucks: s.trucks.map(x => x.id === truckId ? { ...x, fuelPct: 100 } : x) });
+        get().notify('truck', 'gas-station', `${t.customName || modelById(t.modelId).name} refuelled free at your garage.`);
+        return { ok: true };
+      },
+
+      // Instantly relocate a parked truck between two of your garages (small fee).
+      fastTravel(truckId, toCityId) {
+        const s = get();
+        const t = s.trucks.find(x => x.id === truckId);
+        if (!t) return { ok: false, err: 'Truck not found' };
+        if (t.status !== 'parked') return { ok: false, err: 'Only a parked truck can fast-travel' };
+        if (!s.hubs.some(h => h.cityId === t.cityId)) return { ok: false, err: 'Truck must be at one of your garages' };
+        if (!s.hubs.some(h => h.cityId === toCityId)) return { ok: false, err: 'Destination must be one of your garages' };
+        if (t.cityId === toCityId) return { ok: false, err: 'Truck is already here' };
+        const from = cityById(t.cityId), to = cityById(toCityId);
+        const km = Math.round(computeRoute(from.lat, from.lng, to.lat, to.lng)?.roadKm || 0);
+        const fee = Math.max(2000, Math.round(km * 8)); // repositioning fee
+        if (s.balance < fee) return { ok: false, err: `Need ${inr(fee)} for the transfer` };
+        set({
+          balance: s.balance - fee,
+          trucks: s.trucks.map(x => x.id === truckId ? { ...x, lat: to.lat, lng: to.lng, cityId: to.id } : x),
+        });
+        get().notify('truck', 'transfer', `${t.customName || modelById(t.modelId).name} fast-travelled to ${to.name} for ${inr(fee)}.`);
+        return { ok: true, fee, km };
       },
 
       // ---------- deliveries ----------
@@ -392,11 +476,20 @@ export const useGame = create(
           arriveFuelPct = Math.max(4, Math.round(100 - (lastLeg / R) * 100));
         }
         const speedBoost = s.boosts.speedUntil > Date.now() ? 2 : 1;
+        // ----- Driver fatigue: legally/physically a driver can't drive forever.
+        // A sleep break (~2h) after every ~8.5h driving, plus short ~5min breaks
+        // every ~2.5h. These pauses extend the real delivery time.
+        const drivingHours = route.roadKm / model.speed;
+        const sleepBreaks = Math.floor(drivingHours / 8.5);
+        const shortBreaks = Math.floor(drivingHours / 2.5);
+        const restHours = sleepBreaks * 2 + shortBreaks * (5 / 60);
+        const restSec = Math.round((restHours * REAL_SEC_PER_GAME_HOUR) / speedBoost);
         // Each auto-refuel stop costs ~1 in-game hour of real time.
-        const durationSec = tripDurationSec(model, route.roadKm, speedBoost) + refuelCount * 60;
+        const durationSec = tripDurationSec(model, route.roadKm, speedBoost) + refuelCount * 60 + restSec;
         return {
           route, stops, econ, durationSec, tons, model, to, arriveFuelPct, refuelCount,
           startRangeKm: Math.round(startRangeKm), fullRangeKm: R, startFuelPct: Math.round(startFuel),
+          drivingHours: Math.round(drivingHours * 10) / 10, sleepBreaks, shortBreaks, restHours: Math.round(restHours * 10) / 10,
         };
       },
 
@@ -418,7 +511,8 @@ export const useGame = create(
           id: uid('d'), truckId, fromCityId: t.cityId, toCityId, cargoType,
           cargoTons: p.tons, route: p.route, stops: p.stops,
           startedAt: now, endsAt: now + p.durationSec * 1000, econ: p.econ, contractId,
-          arriveFuelPct: p.arriveFuelPct,
+          arriveFuelPct: p.arriveFuelPct, startFuelPct: p.startFuelPct,
+          sleepBreaks: p.sleepBreaks, shortBreaks: p.shortBreaks, restHours: p.restHours,
         };
         // Record the corridor so it stays highlighted on the map (cap 8, dedup).
         const corrId = [d.fromCityId, toCityId].sort().join('~');
@@ -482,6 +576,13 @@ export const useGame = create(
           const flavor = CONTRACT_FLAVORS.find(f => f.id === contract.flavorId);
           reward = Math.round(d.econ.gross * (flavor.mult - 1));
         }
+        const drivingHours = t ? d.route.roadKm / modelById(t.modelId).speed : 0;
+        const sleepH = (d.sleepBreaks || 0) * 2;
+        const logEntry = {
+          id: d.id, fromCityId: d.fromCityId, toCityId: d.toCityId,
+          km: d.route.roadKm, net: d.econ.net, gross: d.econ.gross, ts: Date.now(),
+          hours: Math.round(drivingHours * 10) / 10,
+        };
         set({
           deliveries: s.deliveries.filter(x => x.id !== deliveryId),
           balance: s.balance + d.econ.net + reward,
@@ -489,11 +590,18 @@ export const useGame = create(
             ...x, status: 'parked', lat: to.lat, lng: to.lng, cityId: to.id,
             fuelPct: d.arriveFuelPct != null ? d.arriveFuelPct : Math.max(4, (x.fuelPct || 100) - 15),
             km: x.km + d.route.roadKm, deliveries: x.deliveries + 1,
+            log: [{ ...logEntry, truckName: modelById(x.modelId).name }, ...(x.log || [])].slice(0, 20),
           } : x),
+          // Accumulate the driver's career stats (hours driven, sleep, deliveries).
+          staff: s.staff.map(m => m.id === (t && t.driverId) ? {
+            ...m,
+            hoursDriven: Math.round(((m.hoursDriven || 0) + drivingHours) * 10) / 10,
+            sleepHours: Math.round(((m.sleepHours || 0) + sleepH) * 10) / 10,
+            deliveries: (m.deliveries || 0) + 1,
+            kmDriven: Math.round((m.kmDriven || 0) + d.route.roadKm),
+          } : m),
           history: [{
-            id: d.id, fromCityId: d.fromCityId, toCityId: d.toCityId,
-            km: d.route.roadKm, net: d.econ.net, gross: d.econ.gross, ts: Date.now(),
-            truckName: t ? modelById(t.modelId).name : '',
+            ...logEntry, truckName: t ? modelById(t.modelId).name : '',
           }, ...s.history].slice(0, 30),
           stats: {
             revenue: s.stats.revenue + d.econ.gross + reward,

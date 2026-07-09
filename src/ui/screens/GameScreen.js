@@ -112,36 +112,7 @@ export default function GameScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }}>
-      {/* ---- Header: prominent balance + action icons ---- */}
-      <View style={st.header}>
-        <View style={{ flex: 1 }}>
-          <Text style={[FONT.tiny, { marginBottom: 1 }]}>BALANCE</Text>
-          <Row style={{ alignItems: 'center' }}>
-            <Money value={balance} short size={22} />
-            <Pressable onPress={() => { haptic('light'); setModal({ kind: 'powerups' }); }} style={st.goldChip}>
-              <Icon name="gold" size={13} color={C.gold} />
-              <Text style={[FONT.tiny, { fontWeight: '800', color: C.gold, marginLeft: 3 }]}>{gold}</Text>
-            </Pressable>
-          </Row>
-          {/* Day + live date/time (moved out of the map to save space) */}
-          <Row style={{ alignItems: 'center', marginTop: 2 }}>
-            <Icon name={phase.icon} size={11} color={phase.color} />
-            <Text style={[FONT.tiny, { fontWeight: '800', marginLeft: 3 }]}>Day {clock.day}</Text>
-            <Text style={[FONT.tiny, { color: C.faint, marginHorizontal: 4 }]}>·</Text>
-            <Text style={[FONT.tiny, { color: C.sub }]}>{realClock}</Text>
-          </Row>
-        </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <IconBtn name="cloud-check-outline" onPress={() => setModal({ kind: 'cloud' })} color={C.blue} size={20} />
-          <IconBtn name="garage" onPress={() => setModal({ kind: 'hubs' })} size={20} />
-          <IconBtn name="star-four-points" onPress={() => setModal({ kind: 'powerups' })} color={C.gold} size={20} />
-          <IconBtn name="file-document-outline" onPress={() => setModal({ kind: 'contracts' })} size={20} />
-          <IconBtn name="bell-outline" badge={unread} onPress={() => setModal({ kind: 'notifications' })} size={20} />
-          <IconBtn name="cog-outline" onPress={() => setModal({ kind: 'settings' })} size={20} />
-        </View>
-      </View>
-
-      {/* ---- Map ---- */}
+      {/* ---- Map (full height; header floats over it as one frosted pill) ---- */}
       <View style={{ flex: 1 }}>
         <MapContainer
           pickingMode={!!picking}
@@ -154,6 +125,38 @@ export default function GameScreen() {
         {phase.tint > 0 && (
           <View pointerEvents="none" style={[StyleSheet.absoluteFill, { backgroundColor: '#0A1A3A', opacity: phase.tint }]} />
         )}
+        {/* Single floating frosted header pill — balance/gold/time left, bell+settings right */}
+        <View style={st.hdrPill}>
+          <View style={{ flex: 1 }}>
+            <Row style={{ alignItems: 'center' }}>
+              <Money value={balance} short size={19} />
+              <Pressable onPress={() => { haptic('light'); setModal({ kind: 'powerups' }); }} style={st.goldChip}>
+                <Icon name="gold" size={12} color={C.gold} />
+                <Text style={[FONT.tiny, { fontWeight: '800', color: C.gold, marginLeft: 3 }]}>{gold}</Text>
+              </Pressable>
+            </Row>
+            <Row style={{ alignItems: 'center', marginTop: 2 }}>
+              <Icon name={phase.icon} size={10} color={phase.color} />
+              <Text style={[FONT.tiny, { fontWeight: '800', marginLeft: 3 }]}>Day {clock.day}</Text>
+              <Text style={[FONT.tiny, { color: C.faint, marginHorizontal: 3 }]}>·</Text>
+              <Text style={[FONT.tiny, { color: C.sub }]}>{realClock}</Text>
+            </Row>
+          </View>
+          <IconBtn name="bell-outline" badge={unread} onPress={() => setModal({ kind: 'notifications' })} size={20} />
+          <IconBtn name="cog-outline" onPress={() => setModal({ kind: 'settings' })} size={20} />
+        </View>
+        {/* Right-side action stack (garage / contracts / power-ups) */}
+        <View style={st.actionStack}>
+          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'hubs' }); }}>
+            <Icon name="garage" size={19} color={C.text} />
+          </Pressable>
+          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'contracts' }); }}>
+            <Icon name="file-document-outline" size={19} color={C.text} />
+          </Pressable>
+          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'powerups' }); }}>
+            <Icon name="star-four-points" size={19} color={C.gold} />
+          </Pressable>
+        </View>
         {/* Floating company profile capsule (opens Settings → Profile) */}
         <Pressable style={st.profileCap} onPress={() => { haptic('light'); setModal({ kind: 'settings', tab: 'profile' }); }}>
           <View style={st.logoCircle}><Icon name={company?.logo || 'truck'} size={16} color={C.blue} /></View>
@@ -162,6 +165,18 @@ export default function GameScreen() {
             <Text style={[FONT.tiny, { color: C.sub }]} numberOfLines={1}>{hq?.name}, {hq?.state}</Text>
           </View>
         </Pressable>
+        {/* Right-side action stack — moved out of the header for a clean menu bar */}
+        <View style={st.actionStack}>
+          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'hubs' }); }}>
+            <Icon name="garage" size={19} color={C.text} />
+          </Pressable>
+          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'contracts' }); }}>
+            <Icon name="file-document-outline" size={19} color={C.text} />
+          </Pressable>
+          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'powerups' }); }}>
+            <Icon name="star-four-points" size={19} color={C.gold} />
+          </Pressable>
+        </View>
         {/* Left-edge fleet-manager strip with arrow (opens sidebar) */}
         <Pressable style={[st.mgrStrip, SHADOW.pop]} onPress={() => { haptic('light'); setSidebar(true); }}>
           <Icon name="truck" size={18} color={C.blue} />
@@ -235,22 +250,32 @@ export default function GameScreen() {
 }
 
 const st = StyleSheet.create({
-  header: {
-    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 8,
-    backgroundColor: C.bg, borderBottomWidth: 1, borderBottomColor: C.border, gap: 6,
-  },
   logoCircle: {
     width: 34, height: 34, borderRadius: 17, backgroundColor: C.blueSoft,
     alignItems: 'center', justifyContent: 'center',
+  },
+  // Single floating frosted header pill (Samsung-style glass) over the map.
+  hdrPill: {
+    position: 'absolute', top: 10, left: 10, right: 10, flexDirection: 'row', alignItems: 'center',
+    paddingLeft: 14, paddingRight: 4, paddingVertical: 6,
+    backgroundColor: 'rgba(255,255,255,0.88)', borderRadius: 26,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.7)',
+    shadowColor: '#0B0F14', shadowOpacity: 0.16, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 8,
+  },
+  // Right-side vertical action stack (garage / contracts / power-ups).
+  actionStack: { position: 'absolute', top: 76, right: 12, gap: 8 },
+  actionBtn: {
+    width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.94)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.7)',
   },
   // Gold chip beside the balance.
   goldChip: {
     flexDirection: 'row', alignItems: 'center', marginLeft: 10,
     backgroundColor: C.bgSoft, paddingHorizontal: 9, paddingVertical: 3, borderRadius: 14,
   },
-  // Floating company profile capsule (top-left).
+  // Floating company profile capsule (top-left, below the header pill).
   profileCap: {
-    position: 'absolute', top: 12, left: 12, maxWidth: 210, flexDirection: 'row', alignItems: 'center',
+    position: 'absolute', top: 76, left: 12, maxWidth: 210, flexDirection: 'row', alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.9)', paddingLeft: 6, paddingRight: 12, paddingVertical: 5,
     borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.7)',
     shadowColor: '#0B0F14', shadowOpacity: 0.12, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 4,
