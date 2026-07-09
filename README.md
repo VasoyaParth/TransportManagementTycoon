@@ -1,93 +1,99 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+<div align="center">
 
-# Getting Started
+# 🚚 Truck Empire Tycoon
 
->**Note**: Make sure you have completed the [React Native - Environment Setup](https://reactnative.dev/docs/environment-setup) instructions till "Creating a new application" step, before proceeding.
+**Build and run your own Asian trucking empire — real highways, real cities, real-time hauls. 100% offline. Made in India.**
 
-## Step 1: Start the Metro Server
+![platform](https://img.shields.io/badge/platform-Android-3DDC84?logo=android&logoColor=white)
+![framework](https://img.shields.io/badge/React%20Native-0.74-61DAFB?logo=react&logoColor=white)
+![version](https://img.shields.io/badge/version-v1.4.0-blue)
+![offline](https://img.shields.io/badge/play-offline-success)
 
-First, you will need to start **Metro**, the JavaScript _bundler_ that ships _with_ React Native.
+</div>
 
-To start Metro, run the following command from the _root_ of your React Native project:
+---
+
+## 🌏 About
+
+Truck Empire Tycoon is an offline logistics tycoon game. Start with a single mini-truck in an Indian metro and grow into a cross-border freight giant — buy trucks, hire drivers, win contracts, open garages, run marketing campaigns and expand across Asia. Every route is computed over a **real national-highway graph**, so trucks never travel in straight lines — they roll through the towns you'd actually pass.
+
+## ✨ Features
+
+- 🗺️ **Real road routing** — Dijkstra over a hand-built highway network across India and 9 neighbouring countries.
+- 🚛 **50+ real truck models** — from the Tata Ace to Volvo & Scania mega-haulers, across 3 tiers and diesel / electric / hybrid.
+- 📦 **Live shipment tracking** — watch each haul pass intermediate cities, fuel stops, sleep breaks and short breaks, in real time.
+- 👷 **Drivers & staff** — hire drivers, mechanics and managers; driver hours & distance update live as they drive.
+- 📄 **Contracts** — a board that refreshes every few hours with bonus-paying freight jobs.
+- 💰 **Deep economy** — cargo-type pricing, fuel/maintenance/tolls, tunable per-km rates, and a Gold ↔ Cash exchange.
+- 🌏 **"Around India" world expansion** — unlock Nepal, Bhutan, Bangladesh, Sri Lanka, Pakistan, Myanmar, Afghanistan, Malaysia & China; cross-border hauls pay big but incur customs time + fees.
+- 🔄 **In-app updates** — check for new releases, view version history and download the latest APK from the About screen.
+- 📴 **Fully offline** — timestamp-based simulation settles progress even while the app is closed. No account, no backend.
+
+## 🌏 The World
+
+| Region | Status | Highlights |
+| --- | --- | --- |
+| 🇮🇳 India | Home market | 36 states · 440+ cities · endless highways |
+| 🇳🇵 Nepal · 🇧🇹 Bhutan | Unlockable | Himalayan trade routes |
+| 🇧🇩 Bangladesh · 🇱🇰 Sri Lanka | Unlockable | Delta cities & the Palk Strait ferry |
+| 🇵🇰 Pakistan · 🇦🇫 Afghanistan | Unlockable | The Grand Trunk Road & Khyber Pass |
+| 🇲🇲 Myanmar · 🇲🇾 Malaysia · 🇨🇳 China | Unlockable | The eastern gateway & the giant to the north |
+
+## 🚀 Getting Started (development)
+
+Requires the [React Native environment](https://reactnative.dev/docs/environment-setup) (Node, JDK 17, Android SDK).
 
 ```bash
-# using npm
-npm start
-
-# OR using Yarn
-yarn start
+npm install          # install dependencies
+npm start            # start the Metro bundler
+npm run android      # build & run on an Android device/emulator
 ```
 
-## Step 2: Start your Application
-
-Let Metro Bundler run in its _own_ terminal. Open a _new_ terminal from the _root_ of your React Native project. Run the following command to start your _Android_ or _iOS_ app:
-
-### For Android
+To build a release APK:
 
 ```bash
-# using npm
-npm run android
-
-# OR using Yarn
-yarn android
+cd android && ./gradlew assembleRelease
+# output: android/app/build/outputs/apk/release/app-release.apk
 ```
 
-### For iOS
+## 🧱 Project Structure
 
-```bash
-# using npm
-npm run ios
-
-# OR using Yarn
-yarn ios
+```
+src/
+├── data/        cities, highways, trucks, staff, expansion (countries)
+├── engine/      routing (Dijkstra), economy, stations, geo, sound, haptics
+├── store/       gameStore.js — single Zustand source of truth (offline persistence)
+├── net/         updates.js — GitHub-release auto-updater
+└── ui/          screens, components, theme, map
 ```
 
-If everything is set up _correctly_, you should see your new app running in your _Android Emulator_ or _iOS Simulator_ shortly provided you have set up your emulator/simulator correctly.
-
-This is one way to run your app — you can also run it directly from within Android Studio and Xcode respectively.
-
-## Step 3: Modifying your App
-
-Now that you have successfully run the app, let's modify it.
-
-1. Open `App.tsx` in your text editor of choice and edit some lines.
-2. For **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Developer Menu** (<kbd>Ctrl</kbd> + <kbd>M</kbd> (on Window and Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (on macOS)) to see your changes!
-
-   For **iOS**: Hit <kbd>Cmd ⌘</kbd> + <kbd>R</kbd> in your iOS Simulator to reload the app and see your changes!
-
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [Introduction to React Native](https://reactnative.dev/docs/getting-started).
-
-# Versioning & Releases
+## 📦 Versioning & Releases
 
 > Read this before changing the app version — for humans and AI assistants alike.
 
 The version must stay in sync in **three** places:
 
-1. `src/net/updates.js` → `APP_VERSION` (e.g. `'v1.3.7'`) — what the app reports and compares against GitHub for the in-app "Check for Update".
-2. `android/app/build.gradle` → `versionName` (`"1.3.7"`) and `versionCode` (integer, e.g. `137`).
+1. `src/net/updates.js` → `APP_VERSION` (e.g. `'v1.4.0'`) — what the app reports and compares against GitHub for the in-app "Check for Update".
+2. `android/app/build.gradle` → `versionName` (`"1.4.0"`) and `versionCode` (integer, e.g. `140`).
 3. The GitHub Release tag `vX.Y.Z` — created **automatically** by `.github/workflows/release.yml`.
 
-**CI rule (source of truth = gradle `versionName`):** every merge to `main` reads `android/app/build.gradle`'s `versionName` and releases `v<versionName>` (e.g. `1.4.0` → `v1.4.0`). If that tag already exists, it falls back to patch-bumping the latest tag so tags never collide. So: **to ship a specific version, set `versionName` (+ `APP_VERSION`) to it before merging.**
+**CI rule (source of truth = gradle `versionName`):** every merge to `main` reads `android/app/build.gradle`'s `versionName` and releases `v<versionName>` (e.g. `1.4.0` → `v1.4.0`). If that tag already exists, it falls back to patch-bumping the latest tag so tags never collide. So **to ship a specific version, set `versionName` (+ `APP_VERSION`) to it before merging.**
 
-Keep `APP_VERSION` in `src/net/updates.js` equal to the gradle `versionName` so the running app doesn't flag itself as out of date. The About tab reads releases from `https://api.github.com/repos/VasoyaParth/TransportManagementTycoon/releases`.
+Keep `APP_VERSION` equal to the gradle `versionName` so the running app doesn't flag itself as out of date. The About tab reads releases from the [Releases API](https://api.github.com/repos/VasoyaParth/TransportManagementTycoon/releases).
 
-# Troubleshooting
+## 👥 Team
 
-If you can't get this to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
+| | Role |
+| --- | --- |
+| **Parth Vasoya** | Lead Developer & Designer |
+| **Jeel Gajera** | Developer |
 
-# Learn More
+## 🙏 Credits
 
-To learn more about React Native, take a look at the following resources:
+Built on wonderful open data & open source: **OpenStreetMap**, **Leaflet**, **Esri World Imagery**, **React Native**, **Material Community Icons**, and public National Highway references.
 
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+---
+
+<div align="center">
+Made with ♥ in India
+</div>
