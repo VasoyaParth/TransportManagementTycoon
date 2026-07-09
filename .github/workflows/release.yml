@@ -1,0 +1,89 @@
+name: Build & Release APK
+
+# Triggers ONLY when commits land on main (i.e. a PR/branch merged into main).
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write   # needed to create tags & releases
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # 1) Get the code + full history so we can read existing tags
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 2) Work out the next version by bumping the latest vX.Y.Z tag's patch
+      - name: Compute next version
+        id: ver
+        run: |
+          latest=$(git tag -l 'v*' --sort=-v:refname | head -n1)
+          if [ -z "$latest" ]; then
+            next="v1.0.0"
+          else
+            v=${latest#v}
+            IFS='.' read -r MA MI PA <<< "$v"
+            MA=${MA:-1}; MI=${MI:-0}; PA=${PA:-0}
+            next="v${MA}.${MI}.$((PA + 1))"
+          fi
+          echo "Latest tag: ${latest:-none} -> Next: $next"
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+
+      # 3) Toolchain: Node + Java 17 (Android SDK is preinstalled on ubuntu-latest)
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      # 4) Install JS dependencies (reproducible)
+      - name: Install dependencies
+        run: npm ci
+
+      # 5) Build the signed release APK (uses the committed debug keystore)
+      - name: Build release APK
+        working-directory: android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      # 6) Rename the APK to include the version
+      - name: Rename APK
+        id: apk
+        run: |
+          mkdir -p dist
+          src="android/app/build/outputs/apk/release/app-release.apk"
+          out="dist/TruckEmpireTycoon-${{ steps.ver.outputs.version }}.apk"
+          cp "$src" "$out"
+          echo "path=$out" >> "$GITHUB_OUTPUT"
+          ls -la dist
+
+      # 7) Create the GitHub Release (tag it) and attach the APK
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.version }}
+          name: Truck Empire Tycoon ${{ steps.ver.outputs.version }}
+          body: |
+            Automated release built from `main` (${{ github.sha }}).
+            Download **TruckEmpireTycoon-${{ steps.ver.outputs.version }}.apk** below and install on Android.
+          files: ${{ steps.apk.outputs.path }}
+          fail_on_unmatched_files: true
