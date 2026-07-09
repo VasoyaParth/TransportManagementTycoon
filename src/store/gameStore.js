@@ -112,6 +112,7 @@ const initialState = {
   company: null, // {name, ceo, logo, avatar, hqCityId, code, createdAt}
   balance: 0,
   gold: 0,
+  adGoldCount: 0, // how many rewarded gold ads watched (drives the payout tier)
   trucks: [], // {id, modelId, status, lat, lng, cityId, fuelPct, buildEndsAt, buildTotalSec, km, deliveries, driverId, brokenSince}
   deliveries: [], // active: {id, truckId, fromCityId, toCityId, cargoType, cargoTons, route:{points,cum,roadKm,usesFerry}, stops, startedAt, endsAt, econ, contractId}
   history: [], // completed deliveries (most recent first, capped)
@@ -765,6 +766,60 @@ export const useGame = create(
           `${def.name} unlocked! Welcome bonus: ${inr(def.bonusCash || 0)} + ${def.bonusGold || 0} Gold. New cities are open for delivery.`);
         play('coin', 0.9);
         return { ok: true, bonusCash: def.bonusCash || 0, bonusGold: def.bonusGold || 0 };
+      },
+
+      // ---------- rewarded ads ----------
+      // Gold reward for watching a rewarded ad. Payout tier scales with how many
+      // ads the player has watched: 0–4 → 10–20, 5–9 → 20–30, 10+ → 30–40.
+      // Call ONLY after the ad SDK confirms the reward was earned.
+      grantAdGold() {
+        const s = get();
+        const n = s.adGoldCount || 0;
+        let lo = 10, hi = 20;
+        if (n >= 10) { lo = 30; hi = 40; }
+        else if (n >= 5) { lo = 20; hi = 30; }
+        const amount = lo + Math.floor(Math.random() * (hi - lo + 1));
+        set({ gold: s.gold + amount, adGoldCount: n + 1 });
+        get().notify('system', 'gold', `+${amount} Gold — thanks for watching!`);
+        play('coin', 0.9);
+        return { ok: true, amount, nextTierAt: n + 1 < 5 ? 5 : n + 1 < 10 ? 10 : null };
+      },
+
+      // Speed up an active delivery by 25% of its remaining time (rewarded ad).
+      // Watch enough and it finishes instantly. Call after the ad is earned.
+      boostDeliveryWithAd(deliveryId) {
+        const s = get();
+        const d = s.deliveries.find(x => x.id === deliveryId);
+        if (!d) return { ok: false, err: 'Delivery not found' };
+        const now = Date.now();
+        const cut = (d.endsAt - d.startedAt) * 0.25;
+        const newEnds = d.endsAt - cut;
+        if (newEnds <= now + 1500) {
+          get().completeDelivery(deliveryId);
+          return { ok: true, completed: true };
+        }
+        set({ deliveries: s.deliveries.map(x => x.id === deliveryId ? { ...x, endsAt: newEnds, adBoosts: (x.adBoosts || 0) + 1 } : x) });
+        get().notify('delivery', 'fast-forward', `${cityById(d.toCityId)?.name || 'Delivery'} sped up 25% — the road clears ahead!`);
+        return { ok: true, completed: false };
+      },
+
+      // Instantly repair a broken truck by watching an ad (call after earned).
+      adRepairTruck(truckId) {
+        const s = get();
+        const t = s.trucks.find(x => x.id === truckId);
+        if (!t || t.status !== 'broken') return { ok: false, err: 'Truck is not broken' };
+        set({ trucks: s.trucks.map(x => x.id === truckId ? { ...x, status: 'parked' } : x) });
+        get().notify('truck', 'wrench-check', `${t.customName || modelById(t.modelId).name} repaired free — thanks for watching!`);
+        return { ok: true };
+      },
+      // Instantly finish a building truck by watching an ad (call after earned).
+      adSkipBuild(truckId) {
+        const s = get();
+        const t = s.trucks.find(x => x.id === truckId && x.status === 'building');
+        if (!t) return { ok: false, err: 'No truck under construction' };
+        set({ trucks: s.trucks.map(x => x.id === truckId ? { ...x, status: 'parked', buildEndsAt: null } : x) });
+        get().notify('truck', 'fast-forward', `${modelById(t.modelId).name} build finished instantly!`);
+        return { ok: true };
       },
 
       // ---------- gold exchange ----------

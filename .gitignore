@@ -72,3 +72,6 @@ yarn-error.log
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+# AdMob production ad-unit ids (never commit real ids)
+src/ads/adConfig.local.js
