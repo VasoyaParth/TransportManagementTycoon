@@ -12,6 +12,7 @@ import { C } from './theme';
 import { useGame, modelById } from '../store/gameStore';
 import { cityById } from '../engine/routing';
 import { statusMeta } from './components';
+import { truckSvgString, truckShapes, bodyTypeFor, defaultBodyColor } from './truckArt';
 
 const CITY_DATA = CITIES.map(c => ({ id: c.id, name: c.name, state: c.state, lat: c.lat, lng: c.lng, tier: c.tier, country: c.country || 'IN' }));
 const STATION_DATA = STATIONS.map(s => ({ lat: s.lat, lng: s.lng, type: s.type, price: s.price, name: s.name }));
@@ -47,9 +48,13 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
       }
       const meta = statusMeta[t.status] || statusMeta.parked;
       const model = modelById(t.modelId);
-      const color = t.color || (model.propulsion === 'electric' ? '#12A150'
-        : model.propulsion === 'hybrid' ? '#0E7C86' : '#3A5A8C');
+      const color = t.color || defaultBodyColor(model);
+      const accent = t.status === 'delivering' ? '#0E9F5B' : t.status === 'building' ? '#D97706'
+        : t.status === 'broken' ? '#DC3D43' : '#9DB2D6';
+      const bt = bodyTypeFor(model);
+      const dims = truckShapes(bt, color, accent);
       return { id: t.id, lat, lng, heading, status: t.status, statusLabel: meta.label, color,
+        art: truckSvgString(bt, color, accent), artW: dims.w, artH: dims.h,
         fuelPct: Math.round(t.fuelPct), name: t.customName || model.name };
     });
     const routes = deliveries.map(d => ({ id: d.id, points: d.route.points, stops: d.stops || [] }));

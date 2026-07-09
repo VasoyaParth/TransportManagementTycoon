@@ -14,6 +14,23 @@ import { inr, inrShort } from '../../engine/economy';
 import { APP_VERSION, checkForUpdate, fmtMB, cmpVer } from '../../net/updates';
 import { useDownloadState, startDownload, installDownloaded, cancelDownload } from '../../net/downloadManager';
 import { COUNTRIES, COUNTRY_BY_CODE } from '../../data/expansion';
+import { TruckTopShapes, truckShapes, bodyTypeFor, defaultBodyColor } from '../truckArt';
+
+// Same top-down truck artwork as the map, framed for list/detail cards.
+function TruckArtBadge({ model, color, size = 56, bg }) {
+  const bt = bodyTypeFor(model);
+  const body = color || defaultBodyColor(model);
+  const { w, h } = truckShapes(bt, body, '#9DB2D6');
+  const scale = (size - 8) / h;
+  return (
+    <View style={{ width: size, height: size, borderRadius: 14, backgroundColor: bg || C.bgSoft,
+      alignItems: 'center', justifyContent: 'center' }}>
+      <Svg width={w * scale} height={size - 8} viewBox={`0 0 ${w} ${h}`}>
+        <TruckTopShapes type={bt} body={body} accent="#9DB2D6" />
+      </Svg>
+    </View>
+  );
+}
 
 const propMeta = {
   diesel: { color: C.amber, bg: C.amberSoft, icon: 'gas-station', label: 'Diesel' },
@@ -48,6 +65,14 @@ function fmtDur(sec) {
   if (h > 0) return `${h}h ${m}m`;
   if (m > 0) return `${m}m ${s}s`;
   return `${s}s`;
+}
+
+// hh:mm:ss duration, e.g. 4200 -> "01:10:00".
+function fmtClock(sec) {
+  sec = Math.max(0, Math.round(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  const pad = n => String(n).padStart(2, '0');
+  return `${pad(h)}:${pad(m)}:${pad(s)}`;
 }
 
 // Pseudo-random live driving speed around the model's top speed, changing
@@ -509,7 +534,7 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
     <Sheet visible={visible} onClose={onClose} title={truck.customName || m.name} height="86%">
       <ScrollView showsVerticalScrollIndicator={false}>
         <Row style={{ marginBottom: 12 }}>
-          <View style={[cs.heroIcon, { backgroundColor: meta.bg }]}><Icon name={m.icon} size={34} color={meta.color} /></View>
+          <TruckArtBadge model={m} color={truck.color} size={60} bg={meta.bg} />
           <View style={{ marginLeft: 12, flex: 1 }}>
             <Text style={FONT.h2}>{truck.customName || m.name}</Text>
             <Text style={FONT.sub}>{m.brand}</Text>
@@ -553,7 +578,7 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
         )}
         {truck.status === 'building' && (
           <Card style={{ marginBottom: 12 }}>
-            <Row style={{ justifyContent: 'space-between' }}><Text style={FONT.h3}>Building...</Text><Text style={FONT.mono}>{Math.ceil(buildLeft)}s</Text></Row>
+            <Row style={{ justifyContent: 'space-between' }}><Text style={FONT.h3}>Building...</Text><Text style={FONT.mono}>{fmtClock(buildLeft)}</Text></Row>
             <Progress pct={buildPct} color={C.amber} style={{ marginTop: 8 }} />
           </Card>
         )}
@@ -583,8 +608,10 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
 
         <Card style={{ marginTop: 10 }}>
           <Text style={[FONT.h3, { marginBottom: 4 }]}>Lifetime</Text>
-          <SpecRow icon="map-marker-path" label="Distance driven" value={`${Math.round(truck.km).toLocaleString()} km`} />
-          <SpecRow icon="package-variant-closed-check" label="Deliveries" value={truck.deliveries} />
+          <SpecRow icon="map-marker-path" label="Distance driven"
+            value={`${Math.round(truck.km + kmCovered).toLocaleString()} km${d ? ` (+${kmCovered} in progress)` : ''}`} />
+          <SpecRow icon="package-variant-closed-check" label="Deliveries"
+            value={d ? `${truck.deliveries} (+1 in progress · ${Math.round(prog)}%)` : truck.deliveries} />
           <SpecRow icon="map-marker" label="Location" value={cityById(truck.cityId)?.name || '—'} />
         </Card>
 
@@ -675,7 +702,23 @@ export function BuyTruckModal({ visible, onClose }) {
   const balance = useGame(s => s.balance);
   const buyTruck = useGame(s => s.buyTruck);
   const [tier, setTier] = useState(0);
-  const list = TRUCK_MODELS.filter(m => tier === 0 || m.tier === tier);
+  const [sort, setSort] = useState('default');
+  const SORTS = [
+    ['default', 'Default'],
+    ['name-asc', 'Name A-Z'],
+    ['name-desc', 'Name Z-A'],
+    ['price-asc', 'Price Low-High'],
+    ['price-desc', 'Price High-Low'],
+  ];
+  const list = useMemo(() => {
+    const filtered = TRUCK_MODELS.filter(m => tier === 0 || m.tier === tier);
+    const sorted = [...filtered];
+    if (sort === 'name-asc') sorted.sort((a, b) => a.name.localeCompare(b.name));
+    else if (sort === 'name-desc') sorted.sort((a, b) => b.name.localeCompare(a.name));
+    else if (sort === 'price-asc') sorted.sort((a, b) => a.price - b.price);
+    else if (sort === 'price-desc') sorted.sort((a, b) => b.price - a.price);
+    return sorted;
+  }, [tier, sort]);
   const buy = (m) => {
     const r = buyTruck(m.id);
     if (r.ok) { toast(`${m.name} ordered — building at HQ`, 'success'); }
@@ -688,6 +731,14 @@ export function BuyTruckModal({ visible, onClose }) {
           <Chip key={t} label={l} active={tier === t} onPress={() => setTier(t)} />
         ))}
       </Row>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+        <Row style={{ gap: 6 }}>
+          <Row style={{ marginRight: 2 }}><Icon name="sort" size={14} color={C.sub} /></Row>
+          {SORTS.map(([k, l]) => (
+            <Chip key={k} label={l} active={sort === k} onPress={() => setSort(k)} />
+          ))}
+        </Row>
+      </ScrollView>
       <FlatList
         data={list} keyExtractor={m => m.id} showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 30 }}
@@ -697,7 +748,7 @@ export function BuyTruckModal({ visible, onClose }) {
           return (
             <Card style={{ marginBottom: 10 }}>
               <Row>
-                <View style={[cs.heroIcon, { backgroundColor: pm.bg, width: 52, height: 52 }]}><Icon name={m.icon} size={28} color={pm.color} /></View>
+                <TruckArtBadge model={m} size={52} bg={pm.bg} />
                 <View style={{ marginLeft: 12, flex: 1 }}>
                   <Text style={FONT.h3}>{m.name}</Text>
                   <Text style={FONT.tiny}>{m.brand}</Text>
@@ -1072,6 +1123,55 @@ function SpinGame({ toast }) {
   );
 }
 
+function DiceGame({ toast }) {
+  const playDice = useGame(s => s.playDice);
+  const games = useGame(s => s.games); // re-render on play
+  const gamesToday = useGame(s => s.gamesToday);
+  const left = gamesToday().diceLeft;
+  const [rolling, setRolling] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const doRoll = () => {
+    if (rolling) return;
+    const r = playDice();
+    if (!r.ok) { toast(r.err, 'warn'); return; }
+    setRolling(true); setResult(null);
+    setTimeout(() => { setRolling(false); setResult(r); }, 500);
+  };
+
+  return (
+    <View style={{ alignItems: 'center' }}>
+      <Text style={[FONT.sub, { textAlign: 'center', marginBottom: 4 }]}>Roll two dice — doubles pay big, any other roll pays the average.</Text>
+      <Text style={[FONT.tiny, { marginBottom: 14 }]}>{left} of {DAILY_PLAYS} free rolls left today</Text>
+      <Row style={{ gap: 16, marginBottom: 16 }}>
+        {[0, 1].map(i => {
+          const v = result ? (i === 0 ? result.d1 : result.d2) : null;
+          return (
+            <View key={i} style={{
+              width: 64, height: 64, borderRadius: 12, borderWidth: 2, borderColor: C.border,
+              alignItems: 'center', justifyContent: 'center', backgroundColor: C.bgSoft,
+            }}>
+              {rolling
+                ? <Icon name="dice-multiple" size={28} color={C.faint} />
+                : <Icon name={`dice-${v || 1}`} size={34} color={v ? C.text : C.faint} />}
+            </View>
+          );
+        })}
+      </Row>
+      <View style={{ minHeight: 30, alignItems: 'center' }}>
+        {result ? (
+          <Text style={[FONT.h3, { color: result.reward > 0 ? C.green : C.sub }]}>
+            {result.doubles ? 'Doubles! ' : ''}{result.reward > 0 ? `+${result.reward} Gold` : 'No Gold — try again!'}
+          </Text>
+        ) : null}
+      </View>
+      <Btn title={rolling ? 'Rolling…' : 'Roll the dice'} kind="green" icon="dice-multiple" style={{ marginTop: 12, alignSelf: 'stretch' }}
+        disabled={rolling || left <= 0} onPress={doRoll} />
+      {left <= 0 ? <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 6 }]}>Come back tomorrow for 10 more.</Text> : null}
+    </View>
+  );
+}
+
 export function MiniGamesModal({ visible, onClose }) {
   const toast = useToast();
   const gold = useGame(s => s.gold);
@@ -1088,9 +1188,10 @@ export function MiniGamesModal({ visible, onClose }) {
       <Row style={{ gap: 6, marginBottom: 14 }}>
         <Chip label="Scratch Card" icon="ticket-confirmation" active={tab === 'scratch'} onPress={() => setTab('scratch')} />
         <Chip label="Lucky Spin" icon="rotate-right" active={tab === 'spin'} onPress={() => setTab('spin')} />
+        <Chip label="Dice Roll" icon="dice-multiple" active={tab === 'dice'} onPress={() => setTab('dice')} />
       </Row>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
-        {tab === 'scratch' ? <ScratchGame toast={toast} /> : <SpinGame toast={toast} />}
+        {tab === 'scratch' ? <ScratchGame toast={toast} /> : tab === 'spin' ? <SpinGame toast={toast} /> : <DiceGame toast={toast} />}
       </ScrollView>
     </Sheet>
   );

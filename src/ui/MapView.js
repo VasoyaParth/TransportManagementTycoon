@@ -14,6 +14,7 @@ import { project, WORLD_W, WORLD_H, pointAlong } from '../engine/geo';
 import { C } from './theme';
 import { useGame, modelById } from '../store/gameStore';
 import { cityById } from '../engine/routing';
+import { TruckTopShapes, truckShapes, bodyTypeFor, defaultBodyColor } from './truckArt';
 
 // Darken/lighten a #rrggbb colour by pct (-1..1) for pseudo-3D shading.
 function shade(hex, pct) {
@@ -272,36 +273,24 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
               const q = project(s.lat, s.lng);
               return <Circle key={d.id + i} cx={q.x} cy={q.y} r={4 * inv} fill={C.amber} stroke="#fff" strokeWidth={1.2 * inv} />;
             }))}
-            {/* Trucks — chunky pseudo-3D models with ground shadow, per model */}
+            {/* Trucks — shared per-model top-down artwork (same as the showroom) */}
             {trucks.map(t => {
               const p = truckPos(t);
               const q = project(p.lat, p.lng);
               const model = modelById(t.modelId);
-              // Body colour keyed to propulsion; status tints the roof accent.
-              const body = t.color || (model.propulsion === 'electric' ? '#12A150'
-                : model.propulsion === 'hybrid' ? '#0E7C86' : '#3A5A8C');
-              const dark = shade(body, -0.28);
+              const body = t.color || defaultBodyColor(model);
               const accent = t.status === 'delivering' ? C.green : t.status === 'building' ? C.amber : t.status === 'broken' ? C.red : '#9DB2D6';
-              const sz = (model.cargo >= 22 ? 2.0 : model.cargo >= 16 ? 1.6 : 1.3) * inv;
+              const bt = bodyTypeFor(model);
+              // Marker footprint per silhouette; art canvas is 40 units wide.
+              const sz = (bt === 'semi' ? 2.1 : bt === 'rigid' ? 1.7 : bt === 'box' ? 1.45 : 1.2) * inv;
+              const { h: artH } = truckShapes(bt, body, accent);
+              const k = sz * 0.32; // art units -> map units
               return (
                 <G key={t.id}>
                   {/* soft ground shadow (kept flat, not rotated) */}
                   <Ellipse cx={q.x + 1.2 * sz} cy={q.y + 2 * sz} rx={5.6 * sz} ry={3.2 * sz} fill="rgba(11,15,20,0.20)" />
-                  <G transform={`translate(${q.x}, ${q.y}) rotate(${p.heading + 180}) scale(${sz})`}>
-                    {/* extruded base (depth) */}
-                    <Rect x={-4.6} y={-8.4} width={9.2} height={16.8} rx={2.4} fill={dark} transform="translate(0,1.4)" />
-                    {/* trailer top face */}
-                    <Rect x={-4.6} y={-9} width={9.2} height={12.6} rx={2.2} fill={body} stroke="#fff" strokeWidth={1} />
-                    {/* roof status accent */}
-                    <Rect x={-3.2} y={-7.4} width={6.4} height={3} rx={1} fill={accent} />
-                    {/* cab */}
-                    <Rect x={-3.8} y={3.4} width={7.6} height={5.6} rx={1.6} fill={body} stroke="#fff" strokeWidth={1} />
-                    <Rect x={-2.7} y={4.2} width={5.4} height={2.6} rx={0.9} fill="#DCE7FA" opacity={0.95} />
-                    {/* wheels */}
-                    <Rect x={-5.6} y={-4} width={1.7} height={4.2} rx={0.85} fill="#181B20" />
-                    <Rect x={3.9} y={-4} width={1.7} height={4.2} rx={0.85} fill="#181B20" />
-                    <Rect x={-5.6} y={2} width={1.7} height={3.4} rx={0.85} fill="#181B20" />
-                    <Rect x={3.9} y={2} width={1.7} height={3.4} rx={0.85} fill="#181B20" />
+                  <G transform={`translate(${q.x}, ${q.y}) rotate(${p.heading + 180}) scale(${k}) translate(-20, ${-artH / 2})`}>
+                    <TruckTopShapes type={bt} body={body} accent={accent} />
                   </G>
                 </G>
               );
