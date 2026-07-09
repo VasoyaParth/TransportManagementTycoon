@@ -78,8 +78,9 @@ export default function FleetSidebar({ visible, onClose, onTruckPress, onToast }
           <Text style={st.departTxt}>Depart All ({parkedCount})</Text>
         </Pressable>
 
-        {/* 3 tabs — Running / Parked / Pending */}
-        <View style={st.tabBar}>
+        {/* 3 tabs — Running / Parked / Pending (horizontal scroll, no overlap) */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}
+          style={{ flexGrow: 0 }} contentContainerStyle={st.tabBar}>
           {GROUPS.map(g => {
             const count = trucks.filter(g.match).length;
             const on = tab === g.key;
@@ -95,6 +96,33 @@ export default function FleetSidebar({ visible, onClose, onTruckPress, onToast }
             );
           })}
         </View>
+
+        <ScrollView contentContainerStyle={{ paddingBottom: 30, paddingTop: 12 }} showsVerticalScrollIndicator={false}>
+          {(() => {
+            const g = GROUPS.find(x => x.key === tab);
+            const items = trucks.filter(g.match);
+            if (items.length === 0) {
+              return <Text style={[FONT.tiny, { color: C.faint, paddingVertical: 20, textAlign: 'center' }]}>No {g.title.toLowerCase()} trucks.</Text>;
+            }
+            return items.map(t => {
+              const model = modelById(t.modelId);
+              const d = deliveries.find(x => x.truckId === t.id);
+              const to = d ? cityById(d.toCityId) : cityById(t.cityId);
+              return (
+                <Pressable key={t.id} style={st.row} onPress={() => { haptic('light'); onTruckPress(t); onClose(); }}>
+                  <View style={[st.rowIcon, { backgroundColor: g.color + '18' }]}>
+                    <Icon name={model.icon} size={18} color={g.color} />
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text style={[FONT.body, { fontWeight: '700' }]} numberOfLines={1}>{t.customName || model.name}</Text>
+                    <Text style={FONT.tiny} numberOfLines={1}>{statusLabel(t)}{to ? ` · ${to.name}` : ''}</Text>
+                  </View>
+                  <Icon name="chevron-right" size={18} color={C.faint} />
+                </Pressable>
+              );
+            });
+          })()}
+        </ScrollView>
 
         <ScrollView contentContainerStyle={{ paddingBottom: 30, paddingTop: 12 }} showsVerticalScrollIndicator={false}>
           {(() => {
@@ -143,10 +171,10 @@ const st = StyleSheet.create({
     backgroundColor: C.green, paddingVertical: 13, borderRadius: 26,
   },
   departTxt: { color: '#fff', fontWeight: '800', fontSize: 14 },
-  tabBar: { flexDirection: 'row', gap: 6, marginTop: 4 },
+  tabBar: { flexDirection: 'row', gap: 6, marginTop: 4, paddingRight: 4 },
   tab: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
-    paddingVertical: 9, borderRadius: 16, backgroundColor: C.bgSoft,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
+    paddingVertical: 9, paddingHorizontal: 14, borderRadius: 16, backgroundColor: C.bgSoft,
   },
   tabTxt: { fontSize: 11, fontWeight: '800' },
   grpHead: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
