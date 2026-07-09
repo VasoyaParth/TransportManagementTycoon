@@ -217,15 +217,42 @@ export function FleetTab({ onTruckPress, onBuyTruck }) {
 }
 
 // ============================== 2. ROUTES ==============================
+const ROUTE_SORTS = [
+  { key: 'eta', label: 'ETA' },
+  { key: 'distance', label: 'Distance' },
+  { key: 'profit', label: 'Profit' },
+];
+
 export function RoutesTab({ onTrack, onNewDelivery }) {
   const deliveries = useGame(s => s.deliveries);
   const history = useGame(s => s.history);
   const trucks = useGame(s => s.trucks);
   const now = useNow(deliveries.length > 0);
+  const [sort, setSort] = useState('eta');
+  const [histSort, setHistSort] = useState('recent');
+
+  const sortedDeliveries = useMemo(() => {
+    const arr = [...deliveries];
+    if (sort === 'eta') arr.sort((a, b) => a.endsAt - b.endsAt);
+    else if (sort === 'distance') arr.sort((a, b) => b.route.roadKm - a.route.roadKm);
+    else if (sort === 'profit') arr.sort((a, b) => b.econ.net - a.econ.net);
+    return arr;
+  }, [deliveries, sort]);
+
+  const sortedHistory = useMemo(() => {
+    const arr = [...history];
+    if (histSort === 'recent') arr.sort((a, b) => b.ts - a.ts);
+    else if (histSort === 'profit') arr.sort((a, b) => b.net - a.net);
+    else if (histSort === 'distance') arr.sort((a, b) => b.km - a.km);
+    return arr;
+  }, [history, histSort]);
 
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
       <SectionTitle icon="routes" text="Active Deliveries" />
+      {deliveries.length > 0 && (
+        <FilterChips options={ROUTE_SORTS.map(o => ({ key: o.key, label: `Sort: ${o.label}` }))} value={sort} onChange={setSort} />
+      )}
       {deliveries.length === 0 ? (
         <EmptyState
           icon="truck-outline"
@@ -233,7 +260,7 @@ export function RoutesTab({ onTrack, onNewDelivery }) {
           sub="Dispatch a parked truck to start earning."
           action={<Btn title="New Delivery" icon="plus" small onPress={() => onNewDelivery && onNewDelivery()} />}
         />
-      ) : deliveries.map(d => {
+      ) : sortedDeliveries.map(d => {
         const truck = trucks.find(t => t.id === d.truckId);
         const model = truck ? modelById(truck.modelId) : null;
         const from = cityById(d.fromCityId);
@@ -269,9 +296,19 @@ export function RoutesTab({ onTrack, onNewDelivery }) {
       })}
 
       <SectionTitle icon="history" text="Recent Deliveries" />
+      {history.length > 0 && (
+        <FilterChips
+          options={[
+            { key: 'recent', label: 'Sort: Recent' },
+            { key: 'profit', label: 'Sort: Profit' },
+            { key: 'distance', label: 'Sort: Distance' },
+          ]}
+          value={histSort} onChange={setHistSort}
+        />
+      )}
       {history.length === 0 ? (
         <Text style={[FONT.sub, { textAlign: 'center', paddingVertical: 16 }]}>Completed deliveries will appear here.</Text>
-      ) : history.map(h => {
+      ) : sortedHistory.map(h => {
         const from = cityById(h.fromCityId);
         const to = cityById(h.toCityId);
         return (
@@ -436,6 +473,9 @@ export function StaffTab({ onOpenDriver }) {
   const [page, setPage] = useState(1);
   useEffect(() => { setPage(1); }, [role]);
 
+  const [hireRole, setHireRole] = useState('all');
+  const [hireSort, setHireSort] = useState('skill');
+
   const counts = useMemo(() => ({
     driver: staff.filter(x => x.role === 'driver').length,
     mechanic: staff.filter(x => x.role === 'mechanic').length,
@@ -451,6 +491,26 @@ export function StaffTab({ onOpenDriver }) {
     { key: 'mechanic', label: 'Mechanics', count: counts.mechanic },
     { key: 'manager', label: 'Managers', count: counts.manager },
   ];
+
+  const candCounts = useMemo(() => ({
+    driver: candidates.filter(x => x.role === 'driver').length,
+    mechanic: candidates.filter(x => x.role === 'mechanic').length,
+    manager: candidates.filter(x => x.role === 'manager').length,
+  }), [candidates]);
+  const hireRoleOpts = [
+    { key: 'all', label: 'All', count: candidates.length },
+    { key: 'driver', label: 'Drivers', count: candCounts.driver },
+    { key: 'mechanic', label: 'Mechanics', count: candCounts.mechanic },
+    { key: 'manager', label: 'Managers', count: candCounts.manager },
+  ];
+  const filteredCandidates = useMemo(() => {
+    const arr = hireRole === 'all' ? [...candidates] : candidates.filter(x => x.role === hireRole);
+    if (hireSort === 'skill') arr.sort((a, b) => b.skill - a.skill);
+    else if (hireSort === 'salary-asc') arr.sort((a, b) => a.salary - b.salary);
+    else if (hireSort === 'salary-desc') arr.sort((a, b) => b.salary - a.salary);
+    else if (hireSort === 'bonus') arr.sort((a, b) => a.bonus - b.bonus);
+    return arr;
+  }, [candidates, hireRole, hireSort]);
 
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
@@ -487,7 +547,19 @@ export function StaffTab({ onOpenDriver }) {
         text="Hire Staff"
         right={<IconBtn name="refresh" onPress={() => { refreshCandidates(); toast && toast('New candidates available', 'info'); }} />}
       />
-      {candidates.map(c => {
+      <FilterChips options={hireRoleOpts} value={hireRole} onChange={setHireRole} />
+      <FilterChips
+        options={[
+          { key: 'skill', label: 'Sort: Skill' },
+          { key: 'salary-asc', label: 'Sort: Salary Low-High' },
+          { key: 'salary-desc', label: 'Sort: Salary High-Low' },
+          { key: 'bonus', label: 'Sort: Signing Bonus' },
+        ]}
+        value={hireSort} onChange={setHireSort}
+      />
+      {candidates.length > 0 && filteredCandidates.length === 0 ? (
+        <EmptyState icon="account-search-outline" title="None in this role" sub="Switch the filter to see other candidates." />
+      ) : filteredCandidates.map(c => {
         const role = STAFF_ROLES.find(r => r.id === c.role);
         const level = STAFF_LEVELS.find(l => l.id === c.level);
         const cannot = balance < c.bonus;
@@ -527,13 +599,22 @@ export function EconomyTab() {
   const stats = useGame(s => s.stats);
   const staff = useGame(s => s.staff);
   const trucks = useGame(s => s.trucks);
+  const deliveries = useGame(s => s.deliveries);
   const history = useGame(s => s.history);
   const pricing = useGame(s => s.pricing);
   const savePricing = useGame(s => s.savePricing);
 
+  const now = useNow(deliveries.length > 0);
   const salaryBurden = useMemo(() => staff.reduce((a, x) => a + x.salary, 0), [staff]);
   const bars = useMemo(() => history.slice(0, 8).reverse(), [history]);
   const maxAbs = useMemo(() => Math.max(1, ...bars.map(b => Math.abs(b.net))), [bars]);
+  // Live km covered by in-progress deliveries, so the lifetime distance/delivery
+  // count reflects trucks currently en route instead of jumping only on completion.
+  const liveKm = useMemo(() => deliveries.reduce((a, d) => {
+    const prog = Math.max(0, Math.min(1, (now - d.startedAt) / (d.endsAt - d.startedAt)));
+    return a + d.route.roadKm * prog;
+  }, 0), [deliveries, now]);
+  const inProgress = deliveries.length;
 
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
@@ -548,9 +629,10 @@ export function EconomyTab() {
         <Stat icon="gas-station" label="Fuel Spend" value={inrShort(stats.fuelSpend)} color={C.red} />
       </Row>
       <Row style={{ marginBottom: 8 }}>
-        <Stat icon="package-variant-closed-check" label="Deliveries" value={String(stats.deliveries)} />
+        <Stat icon="package-variant-closed-check" label="Deliveries"
+          value={inProgress ? `${stats.deliveries} (+${inProgress})` : String(stats.deliveries)} />
         <View style={{ width: 8 }} />
-        <Stat icon="map-marker-distance" label="Distance" value={`${Math.round(stats.km).toLocaleString('en-IN')} km`} />
+        <Stat icon="map-marker-distance" label="Distance" value={`${Math.round(stats.km + liveKm).toLocaleString('en-IN')} km`} />
       </Row>
       <Row style={{ marginBottom: 14 }}>
         <Stat icon="cash-clock" label="Salary Burden / mo" value={inrShort(salaryBurden)} color={C.amber} />

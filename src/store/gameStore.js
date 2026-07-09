@@ -137,7 +137,7 @@ const initialState = {
   company: null, // {name, ceo, logo, avatar, hqCityId, code, createdAt}
   balance: 0,
   gold: 0,
-  games: { day: 0, scratchUsed: 0, spinUsed: 0 }, // daily free gold mini-games
+  games: { day: 0, scratchUsed: 0, spinUsed: 0, diceUsed: 0 }, // daily free gold mini-games
   trucks: [], // {id, modelId, status, lat, lng, cityId, fuelPct, buildEndsAt, buildTotalSec, km, deliveries, driverId, brokenSince}
   deliveries: [], // active: {id, truckId, fromCityId, toCityId, cargoType, cargoTons, route:{points,cum,roadKm,usesFerry}, stops, startedAt, endsAt, econ, contractId}
   history: [], // completed deliveries (most recent first, capped)
@@ -852,13 +852,19 @@ export const useGame = create(
       gamesToday() {
         const s = get();
         const day = get().gameDay().day;
-        const g = s.games && s.games.day === day ? s.games : { day, scratchUsed: 0, spinUsed: 0 };
-        return { day, scratchLeft: Math.max(0, DAILY_PLAYS - g.scratchUsed), spinLeft: Math.max(0, DAILY_PLAYS - g.spinUsed), scratchUsed: g.scratchUsed, spinUsed: g.spinUsed };
+        const g = s.games && s.games.day === day ? s.games : { day, scratchUsed: 0, spinUsed: 0, diceUsed: 0 };
+        return {
+          day,
+          scratchLeft: Math.max(0, DAILY_PLAYS - g.scratchUsed),
+          spinLeft: Math.max(0, DAILY_PLAYS - g.spinUsed),
+          diceLeft: Math.max(0, DAILY_PLAYS - (g.diceUsed || 0)),
+          scratchUsed: g.scratchUsed, spinUsed: g.spinUsed, diceUsed: g.diceUsed || 0,
+        };
       },
       _bumpGame(kind) {
         const day = get().gameDay().day;
         const s = get();
-        const g = s.games && s.games.day === day ? { ...s.games } : { day, scratchUsed: 0, spinUsed: 0 };
+        const g = s.games && s.games.day === day ? { ...s.games } : { day, scratchUsed: 0, spinUsed: 0, diceUsed: 0 };
         g[kind] = (g[kind] || 0) + 1;
         set({ games: g });
       },
@@ -895,6 +901,19 @@ export const useGame = create(
         }
         get().notify('system', 'diamond-stone', `Lucky spin: ${seg.label}!`);
         return { ok: true, index, prize: seg.type, label: seg.label, left: t.spinLeft - 1 };
+      },
+
+      // Dice roll: roll two dice, doubles pay out big, otherwise sum → small Gold.
+      playDice() {
+        const t = get().gamesToday();
+        if (t.diceLeft <= 0) return { ok: false, err: 'No dice rolls left today — come back tomorrow!' };
+        const d1 = 1 + Math.floor(Math.random() * 6), d2 = 1 + Math.floor(Math.random() * 6);
+        const doubles = d1 === d2;
+        const reward = clampGold(doubles ? d1 * 3 : Math.floor((d1 + d2) / 2));
+        get()._bumpGame('diceUsed');
+        if (reward > 0) { set({ gold: get().gold + reward }); play('coin', 0.8); }
+        get().notify('system', 'dice-multiple', `Dice roll: ${d1} & ${d2} → +${reward} Gold.`);
+        return { ok: true, d1, d2, doubles, reward, left: t.diceLeft - 1 };
       },
 
       // ---------- gold exchange ----------
