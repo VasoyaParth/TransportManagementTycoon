@@ -641,6 +641,18 @@ export const useGame = create(
         return { ok: true };
       },
 
+      // Sell a purchased garage back for half its price. HQ can't be sold.
+      sellHub(cityId) {
+        const s = get();
+        const hub = s.hubs.find(h => h.cityId === cityId);
+        if (!hub) return { ok: false, err: 'No garage here' };
+        if (hub.hq) return { ok: false, err: 'Your HQ can’t be sold' };
+        const refund = Math.round((hub.cost || 0) * 0.5);
+        set({ balance: s.balance + refund, hubs: s.hubs.filter(h => h.cityId !== cityId) });
+        get().notify('system', 'garage', `Garage in ${hub.name.replace(' Garage', '')} sold for ${inr(refund)}.`);
+        return { ok: true, refund };
+      },
+
       // Free refuel for a truck parked at any of your garages/HQ.
       refuelAtHub(truckId) {
         const s = get();

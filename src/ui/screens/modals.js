@@ -282,7 +282,7 @@ function Chip({ label, active, onPress, icon, color = C.blue }) {
   return (
     <Pressable onPress={onPress} style={[cs.chip, active && { backgroundColor: color, borderColor: color }]}>
       {icon ? <Icon name={icon} size={13} color={active ? '#fff' : C.sub} style={{ marginRight: 4 }} /> : null}
-      <Text style={{ fontSize: 12.5, fontWeight: '700', color: active ? '#fff' : C.sub }}>{label}</Text>
+      <Text style={{ fontSize: 12.5, fontWeight: '700', color: active ? '#fff' : C.sub }} numberOfLines={1}>{label}</Text>
     </Pressable>
   );
 }
@@ -1931,7 +1931,9 @@ export function HubsModal({ visible, onClose, onShowOnMap }) {
     if (!q) return base.filter(c => c.tier <= 2).slice(0, 15);
     return base.filter(c => c.name.toLowerCase().includes(q) || c.state.toLowerCase().includes(q)).slice(0, 15);
   }, [query, hubs.length]);
+  const sellHub = useGame(s => s.sellHub);
   const buy = (c) => { const r = buyHub(c.id); toast(r.ok ? `Garage opened in ${c.name}!` : r.err, r.ok ? 'success' : 'error'); };
+  const sell = (h) => { const r = sellHub(h.cityId); toast(r.ok ? `Garage sold for ${inrShort(r.refund)}` : r.err, r.ok ? 'success' : 'error'); };
 
   return (
     <Sheet visible={visible} onClose={onClose} title="Garages & Network" height="88%">
@@ -1985,6 +1987,9 @@ export function HubsModal({ visible, onClose, onShowOnMap }) {
                 {elsewhere.length > 0 && (
                   <Btn title="Send truck here" kind="blue" small icon="transfer"
                     onPress={() => setTravelFor(travelFor === h.cityId ? null : h.cityId)} />
+                )}
+                {!h.hq && (
+                  <Btn title={`Sell · ${inrShort(Math.round((h.cost || 0) * 0.5))}`} kind="danger" small icon="cash-minus" onPress={() => sell(h)} />
                 )}
               </Row>
               {travelFor === h.cityId && (
@@ -2130,7 +2135,7 @@ export function CountriesModal({ visible, onClose }) {
 const cs = StyleSheet.create({
   section: { ...FONT.tiny, marginTop: 14, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: '700' },
   input: { borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, color: C.text, backgroundColor: '#fff' },
-  chip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1, borderColor: C.border, backgroundColor: '#fff' },
+  chip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1, borderColor: C.border, backgroundColor: '#fff', flexShrink: 1 },
   truckCard: { width: 120, padding: 10, borderRadius: RADIUS.md, borderWidth: 1, borderColor: C.border, marginRight: 8, backgroundColor: '#fff' },
   heroIcon: { width: 64, height: 64, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   resRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border },
