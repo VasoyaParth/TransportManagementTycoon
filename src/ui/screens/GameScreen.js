@@ -16,6 +16,7 @@ import {
 import { haptic } from '../../engine/haptics';
 import Tutorial from './Tutorial';
 import FleetSidebar from './FleetSidebar';
+import { CloudModal } from './CloudModal';
 
 const TABS = [
   { id: 'fleet', icon: 'truck', label: 'Fleet' },
@@ -229,6 +230,7 @@ export default function GameScreen() {
       <PowerupsModal visible={modal?.kind === 'powerups'} onClose={() => setModal(null)} />
       <NotificationsModal visible={modal?.kind === 'notifications'} onClose={() => setModal(null)} />
       <HubsModal visible={modal?.kind === 'hubs'} onClose={() => setModal(null)} onShowOnMap={(f) => { setModal(null); setFocus(f); }} />
+      <CloudModal visible={modal?.kind === 'cloud'} onClose={() => setModal(null)} />
       <SettingsModal visible={modal?.kind === 'settings'} onClose={() => setModal(null)} initialTab={modal?.tab} />
 
       {/* Left fleet-management drawer */}
