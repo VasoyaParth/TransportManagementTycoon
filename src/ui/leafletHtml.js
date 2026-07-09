@@ -112,17 +112,17 @@ function boot(){
   function setTruck(t){
     var accent = t.status==='delivering'?'#0E9F5B':t.status==='building'?'#D97706':t.status==='broken'?'#DC3D43':'#9DB2D6';
     var color = t.color || '#3A5A8C';
-    var html, w=40, h=48;
+    var html, w=40, h=48, anchorY=24;
     if(t.art){
       // Detailed per-model artwork pre-rendered on the RN side (truckArt.js).
-      w=t.artW||40; h=t.artH||48;
+      w=t.artW||40; h=t.artH||48; anchorY=(t.bodyH||h)/2;
       html='<div style="transform:perspective(170px) rotateX(30deg)">'
-        +'<div class="truck3d" style="transform:rotate('+((t.heading||0)+180)+'deg);width:'+w+'px;height:'+h+'px">'
+        +'<div class="truck3d" style="transform:rotate('+((t.heading||0)+180)+'deg);width:'+w+'px;height:'+h+'px;transform-origin:'+(w/2)+'px '+anchorY+'px">'
         +t.art+'</div></div>';
     } else {
       html=truck3d(color,accent,t.heading);
     }
-    var icon=L.divIcon({className:'',html:html,iconSize:[w,h],iconAnchor:[w/2,h/2]});
+    var icon=L.divIcon({className:'',html:html,iconSize:[w,h],iconAnchor:[w/2,anchorY]});
     if(truckMarkers[t.id]){ truckMarkers[t.id].setIcon(icon); truckMarkers[t.id].setLatLng([t.lat,t.lng]); }
     else{
       var m=L.marker([t.lat,t.lng],{icon:icon,zIndexOffset:500}).addTo(map)

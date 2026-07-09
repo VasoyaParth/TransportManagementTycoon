@@ -12,7 +12,7 @@ import { C } from './theme';
 import { useGame, modelById } from '../store/gameStore';
 import { cityById } from '../engine/routing';
 import { statusMeta } from './components';
-import { truckSvgString, truckShapes, bodyTypeFor, defaultBodyColor } from './truckArt';
+import { truckSvgString, truckShapes, bodyTypeFor, defaultBodyColor, headlightFor, isNightHour } from './truckArt';
 
 const CITY_DATA = CITIES.map(c => ({ id: c.id, name: c.name, state: c.state, lat: c.lat, lng: c.lng, tier: c.tier, country: c.country || 'IN' }));
 const STATION_DATA = STATIONS.map(s => ({ lat: s.lat, lng: s.lng, type: s.type, price: s.price, name: s.name }));
@@ -52,9 +52,12 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
       const accent = t.status === 'delivering' ? '#0E9F5B' : t.status === 'building' ? '#D97706'
         : t.status === 'broken' ? '#DC3D43' : '#9DB2D6';
       const bt = bodyTypeFor(model);
-      const dims = truckShapes(bt, color, accent);
+      // Headlights on for trucks driving at night (in-game clock).
+      const night = isNightHour(useGame.getState().gameDay().hour);
+      const lights = night && t.status === 'delivering' ? headlightFor(model) : null;
+      const dims = truckShapes(bt, color, accent, { lights });
       return { id: t.id, lat, lng, heading, status: t.status, statusLabel: meta.label, color,
-        art: truckSvgString(bt, color, accent), artW: dims.w, artH: dims.h,
+        art: truckSvgString(bt, color, accent, { lights }), artW: dims.w, artH: dims.h, bodyH: dims.bodyH,
         fuelPct: Math.round(t.fuelPct), name: t.customName || model.name };
     });
     const routes = deliveries.map(d => ({ id: d.id, points: d.route.points, stops: d.stops || [] }));

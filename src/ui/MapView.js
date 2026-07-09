@@ -14,7 +14,7 @@ import { project, WORLD_W, WORLD_H, pointAlong } from '../engine/geo';
 import { C } from './theme';
 import { useGame, modelById } from '../store/gameStore';
 import { cityById } from '../engine/routing';
-import { TruckTopShapes, truckShapes, bodyTypeFor, defaultBodyColor } from './truckArt';
+import { TruckTopShapes, truckShapes, bodyTypeFor, defaultBodyColor, headlightFor, isNightHour } from './truckArt';
 
 // Darken/lighten a #rrggbb colour by pct (-1..1) for pseudo-3D shading.
 function shade(hex, pct) {
@@ -281,16 +281,19 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
               const body = t.color || defaultBodyColor(model);
               const accent = t.status === 'delivering' ? C.green : t.status === 'building' ? C.amber : t.status === 'broken' ? C.red : '#9DB2D6';
               const bt = bodyTypeFor(model);
+              // Headlights on for trucks driving at night (in-game clock).
+              const night = isNightHour(useGame.getState().gameDay().hour);
+              const lights = night && t.status === 'delivering' ? headlightFor(model) : null;
               // Marker footprint per silhouette; art canvas is 40 units wide.
               const sz = (bt === 'semi' ? 2.1 : bt === 'rigid' ? 1.7 : bt === 'box' ? 1.45 : 1.2) * inv;
-              const { h: artH } = truckShapes(bt, body, accent);
+              const { bodyH } = truckShapes(bt, body, accent, { lights });
               const k = sz * 0.32; // art units -> map units
               return (
                 <G key={t.id}>
                   {/* soft ground shadow (kept flat, not rotated) */}
                   <Ellipse cx={q.x + 1.2 * sz} cy={q.y + 2 * sz} rx={5.6 * sz} ry={3.2 * sz} fill="rgba(11,15,20,0.20)" />
-                  <G transform={`translate(${q.x}, ${q.y}) rotate(${p.heading + 180}) scale(${k}) translate(-20, ${-artH / 2})`}>
-                    <TruckTopShapes type={bt} body={body} accent={accent} />
+                  <G transform={`translate(${q.x}, ${q.y}) rotate(${p.heading + 180}) scale(${k}) translate(-20, ${-bodyH / 2})`}>
+                    <TruckTopShapes type={bt} body={body} accent={accent} lights={lights} />
                   </G>
                 </G>
               );
