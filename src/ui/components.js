@@ -2,7 +2,7 @@
 // toasts, modals, skeletons. Pure RN Animated (no extra native deps).
 import React, { useEffect, useRef, useState, createContext, useContext } from 'react';
 import {
-  View, Text, Pressable, Animated, Easing, StyleSheet, Modal as RNModal, ScrollView, SafeAreaView, StatusBar, Platform,
+  View, Text, Pressable, Animated, Easing, StyleSheet, Modal as RNModal, ScrollView, StatusBar, Platform,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { C, FONT, SHADOW, RADIUS } from './theme';
@@ -185,15 +185,11 @@ export function ToastProvider({ children }) {
   return (
     <ToastCtx.Provider value={push}>
       {children}
-      {/* Toasts live in their own top-level Modal so they always float ABOVE any
-          open Sheet (a native Modal), and drop in just below the header. */}
-      <RNModal visible={toasts.length > 0} transparent animationType="none" onRequestClose={() => {}}>
-        <SafeAreaView pointerEvents="box-none" style={{ flex: 1 }}>
-          <View pointerEvents="box-none" style={st.toastWrap}>
-            {toasts.map(t => <ToastItem key={t.id} {...t} />)}
-          </View>
-        </SafeAreaView>
-      </RNModal>
+      {/* Non-blocking top overlay: pointerEvents="none" so the WHOLE screen stays
+          touchable while a toast is visible (never traps taps behind it). */}
+      <View pointerEvents="none" style={st.toastWrap}>
+        {toasts.map(t => <ToastItem key={t.id} {...t} />)}
+      </View>
     </ToastCtx.Provider>
   );
 }

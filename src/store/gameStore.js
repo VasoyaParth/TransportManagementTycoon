@@ -14,6 +14,7 @@ import { computeRoute, planFuelStops, cityById } from '../engine/routing';
 import { deliveryEconomics, tripDurationSec, inr, REAL_SEC_PER_GAME_HOUR } from '../engine/economy';
 import { play, setSoundEnabled } from '../engine/sound';
 import { setHapticsEnabled } from '../engine/haptics';
+import { initNotifications, pushNow, scheduleAt, setNotificationsEnabled } from '../engine/notify';
 
 export const GAME_HOUR_MS = 3600000; // 1 in-game hour = 1 real minute -> 1 day = 24 min
 const SALARY_EVERY_DAYS = 30;
@@ -202,6 +203,9 @@ export const useGame = create(
           notifications: [makeNotification('system', 'rocket-launch',
             `${name} is live! Your first ${model.name} is being built at ${hq.name}.`)],
         });
+        initNotifications();
+        scheduleAt(truck.buildEndsAt, `${truck.id}-built`, 'Your first truck is ready!',
+          `${model.name} just rolled off the line at ${hq.name}. Time to haul!`);
       },
 
       resetGame() {
@@ -212,6 +216,9 @@ export const useGame = create(
       settleOffline() {
         const s = get();
         if (s.phase !== 'game') return;
+        // Ask for OS-notification permission + set up the channel (idempotent).
+        setNotificationsEnabled(s.settings?.notif?.delivery !== false || s.settings?.notif?.truck !== false);
+        initNotifications();
         const now = Date.now();
         let changed = false;
         // finished builds
@@ -319,6 +326,7 @@ export const useGame = create(
           set({ balance: s.balance - loss });
           if (c) pushMapEvent('theft', 'shield-alert', '#C0392B', c.lat, c.lng, 'Cargo theft');
           get().notify('system', 'shield-alert', `Cargo theft! Bandits stole goods worth ${inr(loss)} near ${c ? c.name : 'a depot'}.`);
+          pushNow('Uh oh — cargo theft!', `Bandits made off with ${inr(loss)} of goods near ${c ? c.name : 'a depot'}.`);
         });
         // Accident — a random on-road truck breaks down.
         const onRoad = s.trucks.filter(t => t.status === 'delivering' || t.status === 'parked');
@@ -331,6 +339,7 @@ export const useGame = create(
           });
           pushMapEvent('accident', 'car-brake-alert', '#E67E22', t.lat, t.lng, 'Breakdown');
           get().notify('truck', 'car-brake-alert', `Accident! ${modelById(t.modelId).name} broke down and needs repair.`);
+          pushNow('Breakdown on the road!', `${modelById(t.modelId).name} conked out and needs a mechanic. Send help!`);
         });
         // Fuel price spike — informational.
         pool.push(() => get().notify('system', 'gas-station', 'Fuel prices spiked nationwide — watch your margins today.'));
@@ -341,6 +350,7 @@ export const useGame = create(
           set({ balance: get().balance + bonus });
           if (c) pushMapEvent('windfall', 'gift', '#12A150', c.lat, c.lng, 'Client bonus');
           get().notify('system', 'gift', `Loyal client bonus! You received ${inr(bonus)}${c ? ` in ${c.name}` : ''}.`);
+          pushNow('Surprise bonus!', `A loyal client just tipped you ${inr(bonus)}${c ? ` in ${c.name}` : ''}. Cha-ching!`);
         });
         pool[Math.floor(Math.random() * pool.length)]();
       },
@@ -359,6 +369,8 @@ export const useGame = create(
         };
         set({ balance: s.balance - model.price, trucks: [...s.trucks, truck] });
         get().notify('truck', 'factory', `${model.name} ordered — building at HQ (${model.build}s).`);
+        scheduleAt(truck.buildEndsAt, `${truck.id}-built`, 'Truck ready to roll!',
+          `${model.name} just rolled off the line, fuelled up and raring to go.`);
         return { ok: true };
       },
 
@@ -577,8 +589,19 @@ export const useGame = create(
             : s.contracts,
         });
         const to = cityById(toCityId);
+        const truckName = t.customName || modelById(t.modelId).name;
         play('start', 0.7);
         get().notify('delivery', 'truck-fast', `Delivery started to ${to.name} — ${p.route.roadKm} km by road.`);
+        // Real OS notifications, scheduled at each fuel stop's ETA and at the
+        // final drop-off, so the player hears about it even with the app closed.
+        const span = d.endsAt - d.startedAt;
+        (p.stops || []).forEach((stop, i) => {
+          const ts = d.startedAt + span * (Math.min(1, (stop.atKm || 0) / Math.max(1, p.route.roadKm)));
+          scheduleAt(ts, `${d.id}-fuel-${i}`, 'Pit stop!',
+            `${truckName} is refuelling${stop.station ? ` at ${stop.station.name}` : ' en route'}. Chai time for the driver.`);
+        });
+        scheduleAt(d.endsAt, `${d.id}-done`, 'Delivery complete!',
+          `Cha-ching! ${truckName} reached ${to.name}. Payment is in your account.`);
         return { ok: true, delivery: d };
       },
 
@@ -798,6 +821,10 @@ export const useGame = create(
         set({ settings: { ...get().settings, ...patch } });
         if ('sound' in patch) setSoundEnabled(patch.sound !== false);
         if ('haptics' in patch) setHapticsEnabled(patch.haptics !== false);
+        if ('notif' in patch) {
+          const n = get().settings.notif || {};
+          setNotificationsEnabled(n.delivery !== false || n.truck !== false);
+        }
       },
       savePricing(patch) { set({ pricing: { ...get().pricing, ...patch } }); },
       saveCompany(patch) { set({ company: { ...get().company, ...patch } }); },
