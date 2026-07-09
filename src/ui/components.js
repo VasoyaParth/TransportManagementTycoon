@@ -33,7 +33,7 @@ export function Money({ value, short = false, style, prefixIcon, size }) {
     }
     prev.current = value;
     return () => anim.removeListener(id);
-  }, [value]);
+  }, [value, anim, flash, floatA]);
 
   const color = flash.interpolate({ inputRange: [0, 1], outputRange: [C.text, C.green] });
   return (
@@ -56,7 +56,7 @@ export function Progress({ pct, color = C.blue, height = 6, style }) {
   const anim = useRef(new Animated.Value(pct)).current;
   useEffect(() => {
     Animated.timing(anim, { toValue: pct, duration: 400, easing: Easing.out(Easing.quad), useNativeDriver: false }).start();
-  }, [pct]);
+  }, [pct, anim]);
   return (
     <View style={[{ height, borderRadius: height / 2, backgroundColor: C.bgSoft, overflow: 'hidden' }, style]}>
       <Animated.View style={{
@@ -147,7 +147,7 @@ export function Skeleton({ w = '100%', h = 14, r = 6, style }) {
       Animated.timing(anim, { toValue: 1, duration: 700, useNativeDriver: true }),
       Animated.timing(anim, { toValue: 0.4, duration: 700, useNativeDriver: true }),
     ])).start();
-  }, []);
+  }, [anim]);
   return <Animated.View style={[{ width: w, height: h, borderRadius: r, backgroundColor: C.border, opacity: anim }, style]} />;
 }
 
@@ -156,7 +156,7 @@ export function Sheet({ visible, onClose, title, children, height = '82%' }) {
   const slide = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.timing(slide, { toValue: visible ? 1 : 0, duration: 260, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
-  }, [visible]);
+  }, [visible, slide]);
   return (
     <RNModal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={st.dim} onPress={onClose} />
@@ -203,7 +203,7 @@ function ToastItem({ msg, kind }) {
   useEffect(() => {
     Animated.spring(anim, { toValue: 1, useNativeDriver: true, speed: 20, bounciness: 8 }).start();
     haptic(kind === 'error' ? 'error' : kind === 'warn' ? 'warn' : kind === 'success' ? 'success' : 'light');
-  }, []);
+  }, [anim, kind]);
   const meta = {
     info: { icon: 'information', color: C.blue },
     success: { icon: 'check-circle', color: C.green },

@@ -808,7 +808,7 @@ export function PowerupsModal({ visible, onClose }) {
   const convertGoldToCash = useGame(s => s.convertGoldToCash);
   const [expand, setExpand] = useState(null);
   const [xGold, setXGold] = useState(5);
-  useEffect(() => { if (visible) setXGold(g => Math.min(Math.max(1, g), Math.max(1, gold))); }, [visible]);
+  useEffect(() => { if (visible) setXGold(g => Math.min(Math.max(1, g), Math.max(1, gold))); }, [visible, gold]);
   const xClamp = Math.min(Math.max(1, xGold), Math.max(1, gold));
   const exchange = () => {
     const r = convertGoldToCash(xClamp);
