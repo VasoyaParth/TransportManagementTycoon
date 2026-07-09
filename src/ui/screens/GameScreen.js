@@ -11,7 +11,7 @@ import { cityById } from '../../engine/routing';
 import { FleetTab, RoutesTab, StaffTab, EconomyTab, MarketingTab, CollabTab } from './tabs';
 import {
   NewDeliveryModal, TruckDetailModal, BuyTruckModal, ContractsModal,
-  PowerupsModal, NotificationsModal, SettingsModal, HubsModal, DriverDetailModal,
+  PowerupsModal, NotificationsModal, SettingsModal, HubsModal, DriverDetailModal, CountriesModal,
 } from './modals';
 import { haptic } from '../../engine/haptics';
 import Tutorial from './Tutorial';
@@ -152,6 +152,9 @@ export default function GameScreen() {
           <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'contracts' }); }}>
             <Icon name="file-document-outline" size={19} color={C.text} />
           </Pressable>
+          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'countries' }); }}>
+            <Icon name="earth" size={19} color={C.blue} />
+          </Pressable>
           <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'powerups' }); }}>
             <Icon name="star-four-points" size={19} color={C.gold} />
           </Pressable>
@@ -215,6 +218,7 @@ export default function GameScreen() {
         visible={modal?.kind === 'driver'} onClose={() => setModal(null)} staffId={modal?.staffId}
         onShowOnMap={(t) => { setModal(null); setTab(null); showOnMap(t); }}
       />
+      <CountriesModal visible={modal?.kind === 'countries'} onClose={() => setModal(null)} />
       <BuyTruckModal visible={modal?.kind === 'buy'} onClose={() => setModal(null)} />
       <ContractsModal visible={modal?.kind === 'contracts'} onClose={() => setModal(null)}
         onAccept={(c) => openNewDelivery(undefined, c.destCityId, c)} />

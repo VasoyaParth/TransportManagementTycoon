@@ -520,3 +520,10 @@ export const CITIES = [
   { id: 'nathdwara', name: 'Nathdwara', state: 'Rajasthan', lat: 24.94, lng: 73.82, pop: 45000, tier: 3 },
   { id: 'rajsamand', name: 'Rajsamand', state: 'Rajasthan', lat: 25.07, lng: 73.88, pop: 75000, tier: 3 },
 ];
+
+// v1.4.0 "Around India" expansion: tag every existing city as India, then merge
+// in the neighbouring-country cities. Everything else (routing, search, map)
+// consumes CITIES unchanged.
+import { INTL_CITIES } from './expansion';
+for (const c of CITIES) { if (!c.country) c.country = 'IN'; }
+CITIES.push(...INTL_CITIES);

@@ -26,8 +26,15 @@ jobs:
       - name: Compute next version
         id: ver
         run: |
+          # Source of truth = android versionName (keep in sync with
+          # src/net/updates.js APP_VERSION). If a release for that version
+          # already exists, fall back to patch-bumping the latest tag so tags
+          # never collide.
+          gv=$(grep -oE 'versionName "[0-9]+(\.[0-9]+)*"' android/app/build.gradle | head -n1 | grep -oE '[0-9]+(\.[0-9]+)*')
           latest=$(git tag -l 'v*' --sort=-v:refname | head -n1)
-          if [ -z "$latest" ]; then
+          if [ -n "$gv" ] && ! git rev-parse "v${gv}" >/dev/null 2>&1; then
+            next="v${gv}"
+          elif [ -z "$latest" ]; then
             next="v1.0.0"
           else
             v=${latest#v}
@@ -35,7 +42,7 @@ jobs:
             MA=${MA:-1}; MI=${MI:-0}; PA=${PA:-0}
             next="v${MA}.${MI}.$((PA + 1))"
           fi
-          echo "Latest tag: ${latest:-none} -> Next: $next"
+          echo "Gradle versionName: ${gv:-none}  Latest tag: ${latest:-none} -> Next: $next"
           echo "version=$next" >> "$GITHUB_OUTPUT"
 
       # 3) Toolchain: Node + Java 17 + Android SDK

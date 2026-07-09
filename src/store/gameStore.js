@@ -7,6 +7,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { TRUCK_MODELS, CARGO_TYPES, CAMPAIGNS, POWERUPS, CONTRACT_FLAVORS } from '../data/trucks';
+import { COUNTRY_BY_CODE } from '../data/expansion';
 import { STAFF_NAMES, STAFF_LEVELS } from '../data/staffNames';
 import { CITIES } from '../data/cities';
 import { computeRoute, planFuelStops, cityById } from '../engine/routing';
@@ -24,6 +25,10 @@ const nextRefreshDelay = () =>
   CONTRACT_REFRESH_MIN_MS + Math.random() * (CONTRACT_REFRESH_MAX_MS - CONTRACT_REFRESH_MIN_MS);
 // Gold → cash exchange rate (₹ per Gold). Gold is premium, so it converts rich.
 export const GOLD_TO_CASH = 50000;
+// International customs charged per border crossing (v1.4.0 expansion).
+const CUSTOMS_FEE_BASE = 15000;   // ₹ paperwork/duty per crossing
+const CUSTOMS_FEE_PER_TON = 800;  // ₹ per ton per crossing
+const CUSTOMS_HOURS = 3;          // game-hours of inspection time per crossing
 
 let idSeq = 1;
 const uid = p => `${p}-${Date.now().toString(36)}-${(idSeq++).toString(36)}`;
@@ -114,6 +119,7 @@ const initialState = {
   hubs: [], // {cityId, name, hq, since} — HQ + purchased garages/hubs
   corridors: [], // {id, fromCityId, toCityId, points} — unlocked/highlighted routes
   contracts: [],
+  unlockedCountries: ['IN'], // v1.4.0: neighbouring countries unlock in-game
   campaigns: [], // {id, campaignId, startedAt, endsAt}
   notifications: [],
   boosts: { speedUntil: 0, doubleNext: false },
@@ -190,6 +196,7 @@ export const useGame = create(
           clockStart: Date.now(),
           lastSalaryDay: 0, lastContractDay: 0,
           nextContractAt: Date.now() + nextRefreshDelay(),
+          unlockedCountries: ['IN'],
           contracts: randomContracts(1),
           candidates: randomCandidates(),
           notifications: [makeNotification('system', 'rocket-launch',
@@ -474,17 +481,31 @@ export const useGame = create(
         if (!t) return { err: 'Truck not found' };
         const model = modelById(t.modelId);
         const to = cityById(toCityId);
+        // Country gating: the destination's country must be unlocked.
+        const destCountry = to.country || 'IN';
+        const unlocked = s.unlockedCountries || ['IN'];
+        if (!unlocked.includes(destCountry)) {
+          const cn = COUNTRY_BY_CODE[destCountry];
+          return { err: `Locked — unlock ${cn ? cn.name : destCountry} in the World map to deliver here.`, locked: destCountry };
+        }
         const route = computeRoute(t.lat, t.lng, to.lat, to.lng);
         if (!route) return { err: 'No road or ferry connection reaches this destination yet. Island routes need a ferry link.' };
-        if (route.usesFerry && route.roadKm > 3500) return { err: 'This route is beyond practical reach for now.' };
+        // Cap only truly absurd sea distances; continental international hauls
+        // (China, Malaysia) legitimately run long.
+        if (route.usesFerry && route.roadKm > 8000) return { err: 'This route is beyond practical reach for now.' };
         const stops = planFuelStops(route, model);
         const cargo = cargoById(cargoType);
         const tons = Math.min(cargoTons, model.cargo);
         const rate = s.pricing[cargoType] != null ? s.pricing[cargoType] : cargo.rate;
-        const econ = deliveryEconomics({
+        const econ0 = deliveryEconomics({
           model, distanceKm: route.roadKm, cargoTons: tons, rate,
           boosts: { marketing: get().marketingBoost(), doubleNext: s.boosts.doubleNext },
         });
+        // International customs: each border crossing costs a fee (paperwork +
+        // duty) and adds inspection time at the checkpoint.
+        const borders = route.bordersCrossed || 0;
+        const customs = borders > 0 ? Math.round(borders * (CUSTOMS_FEE_BASE + CUSTOMS_FEE_PER_TON * tons)) : 0;
+        const econ = { ...econ0, customs, net: econ0.net - customs };
         // ----- Fuel model: consume based on current tank; auto-refuel en route -----
         const R = model.range;
         const startFuel = t.fuelPct == null ? 100 : t.fuelPct;
@@ -508,12 +529,15 @@ export const useGame = create(
         const shortBreaks = Math.floor(drivingHours / 2.5);
         const restHours = sleepBreaks * 2 + shortBreaks * (5 / 60);
         const restSec = Math.round((restHours * REAL_SEC_PER_GAME_HOUR) / speedBoost);
-        // Each auto-refuel stop costs ~1 in-game hour of real time.
-        const durationSec = tripDurationSec(model, route.roadKm, speedBoost) + refuelCount * 60 + restSec;
+        // Each auto-refuel stop costs ~1 in-game hour of real time; each border
+        // crossing adds customs/inspection time at the checkpoint.
+        const borderSec = Math.round((borders * CUSTOMS_HOURS * REAL_SEC_PER_GAME_HOUR) / speedBoost);
+        const durationSec = tripDurationSec(model, route.roadKm, speedBoost) + refuelCount * 60 + restSec + borderSec;
         return {
           route, stops, econ, durationSec, tons, model, to, arriveFuelPct, refuelCount,
           startRangeKm: Math.round(startRangeKm), fullRangeKm: R, startFuelPct: Math.round(startFuel),
           drivingHours: Math.round(drivingHours * 10) / 10, sleepBreaks, shortBreaks, restHours: Math.round(restHours * 10) / 10,
+          borders, customs, borderNames: route.borderNames || [], destCountry,
         };
       },
 
@@ -698,6 +722,26 @@ export const useGame = create(
         if (c.expiresAt < Date.now()) return { ok: false, err: 'Contract expired' };
         if (!s.trucks.some(t => t.status === 'parked')) return { ok: false, err: 'You need a parked truck to accept a contract' };
         return { ok: true, contract: c };
+      },
+
+      // ---------- world expansion (v1.4.0) ----------
+      unlockCountry(code) {
+        const s = get();
+        const def = COUNTRY_BY_CODE[code];
+        if (!def) return { ok: false, err: 'Unknown country' };
+        const unlocked = s.unlockedCountries || ['IN'];
+        if (unlocked.includes(code)) return { ok: false, err: `${def.name} is already unlocked` };
+        if (s.balance < def.unlockCost) return { ok: false, err: `Need ${inr(def.unlockCost)} to expand into ${def.name}` };
+        // Pay the entry cost, then hand back a welcome bonus (cash + gold).
+        set({
+          balance: s.balance - def.unlockCost + (def.bonusCash || 0),
+          gold: s.gold + (def.bonusGold || 0),
+          unlockedCountries: [...unlocked, code],
+        });
+        get().notify('system', 'flag-checkered',
+          `${def.name} unlocked! Welcome bonus: ${inr(def.bonusCash || 0)} + ${def.bonusGold || 0} Gold. New cities are open for delivery.`);
+        play('coin', 0.9);
+        return { ok: true, bonusCash: def.bonusCash || 0, bonusGold: def.bonusGold || 0 };
       },
 
       // ---------- gold exchange ----------

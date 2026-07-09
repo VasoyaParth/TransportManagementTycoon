@@ -12,6 +12,7 @@ import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
 import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, TRUCK_COLORS, TRUCK_LOGOS } from '../../data/trucks';
 import { inr, inrShort } from '../../engine/economy';
 import { APP_VERSION, checkForUpdate, downloadApk, openInstaller, fmtMB, cmpVer } from '../../net/updates';
+import { COUNTRIES, COUNTRY_BY_CODE } from '../../data/expansion';
 
 const propMeta = {
   diesel: { color: C.amber, bg: C.amberSoft, icon: 'gas-station', label: 'Diesel' },
@@ -206,6 +207,7 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
   const startDelivery = useGame(s => s.startDelivery);
   const previewDelivery = useGame(s => s.previewDelivery);
   const pricing = useGame(s => s.pricing);
+  const unlockedCountries = useGame(s => s.unlockedCountries || ['IN']);
   const parked = trucks.filter(t => t.status === 'parked');
   const [truckId, setTruckId] = useState(presetTruckId);
   const [dest, setDest] = useState(presetDest);
@@ -237,7 +239,7 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
 
   const suggestions = useMemo(() => {
     if (!truck || query.trim() || dest) return [];
-    try { return suggestDestinations(truck.lat, truck.lng, 5); } catch { return []; }
+    try { return suggestDestinations(truck.lat, truck.lng, 5, unlockedCountries); } catch { return []; }
   }, [truckId, dest, query, visible]);
 
   const preview = useMemo(() => {
@@ -291,11 +293,12 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
             </Row>
             {results.map(c => (
               <Pressable key={c.id} onPress={() => { setDest(c.id); setQuery(c.name); }} style={cs.resRow}>
-                <Icon name="map-marker" size={16} color={C.blue} />
+                <Icon name="map-marker" size={16} color={(c.country || 'IN') === 'IN' ? C.blue : C.amber} />
                 <View style={{ marginLeft: 8, flex: 1 }}>
                   <Text style={[FONT.body, { fontWeight: '600' }]}>{c.name}</Text>
-                  <Text style={FONT.tiny}>{c.state} · Tier {c.tier}</Text>
+                  <Text style={FONT.tiny}>{c.state} · Tier {c.tier}{(c.country || 'IN') !== 'IN' ? ` · ${COUNTRY_BY_CODE[c.country]?.name || c.country}` : ''}</Text>
                 </View>
+                {(c.country || 'IN') !== 'IN' ? <Icon name="earth" size={14} color={C.amber} /> : null}
               </Pressable>
             ))}
             {suggestions.length > 0 && (
@@ -382,10 +385,25 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
                 <Row style={{ justifyContent: 'space-between' }}><Text style={FONT.sub}>Fuel / charge</Text><Text style={[FONT.mono, { color: C.red }]}>-{inr(preview.econ.fuel)}</Text></Row>
                 <Row style={{ justifyContent: 'space-between' }}><Text style={FONT.sub}>Maintenance</Text><Text style={[FONT.mono, { color: C.red }]}>-{inr(preview.econ.maint)}</Text></Row>
                 <Row style={{ justifyContent: 'space-between' }}><Text style={FONT.sub}>Highway tolls</Text><Text style={[FONT.mono, { color: C.red }]}>-{inr(preview.econ.tolls || 0)}</Text></Row>
+                {preview.customs > 0 && (
+                  <Row style={{ justifyContent: 'space-between' }}>
+                    <Text style={FONT.sub}>Customs ({preview.borders} border{preview.borders === 1 ? '' : 's'})</Text>
+                    <Text style={[FONT.mono, { color: C.red }]}>-{inr(preview.econ.customs || 0)}</Text>
+                  </Row>
+                )}
                 <Row style={{ justifyContent: 'space-between', marginTop: 6 }}>
                   <Text style={[FONT.h3]}>Net profit</Text>
                   <Text style={[FONT.h2, { color: preview.econ.net >= 0 ? C.green : C.red }]}>{inr(preview.econ.net)}</Text>
                 </Row>
+                {preview.borders > 0 && (
+                  <Row style={{ marginTop: 8, backgroundColor: C.amberSoft, borderRadius: RADIUS.md, padding: 10 }}>
+                    <Icon name="passport" size={16} color={C.amber} />
+                    <Text style={[FONT.tiny, { marginLeft: 8, flex: 1, color: C.text }]}>
+                      International haul — crosses {preview.borders} border{preview.borders === 1 ? '' : 's'}
+                      {preview.borderNames?.length ? ` (${preview.borderNames.join(', ')})` : ''}. Adds customs time & a {inr(preview.econ.customs || 0)} fee.
+                    </Text>
+                  </Row>
+                )}
                 {preview.route.usesFerry && <View style={{ marginTop: 8 }}><Pill text="Uses Ferry" icon="ferry" color={C.amber} bg={C.amberSoft} /></View>}
                 {contract && <View style={{ marginTop: 8 }}><Pill text="Contract delivery — bonus on completion" icon="file-check" color={C.green} bg={C.greenSoft} /></View>}
               </Card>
@@ -1487,6 +1505,91 @@ export function HubsModal({ visible, onClose, onShowOnMap }) {
             );
           })}
         </View>
+      </ScrollView>
+    </Sheet>
+  );
+}
+
+// ============ World Expansion (unlock countries) ============
+export function CountriesModal({ visible, onClose }) {
+  const toast = useToast();
+  const unlocked = useGame(s => s.unlockedCountries || ['IN']);
+  const balance = useGame(s => s.balance);
+  const unlockCountry = useGame(s => s.unlockCountry);
+  const [confirm, setConfirm] = useState(null);
+  useEffect(() => { if (!visible) setConfirm(null); }, [visible]);
+
+  const cityCount = useMemo(() => {
+    const m = {};
+    for (const c of CITIES) { const k = c.country || 'IN'; m[k] = (m[k] || 0) + 1; }
+    return m;
+  }, []);
+
+  const doUnlock = (code) => {
+    const r = unlockCountry(code);
+    if (r.ok) { toast(`Unlocked! +${inr(r.bonusCash)} & ${r.bonusGold} Gold`, 'success'); setConfirm(null); }
+    else toast(r.err, 'error');
+  };
+
+  const total = COUNTRIES.length;
+  const have = unlocked.length;
+
+  return (
+    <Sheet visible={visible} onClose={onClose} title="World Expansion" height="88%">
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+        <Card style={{ marginBottom: 12, backgroundColor: C.blueSoft }}>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <Row style={{ flex: 1 }}>
+              <Icon name="earth" size={20} color={C.blue} />
+              <Text style={[FONT.h3, { marginLeft: 6 }]}>Expand Across Asia</Text>
+            </Row>
+            <Pill text={`${have}/${total} unlocked`} color={C.blue} bg="#fff" />
+          </Row>
+          <Text style={[FONT.tiny, { marginTop: 6, color: C.text }]}>
+            Unlock neighbouring countries to open hundreds of new cities. Each unlock pays a one-time welcome bonus. Cross-border hauls charge customs (extra time + fee per border) but pay big.
+          </Text>
+        </Card>
+
+        {COUNTRIES.map(co => {
+          const isUnlocked = unlocked.includes(co.code);
+          const afford = balance >= co.unlockCost;
+          const cnt = cityCount[co.code] || 0;
+          return (
+            <Card key={co.code} style={{ marginBottom: 10, borderColor: isUnlocked ? C.green : C.border }}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Row style={{ flex: 1 }}>
+                  <View style={[cs.heroIcon, { width: 46, height: 46, backgroundColor: isUnlocked ? C.greenSoft : C.bgSoft }]}>
+                    <Icon name={co.icon} size={24} color={isUnlocked ? C.green : C.sub} />
+                  </View>
+                  <View style={{ marginLeft: 10, flex: 1 }}>
+                    <Row>
+                      <Text style={FONT.h3}>{co.name}</Text>
+                      <View style={{ marginLeft: 6 }}>
+                        {isUnlocked
+                          ? <Pill text={co.code === 'IN' ? 'Home' : 'Unlocked'} icon="check-circle" color={C.green} bg={C.greenSoft} />
+                          : <Pill text="Locked" icon="lock" color={C.sub} bg={C.bgSoft} />}
+                      </View>
+                    </Row>
+                    <Text style={FONT.tiny}>{co.blurb}</Text>
+                  </View>
+                </Row>
+              </Row>
+              <Row style={{ marginTop: 10, backgroundColor: C.bgSoft, borderRadius: RADIUS.md, paddingVertical: 8 }}>
+                <ContractStat icon="city-variant-outline" label="Cities" value={String(cnt)} />
+                {!isUnlocked && <ContractStat icon="cash" label="Unlock cost" value={inrShort(co.unlockCost)} color={C.text} />}
+                {!isUnlocked && <ContractStat icon="gift" label="Bonus" value={`${inrShort(co.bonusCash)} +${co.bonusGold}G`} color={C.green} />}
+              </Row>
+              {!isUnlocked && (
+                <Btn
+                  title={confirm === co.code ? `Confirm — pay ${inr(co.unlockCost)}` : afford ? `Unlock ${co.name}` : `Need ${inrShort(co.unlockCost)}`}
+                  kind={afford ? 'green' : 'soft'} icon="lock-open-variant" small={false} disabled={!afford}
+                  style={{ marginTop: 10 }}
+                  onPress={() => { if (confirm === co.code) doUnlock(co.code); else setConfirm(co.code); }}
+                />
+              )}
+            </Card>
+          );
+        })}
       </ScrollView>
     </Sheet>
   );

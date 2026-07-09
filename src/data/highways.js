@@ -660,3 +660,9 @@ ROAD_EDGES.push(
   { a: 'solapur', b: 'kolhapur', nh: 'NH-166', via: [[17.1, 75.0]] },
   { a: 'nashik', b: 'jalgaon', nh: 'NH-848', via: [[20.5, 74.6]] }
 );
+
+// --- v1.4.0 "Around India" expansion: merge in the neighbouring-country road
+// network (nodes + intra-country roads + flagged BORDER/SEA crossings). ---
+import { INTL_NODES, INTL_EDGES } from './expansion';
+Object.assign(ROAD_NODES, INTL_NODES);
+ROAD_EDGES.push(...INTL_EDGES);
