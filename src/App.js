@@ -1,30 +1,15 @@
-// App root — cloud auth gate + phase routing (splash / onboarding / game).
-// Cloud-only: the player must log in; game state is loaded from and synced to
-// the Node/MongoDB backend.
+// App root — phase routing (splash / onboarding / game) + persistence gate.
+// Fully offline / local — no cloud, no login.
 import React, { useEffect, useState } from 'react';
-import { View, Text, StatusBar, ActivityIndicator, AppState, PermissionsAndroid, Platform } from 'react-native';
+import { View, StatusBar, PermissionsAndroid, Platform } from 'react-native';
 import { useGame } from './store/gameStore';
-import { useAuth } from './store/authStore';
-import { api } from './net/api';
-import { hydrateConfig } from './net/config';
-import { useSync } from './store/syncStore';
 import { ToastProvider, Skeleton } from './ui/components';
-import { C, FONT } from './ui/theme';
+import { C } from './ui/theme';
 import Splash from './ui/screens/Splash';
 import Onboarding from './ui/screens/Onboarding';
 import GameScreen from './ui/screens/GameScreen';
-import Auth from './ui/screens/Auth';
 import { initSound, setSoundEnabled } from './engine/sound';
 import { setHapticsEnabled } from './engine/haptics';
-
-function Loading({ label }) {
-  return (
-    <View style={{ flex: 1, backgroundColor: C.bg, alignItems: 'center', justifyContent: 'center' }}>
-      <ActivityIndicator color={C.blue} size="large" />
-      {label ? <Text style={[FONT.sub, { marginTop: 14 }]}>{label}</Text> : null}
-    </View>
-  );
-}
 
 export default function App() {
   const [hydrated, setHydrated] = useState(useGame.persist?.hasHydrated?.() ?? false);
@@ -32,19 +17,13 @@ export default function App() {
   const company = useGame(s => s.company);
   const setPhase = useGame(s => s.setPhase);
 
-  const authStatus = useAuth(s => s.status);
-  const bootstrap = useAuth(s => s.bootstrap);
-  const [cloudLoaded, setCloudLoaded] = useState(false);
-
   useEffect(() => {
     const unsub = useGame.persist.onFinishHydration(() => setHydrated(true));
     if (useGame.persist.hasHydrated()) setHydrated(true);
     return unsub;
   }, []);
 
-  // Try to restore a saved session (auto-login) on launch.
-  useEffect(() => { bootstrap(); }, []);
-
+  // Initialise audio once hydrated, honouring the saved sound setting.
   useEffect(() => {
     if (!hydrated) return;
     initSound();
@@ -52,6 +31,7 @@ export default function App() {
     setHapticsEnabled(useGame.getState().settings.haptics !== false);
   }, [hydrated]);
 
+  // Ask for notification permission on first launch (Android 13+).
   useEffect(() => {
     if (Platform.OS !== 'android') return;
     const perm = PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS;
@@ -61,64 +41,7 @@ export default function App() {
     }).catch(() => {});
   }, []);
 
-  // Once authenticated, load the authoritative game state from the cloud.
-  useEffect(() => {
-    if (authStatus !== 'authed') { setCloudLoaded(false); return; }
-    let alive = true;
-    (async () => {
-      // 1) Pull all game catalogs (cities, trucks, cargo, staff, logos…) from the cloud.
-      try { await hydrateConfig(); } catch { /* keep bundled fallback */ }
-      // 2) Load this account's authoritative game state from the cloud.
-      try {
-        const { state } = await api.getState();
-        if (!alive) return;
-        if (state && Object.keys(state).length) useGame.getState().applyCloudState(state);
-        else { useGame.getState().resetGame(); } // new account → fresh empire
-      } catch {
-        // Server unreachable — fall back to whatever is cached locally.
-      }
-      if (alive) setCloudLoaded(true);
-    })();
-    return () => { alive = false; };
-  }, [authStatus]);
-
-  // Push local changes up to the cloud for multi-device sync. Debounced during
-  // play, but flushed IMMEDIATELY when the app is backgrounded/closed so no
-  // progress is lost when you switch apps or phones.
-  useEffect(() => {
-    if (authStatus !== 'authed' || !cloudLoaded) return undefined;
-    let timer = null;
-    let version = 0;
-    let dirty = false;
-    let saving = false;
-
-    const save = async () => {
-      if (saving) return;
-      saving = true; dirty = false;
-      useSync.getState().markSyncing();
-      try {
-        const r = await api.putState(useGame.getState().cloudSnapshot(), version);
-        if (r && typeof r.version === 'number') version = r.version;
-        useSync.getState().markSaved(Date.now());
-      } catch (e) {
-        dirty = true; // keep dirty so a later trigger retries
-        useSync.getState().markError(e && e.message);
-      } finally {
-        saving = false;
-      }
-    };
-    const scheduleSave = () => { dirty = true; clearTimeout(timer); timer = setTimeout(save, 1500); };
-    const flush = () => { clearTimeout(timer); save(); };
-
-    useSync.getState().registerFlush(flush);
-    const unsub = useGame.subscribe(scheduleSave);
-    const sub = AppState.addEventListener('change', (s) => {
-      if (s === 'background' || s === 'inactive') flush();
-    });
-    return () => { clearTimeout(timer); unsub(); sub.remove(); flush(); };
-  }, [authStatus, cloudLoaded]);
-
-  if (!hydrated || authStatus === 'checking') {
+  if (!hydrated) {
     return (
       <View style={{ flex: 1, backgroundColor: C.bg, padding: 24, justifyContent: 'center' }}>
         <Skeleton h={44} w="60%" style={{ marginBottom: 14 }} />
@@ -131,11 +54,7 @@ export default function App() {
   return (
     <ToastProvider>
       <StatusBar barStyle="dark-content" backgroundColor={C.bg} />
-      {authStatus !== 'authed' ? (
-        <Auth />
-      ) : !cloudLoaded ? (
-        <Loading label="Setting up your profile…" />
-      ) : phase === 'game' && company ? (
+      {phase === 'game' && company ? (
         <GameScreen />
       ) : phase === 'onboarding' ? (
         <Onboarding onDone={() => {}} />
