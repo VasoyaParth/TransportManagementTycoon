@@ -194,6 +194,102 @@ export const TRUCK_MODELS = [
     desc: 'Long-haul tractor blending big-torque power with frugal fuel burn.',
     speed: 82, cargo: 30, tank: 400, eff: 3.8, range: 1520, maint: 10, price: 6400000, build: 2400,
   },
+  {
+    id: 'sml-sartaj-gs', name: 'SML Isuzu Sartaj GS', brand: 'SML Isuzu',
+    tier: 1, propulsion: 'diesel', rating: 4.0, icon: 'truck',
+    desc: 'Light-duty Isuzu-bred workhorse famous for bulletproof reliability.',
+    speed: 80, cargo: 4, tank: 60, eff: 9, range: 540, maint: 5, price: 1550000, build: 420,
+  },
+  {
+    id: 'sml-supreme', name: 'SML Isuzu Supreme', brand: 'SML Isuzu',
+    tier: 1, propulsion: 'diesel', rating: 4.1, icon: 'truck',
+    desc: 'Comfortable intermediate hauler built for tireless regional runs.',
+    speed: 80, cargo: 5, tank: 90, eff: 8, range: 720, maint: 5, price: 1750000, build: 480,
+  },
+  {
+    id: 'sml-prestige', name: 'SML Isuzu Prestige', brand: 'SML Isuzu',
+    tier: 2, propulsion: 'diesel', rating: 4.2, icon: 'truck-cargo-container',
+    desc: 'Premium-cabin medium-duty truck that pampers long-distance drivers.',
+    speed: 80, cargo: 7, tank: 150, eff: 6, range: 900, maint: 6, price: 2000000, build: 600,
+  },
+  {
+    id: 'sml-samrat-gs', name: 'SML Isuzu Samrat GS', brand: 'SML Isuzu',
+    tier: 2, propulsion: 'diesel', rating: 4.1, icon: 'truck',
+    desc: 'Sturdy multi-purpose hauler that punches well above its weight.',
+    speed: 78, cargo: 6, tank: 120, eff: 6.5, range: 780, maint: 6, price: 1850000, build: 540,
+  },
+  {
+    id: 'force-traveller-van', name: 'Force Traveller Delivery Van', brand: 'Force Motors',
+    tier: 1, propulsion: 'diesel', rating: 3.9, icon: 'van-utility',
+    desc: 'Spacious panel van that owns the city courier and e-commerce lanes.',
+    speed: 90, cargo: 1.2, tank: 70, eff: 11, range: 770, maint: 4, price: 1250000, build: 360,
+  },
+  {
+    id: 'force-trump-40', name: 'Force Trump 40', brand: 'Force Motors',
+    tier: 1, propulsion: 'diesel', rating: 3.8, icon: 'truck-delivery',
+    desc: 'Compact light truck offering rugged value for small businesses.',
+    speed: 80, cargo: 2.5, tank: 60, eff: 10, range: 600, maint: 5, price: 1150000, build: 360,
+  },
+  {
+    id: 'volvo-fm-420', name: 'Volvo FM 420', brand: 'Volvo Trucks',
+    tier: 3, propulsion: 'diesel', rating: 4.8, icon: 'truck-trailer',
+    desc: 'Swedish-engineered heavy tractor blending safety, comfort and grunt.',
+    speed: 95, cargo: 32, tank: 500, eff: 3.4, range: 1700, maint: 14, price: 11000000, build: 3600,
+  },
+  {
+    id: 'volvo-fh-520', name: 'Volvo FH 520', brand: 'Volvo Trucks',
+    tier: 3, propulsion: 'diesel', rating: 5.0, icon: 'truck-trailer',
+    desc: 'The flagship long-haul icon — first-class cabin, relentless power.',
+    speed: 105, cargo: 40, tank: 600, eff: 3.2, range: 1920, maint: 16, price: 14500000, build: 4200,
+  },
+  {
+    id: 'scania-r-500', name: 'Scania R 500', brand: 'Scania',
+    tier: 3, propulsion: 'diesel', rating: 5.0, icon: 'truck-trailer',
+    desc: 'King-of-the-road premium tractor prized for elite fuel economy.',
+    speed: 110, cargo: 40, tank: 600, eff: 3.3, range: 1980, maint: 16, price: 14000000, build: 4200,
+  },
+  {
+    id: 'scania-g-460', name: 'Scania G 460', brand: 'Scania',
+    tier: 3, propulsion: 'diesel', rating: 4.9, icon: 'truck-cargo-container',
+    desc: 'Robust premium hauler built for punishing mining and tipper duty.',
+    speed: 90, cargo: 35, tank: 500, eff: 3.4, range: 1700, maint: 15, price: 12500000, build: 3900,
+  },
+  {
+    id: 'man-cla-49300', name: 'MAN CLA 49.300', brand: 'MAN',
+    tier: 3, propulsion: 'diesel', rating: 4.7, icon: 'truck-trailer',
+    desc: 'German-bred heavy tractor engineered for rugged Indian long-haul.',
+    speed: 95, cargo: 38, tank: 520, eff: 3.3, range: 1716, maint: 14, price: 10500000, build: 3600,
+  },
+  {
+    id: 'man-tgs', name: 'MAN TGS', brand: 'MAN',
+    tier: 3, propulsion: 'diesel', rating: 4.8, icon: 'truck-trailer',
+    desc: 'Premium European workhorse with efficiency-tuned long-distance muscle.',
+    speed: 100, cargo: 40, tank: 560, eff: 3.3, range: 1848, maint: 15, price: 12000000, build: 3900,
+  },
+  {
+    id: 'tata-prima-3530k', name: 'Tata Prima 3530.K', brand: 'Tata Motors',
+    tier: 3, propulsion: 'diesel', rating: 4.6, icon: 'truck-cargo-container',
+    desc: 'Heavy-duty tipper built to shift mountains on mining and site work.',
+    speed: 75, cargo: 25, tank: 365, eff: 3.6, range: 1314, maint: 10, price: 4800000, build: 2100,
+  },
+  {
+    id: 'tata-winger-cargo', name: 'Tata Winger Cargo', brand: 'Tata Motors',
+    tier: 1, propulsion: 'diesel', rating: 3.9, icon: 'van-utility',
+    desc: 'Roomy maxi-van perfect for high-volume urban parcel deliveries.',
+    speed: 90, cargo: 1.2, tank: 65, eff: 11, range: 715, maint: 4, price: 1300000, build: 360,
+  },
+  {
+    id: 'al-ecomet-star-1115', name: 'Ashok Leyland Ecomet Star 1115', brand: 'Ashok Leyland',
+    tier: 2, propulsion: 'diesel', rating: 4.3, icon: 'truck',
+    desc: 'Fuel-smart medium-duty star with a modern, driver-friendly cabin.',
+    speed: 80, cargo: 6, tank: 140, eff: 6, range: 840, maint: 6, price: 2100000, build: 660,
+  },
+  {
+    id: 'mahindra-furio-14', name: 'Mahindra Furio 14', brand: 'Mahindra',
+    tier: 2, propulsion: 'diesel', rating: 4.4, icon: 'truck-cargo-container',
+    desc: 'Tech-loaded intermediate truck delivering strong payload and uptime.',
+    speed: 82, cargo: 9, tank: 160, eff: 5.5, range: 880, maint: 7, price: 2700000, build: 840,
+  },
 ];
 
 // Truck livery colours for customization (id + hex + display name).

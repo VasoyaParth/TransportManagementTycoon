@@ -10,7 +10,7 @@ import { TRUCK_MODELS, CARGO_TYPES, CAMPAIGNS, POWERUPS, CONTRACT_FLAVORS } from
 import { STAFF_NAMES, STAFF_LEVELS } from '../data/staffNames';
 import { CITIES } from '../data/cities';
 import { computeRoute, planFuelStops, cityById } from '../engine/routing';
-import { deliveryEconomics, tripDurationSec, inr } from '../engine/economy';
+import { deliveryEconomics, tripDurationSec, inr, REAL_SEC_PER_GAME_HOUR } from '../engine/economy';
 import { play, setSoundEnabled } from '../engine/sound';
 import { setHapticsEnabled } from '../engine/haptics';
 
@@ -111,6 +111,8 @@ const initialState = {
   clockStart: 0, // real ms when day 1 hour 0 began
   lastSalaryDay: 0,
   lastContractDay: 0,
+  lastEventAt: 0, // real ms of the last random-event roll
+  mapEvents: [], // recent world events with a location, highlighted on the map
   pricing: {}, // per-cargo ₹/km/t overrides; empty => each cargo uses its own default rate
   settings: {
     speed: 1, autosave: true, sound: true, haptics: true, showStations: true,
@@ -215,6 +217,7 @@ export const useGame = create(
       dailyTick() {
         const s = get();
         if (s.phase !== 'game') return;
+        const now = Date.now();
         const { day } = get().gameDay();
         // Monthly running costs: staff salaries + garage maintenance (non-HQ).
         if (day - s.lastSalaryDay >= SALARY_EVERY_DAYS) {
@@ -246,7 +249,15 @@ export const useGame = create(
               const [icon, msg] = flavor[Math.floor(Math.random() * flavor.length)];
               get().notify('system', icon, msg);
             }
-            // Rare, impactful random events — frequency configurable in Settings.
+          }
+        }
+        // Random events on a REAL-TIME cadence (independent of the day rollover),
+        // so they happen noticeably often during play.
+        const freq = s.settings.events || 'rare';
+        if (freq !== 'off') {
+          const intervalMs = freq === 'sometimes' ? 12 * 60 * 1000 : 25 * 60 * 1000;
+          if (now - (s.lastEventAt || 0) > intervalMs) {
+            set({ lastEventAt: now });
             get().rollRandomEvent();
           }
         }
@@ -257,25 +268,37 @@ export const useGame = create(
       rollRandomEvent() {
         const s = get();
         const freq = s.settings.events || 'rare';
-        const chance = freq === 'off' ? 0 : freq === 'sometimes' ? 0.12 : 0.05;
+        const chance = freq === 'off' ? 0 : freq === 'sometimes' ? 0.6 : 0.35;
         if (Math.random() > chance) return;
+        // Push a located event so the map can highlight it (kept short, capped).
+        const pushMapEvent = (kind, icon, color, lat, lng, label) => {
+          if (lat == null || lng == null) return;
+          set({ mapEvents: [{ id: uid('ev'), kind, icon, color, lat, lng, label, ts: Date.now() },
+            ...(get().mapEvents || [])].slice(0, 6) });
+        };
+        const anyCity = () => {
+          const h = (s.hubs || [])[Math.floor(Math.random() * Math.max(1, (s.hubs || []).length))];
+          return h ? cityById(h.cityId) : cityById(s.company?.hqCityId);
+        };
         const pool = [];
         // Goods stolen — lose a small sum if you have cash.
         if (s.balance > 100000) pool.push(() => {
           const loss = Math.min(s.balance, Math.round(50000 + Math.random() * 200000));
+          const c = anyCity();
           set({ balance: s.balance - loss });
-          get().notify('system', 'shield-alert', `Cargo theft! Bandits stole goods worth ${inr(loss)} from a depot.`);
+          if (c) pushMapEvent('theft', 'shield-alert', '#C0392B', c.lat, c.lng, 'Cargo theft');
+          get().notify('system', 'shield-alert', `Cargo theft! Bandits stole goods worth ${inr(loss)} near ${c ? c.name : 'a depot'}.`);
         });
         // Accident — a random on-road truck breaks down.
         const onRoad = s.trucks.filter(t => t.status === 'delivering' || t.status === 'parked');
         if (onRoad.length) pool.push(() => {
           const t = onRoad[Math.floor(Math.random() * onRoad.length)];
-          // cancel its delivery if any, then mark broken
           const d = s.deliveries.find(x => x.truckId === t.id);
           set({
             deliveries: d ? s.deliveries.filter(x => x.id !== d.id) : s.deliveries,
             trucks: get().trucks.map(x => x.id === t.id ? { ...x, status: 'broken' } : x),
           });
+          pushMapEvent('accident', 'car-brake-alert', '#E67E22', t.lat, t.lng, 'Breakdown');
           get().notify('truck', 'car-brake-alert', `Accident! ${modelById(t.modelId).name} broke down and needs repair.`);
         });
         // Fuel price spike — informational.
@@ -283,8 +306,10 @@ export const useGame = create(
         // Windfall — small bonus.
         pool.push(() => {
           const bonus = Math.round(40000 + Math.random() * 120000);
+          const c = anyCity();
           set({ balance: get().balance + bonus });
-          get().notify('system', 'gift', `Loyal client bonus! You received ${inr(bonus)}.`);
+          if (c) pushMapEvent('windfall', 'gift', '#12A150', c.lat, c.lng, 'Client bonus');
+          get().notify('system', 'gift', `Loyal client bonus! You received ${inr(bonus)}${c ? ` in ${c.name}` : ''}.`);
         });
         pool[Math.floor(Math.random() * pool.length)]();
       },
@@ -451,11 +476,20 @@ export const useGame = create(
           arriveFuelPct = Math.max(4, Math.round(100 - (lastLeg / R) * 100));
         }
         const speedBoost = s.boosts.speedUntil > Date.now() ? 2 : 1;
+        // ----- Driver fatigue: legally/physically a driver can't drive forever.
+        // A sleep break (~2h) after every ~8.5h driving, plus short ~5min breaks
+        // every ~2.5h. These pauses extend the real delivery time.
+        const drivingHours = route.roadKm / model.speed;
+        const sleepBreaks = Math.floor(drivingHours / 8.5);
+        const shortBreaks = Math.floor(drivingHours / 2.5);
+        const restHours = sleepBreaks * 2 + shortBreaks * (5 / 60);
+        const restSec = Math.round((restHours * REAL_SEC_PER_GAME_HOUR) / speedBoost);
         // Each auto-refuel stop costs ~1 in-game hour of real time.
-        const durationSec = tripDurationSec(model, route.roadKm, speedBoost) + refuelCount * 60;
+        const durationSec = tripDurationSec(model, route.roadKm, speedBoost) + refuelCount * 60 + restSec;
         return {
           route, stops, econ, durationSec, tons, model, to, arriveFuelPct, refuelCount,
           startRangeKm: Math.round(startRangeKm), fullRangeKm: R, startFuelPct: Math.round(startFuel),
+          drivingHours: Math.round(drivingHours * 10) / 10, sleepBreaks, shortBreaks, restHours: Math.round(restHours * 10) / 10,
         };
       },
 
@@ -477,7 +511,8 @@ export const useGame = create(
           id: uid('d'), truckId, fromCityId: t.cityId, toCityId, cargoType,
           cargoTons: p.tons, route: p.route, stops: p.stops,
           startedAt: now, endsAt: now + p.durationSec * 1000, econ: p.econ, contractId,
-          arriveFuelPct: p.arriveFuelPct,
+          arriveFuelPct: p.arriveFuelPct, startFuelPct: p.startFuelPct,
+          sleepBreaks: p.sleepBreaks, shortBreaks: p.shortBreaks, restHours: p.restHours,
         };
         // Record the corridor so it stays highlighted on the map (cap 8, dedup).
         const corrId = [d.fromCityId, toCityId].sort().join('~');
@@ -541,6 +576,13 @@ export const useGame = create(
           const flavor = CONTRACT_FLAVORS.find(f => f.id === contract.flavorId);
           reward = Math.round(d.econ.gross * (flavor.mult - 1));
         }
+        const drivingHours = t ? d.route.roadKm / modelById(t.modelId).speed : 0;
+        const sleepH = (d.sleepBreaks || 0) * 2;
+        const logEntry = {
+          id: d.id, fromCityId: d.fromCityId, toCityId: d.toCityId,
+          km: d.route.roadKm, net: d.econ.net, gross: d.econ.gross, ts: Date.now(),
+          hours: Math.round(drivingHours * 10) / 10,
+        };
         set({
           deliveries: s.deliveries.filter(x => x.id !== deliveryId),
           balance: s.balance + d.econ.net + reward,
@@ -548,11 +590,18 @@ export const useGame = create(
             ...x, status: 'parked', lat: to.lat, lng: to.lng, cityId: to.id,
             fuelPct: d.arriveFuelPct != null ? d.arriveFuelPct : Math.max(4, (x.fuelPct || 100) - 15),
             km: x.km + d.route.roadKm, deliveries: x.deliveries + 1,
+            log: [{ ...logEntry, truckName: modelById(x.modelId).name }, ...(x.log || [])].slice(0, 20),
           } : x),
+          // Accumulate the driver's career stats (hours driven, sleep, deliveries).
+          staff: s.staff.map(m => m.id === (t && t.driverId) ? {
+            ...m,
+            hoursDriven: Math.round(((m.hoursDriven || 0) + drivingHours) * 10) / 10,
+            sleepHours: Math.round(((m.sleepHours || 0) + sleepH) * 10) / 10,
+            deliveries: (m.deliveries || 0) + 1,
+            kmDriven: Math.round((m.kmDriven || 0) + d.route.roadKm),
+          } : m),
           history: [{
-            id: d.id, fromCityId: d.fromCityId, toCityId: d.toCityId,
-            km: d.route.roadKm, net: d.econ.net, gross: d.econ.gross, ts: Date.now(),
-            truckName: t ? modelById(t.modelId).name : '',
+            ...logEntry, truckName: t ? modelById(t.modelId).name : '',
           }, ...s.history].slice(0, 30),
           stats: {
             revenue: s.stats.revenue + d.econ.gross + reward,

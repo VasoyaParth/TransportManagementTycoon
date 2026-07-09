@@ -82,6 +82,28 @@ function Gauge({ value, max, label, unit, color = C.blue }) {
   );
 }
 
+// One step in the Amazon-style shipment tracker (vertical timeline).
+function TrackerStep({ icon, color, title, sub, done, active, line }) {
+  return (
+    <Row style={{ alignItems: 'flex-start' }}>
+      <View style={{ alignItems: 'center', width: 30 }}>
+        <View style={{
+          width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
+          backgroundColor: (done || active) ? color : C.bgSoft,
+          borderWidth: active ? 2 : 0, borderColor: '#fff',
+        }}>
+          <Icon name={done ? 'check' : icon} size={15} color={(done || active) ? '#fff' : C.faint} />
+        </View>
+        {line && <View style={{ width: 2, flex: 1, minHeight: 22, backgroundColor: done ? color : C.border, marginVertical: 2 }} />}
+      </View>
+      <View style={{ flex: 1, marginLeft: 10, paddingBottom: line ? 8 : 0 }}>
+        <Text style={[FONT.body, { fontWeight: active ? '800' : '600', color: (done || active) ? C.text : C.sub }]}>{title}</Text>
+        {sub ? <Text style={FONT.tiny}>{sub}</Text> : null}
+      </View>
+    </Row>
+  );
+}
+
 function SpecRow({ icon, label, value }) {
   return (
     <Row style={{ justifyContent: 'space-between', paddingVertical: 5 }}>
@@ -353,6 +375,12 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
   const now = Date.now();
   const prog = d ? Math.min(100, ((now - d.startedAt) / (d.endsAt - d.startedAt)) * 100) : 0;
   const eta = d ? fmtDur((d.endsAt - now) / 1000) : null;
+  // Live fuel drains from the departure tank down to the arrival fuel as it drives.
+  const startFuel = d && d.startFuelPct != null ? d.startFuelPct : truck.fuelPct;
+  const arriveFuel = d && d.arriveFuelPct != null ? d.arriveFuelPct : startFuel;
+  const curFuel = d ? Math.max(3, Math.round(startFuel + (arriveFuel - startFuel) * (prog / 100))) : Math.round(truck.fuelPct);
+  const totalKm = d ? d.route.roadKm : 0;
+  const kmCovered = d ? Math.round(totalKm * (prog / 100)) : 0;
   const buildLeft = truck.status === 'building' ? Math.max(0, (truck.buildEndsAt - now) / 1000) : 0;
   const buildPct = truck.status === 'building' ? 100 * (1 - buildLeft / truck.buildTotalSec) : 0;
   const fee = Math.round(m.price * 0.04);
@@ -378,12 +406,32 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
               <Text style={[FONT.mono, { color: C.blue }]}>ETA {eta}</Text>
             </Row>
             <Progress pct={prog} color={C.green} style={{ marginTop: 8 }} />
-            {/* Live gauges — speed varies realistically with the road */}
+            <Row style={{ justifyContent: 'space-between', marginTop: 4 }}>
+              <Text style={FONT.tiny}>{kmCovered} / {totalKm} km</Text>
+              <Text style={FONT.tiny}>{Math.round(prog)}%</Text>
+            </Row>
+            {/* Live gauges — speed varies realistically, fuel drains as it drives */}
             <Row style={{ marginTop: 10 }}>
               <Gauge value={liveSpeed(m.speed)} max={Math.round(m.speed * 1.15)} label="Speed" unit="km/h" color={C.green} />
-              <Gauge value={truck.fuelPct} max={100} label={m.propulsion === 'electric' ? 'Charge' : 'Fuel'} unit="%"
-                color={truck.fuelPct > 50 ? C.green : truck.fuelPct > 20 ? C.amber : C.red} />
+              <Gauge value={curFuel} max={100} label={m.propulsion === 'electric' ? 'Charge' : 'Fuel'} unit="%"
+                color={curFuel > 50 ? C.green : curFuel > 20 ? C.amber : C.red} />
             </Row>
+          </Card>
+        )}
+
+        {/* Amazon-style route tracker */}
+        {truck.status === 'delivering' && d && (
+          <Card style={{ marginBottom: 12 }}>
+            <Text style={[FONT.h3, { marginBottom: 10 }]}>Shipment Tracking</Text>
+            <TrackerStep icon="package-variant-closed" color={C.green} done
+              title={`Picked up · ${cityById(d.fromCityId)?.name}`} sub="Departed origin" line />
+            <TrackerStep icon="gas-station" color={prog > 15 ? C.green : C.amber} done={prog > 15}
+              title={`${d.refuelCount ? d.refuelCount : 0} fuel stop${(d.refuelCount || 0) === 1 ? '' : 's'} en route`}
+              sub={d.sleepBreaks ? `${d.sleepBreaks} sleep break${d.sleepBreaks === 1 ? '' : 's'} · ${d.shortBreaks || 0} short breaks` : 'No rest breaks needed'} line />
+            <TrackerStep icon="truck-fast" color={C.blue} done={false} active
+              title={`In transit — ${kmCovered} km covered`} sub={`${Math.round(prog)}% · ETA ${eta}`} line />
+            <TrackerStep icon="map-marker-check" color={prog >= 100 ? C.green : C.faint} done={prog >= 100}
+              title={`Deliver to ${cityById(d.toCityId)?.name}`} sub={prog >= 100 ? 'Arrived' : 'Pending arrival'} />
           </Card>
         )}
         {truck.status === 'building' && (
@@ -411,7 +459,7 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
             : <SpecRow icon="fuel" label="Fuel tank" value={`${m.tank} L`} />}
           <SpecRow icon="map-marker-distance" label="Full range" value={`${m.range} km`} />
           <SpecRow icon="fuel" label={m.propulsion === 'electric' ? 'Charge now' : 'Fuel now'}
-            value={`${Math.round(truck.fuelPct)}% · ~${Math.round((truck.fuelPct / 100) * m.range)} km left`} />
+            value={`${curFuel}% · ~${Math.round((curFuel / 100) * m.range)} km left`} />
           <SpecRow icon="wrench" label="Maintenance" value={`${inr(m.maint)}/km`} />
           <SpecRow icon="cash" label="Purchase price" value={inr(m.price)} />
         </Card>
@@ -422,6 +470,28 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
           <SpecRow icon="package-variant-closed-check" label="Deliveries" value={truck.deliveries} />
           <SpecRow icon="map-marker" label="Location" value={cityById(truck.cityId)?.name || '—'} />
         </Card>
+
+        {/* This truck's own delivery history */}
+        {(truck.log || []).length > 0 && (
+          <Card style={{ marginTop: 10 }}>
+            <Text style={[FONT.h3, { marginBottom: 8 }]}>Delivery History</Text>
+            {(truck.log || []).slice(0, 8).map(h => {
+              const f = cityById(h.fromCityId), t2 = cityById(h.toCityId);
+              return (
+                <Row key={h.id} style={{ justifyContent: 'space-between', paddingVertical: 6, borderTopWidth: 1, borderTopColor: C.border }}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Row><Text style={FONT.body} numberOfLines={1}>{f?.name || '?'}</Text>
+                      <Icon name="arrow-right" size={12} color={C.faint} style={{ marginHorizontal: 4 }} />
+                      <Text style={FONT.body} numberOfLines={1}>{t2?.name || '?'}</Text>
+                    </Row>
+                    <Text style={FONT.tiny}>{h.km} km · {h.hours ? `${h.hours}h · ` : ''}{relTime(h.ts)}</Text>
+                  </View>
+                  <Text style={[FONT.mono, { fontWeight: '700', color: h.net >= 0 ? C.green : C.red }]}>{inr(h.net)}</Text>
+                </Row>
+              );
+            })}
+          </Card>
+        )}
 
         <Card style={{ marginTop: 10 }}>
           <Text style={[FONT.h3, { marginBottom: 8 }]}>Customize</Text>
