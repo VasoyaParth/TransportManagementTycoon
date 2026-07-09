@@ -175,8 +175,21 @@ export default function Onboarding({ onDone }) {
                 <Pill text="Launch Market" icon="rocket-launch-outline" color={C.green} bg={C.greenSoft} />
               </View>
             </Pressable>
-            <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 14 }]}>
-              More countries arrive in future updates.
+            <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 16, marginBottom: 8, fontWeight: '700' }]}>
+              UNLOCK ACROSS ASIA AS YOU GROW
+            </Text>
+            <Row style={{ flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
+              {[['terrain', 'Nepal'], ['pine-tree', 'Bhutan'], ['waves', 'Bangladesh'], ['ferry', 'Sri Lanka'],
+                ['flag-variant', 'Pakistan'], ['rice', 'Myanmar'], ['palm-tree', 'Malaysia'], ['wall', 'China']].map(([ic, nm]) => (
+                <Row key={nm} style={{ backgroundColor: C.bgSoft, borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6 }}>
+                  <Icon name={ic} size={13} color={C.sub} />
+                  <Text style={[FONT.tiny, { marginLeft: 4 }]}>{nm}</Text>
+                  <Icon name="lock" size={11} color={C.faint} style={{ marginLeft: 4 }} />
+                </Row>
+              ))}
+            </Row>
+            <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 12 }]}>
+              Start in India, then expand into neighbouring countries from the in-game World map.
             </Text>
           </View>
         );

@@ -74,9 +74,9 @@ The version must stay in sync in **three** places:
 2. `android/app/build.gradle` → `versionName` (`"1.3.7"`) and `versionCode` (integer, e.g. `137`).
 3. The GitHub Release tag `vX.Y.Z` — created **automatically** by `.github/workflows/release.yml`.
 
-**CI bump rule:** every merge to `main` reads the latest `vX.Y.Z` tag, bumps the **patch** by one, builds a signed APK (`TruckEmpireTycoon-vX.Y.Z.apk`) and publishes a GitHub Release. So the next release = latest tag + 1 patch.
+**CI rule (source of truth = gradle `versionName`):** every merge to `main` reads `android/app/build.gradle`'s `versionName` and releases `v<versionName>` (e.g. `1.4.0` → `v1.4.0`). If that tag already exists, it falls back to patch-bumping the latest tag so tags never collide. So: **to ship a specific version, set `versionName` (+ `APP_VERSION`) to it before merging.**
 
-**When preparing a branch for merge:** set `APP_VERSION` and the gradle version to the version CI *will* produce (latest tag + 1 patch), so the shipped build doesn't flag itself as out of date. The About tab reads releases from `https://api.github.com/repos/VasoyaParth/TransportManagementTycoon/releases`.
+Keep `APP_VERSION` in `src/net/updates.js` equal to the gradle `versionName` so the running app doesn't flag itself as out of date. The About tab reads releases from `https://api.github.com/repos/VasoyaParth/TransportManagementTycoon/releases`.
 
 # Troubleshooting
 

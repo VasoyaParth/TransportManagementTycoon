@@ -114,6 +114,8 @@ export function computeRoute(fromLat, fromLng, toLat, toLng) {
 
   let points = [{ lat: fromLat, lng: fromLng }];
   let usesFerry = false;
+  let bordersCrossed = 0;
+  const borderNames = [];
   const nodeIds = [s.id];
 
   if (s.id !== e.id) {
@@ -124,7 +126,8 @@ export function computeRoute(fromLat, fromLng, toLat, toLng) {
     for (const { hop } of path.hops) {
       const pts = edgePoints(hop.edge, hop.reversed);
       points.push(...pts.slice(1)); // skip duplicated start point
-      if (hop.ferry) usesFerry = true;
+      if (hop.ferry || (hop.edge && hop.edge.ferry)) usesFerry = true;
+      if (hop.edge && hop.edge.border) { bordersCrossed++; if (hop.edge.nh) borderNames.push(hop.edge.nh); }
       nodeIds.push(hop.to);
     }
   } else {
@@ -139,7 +142,7 @@ export function computeRoute(fromLat, fromLng, toLat, toLng) {
 
   const cum = polylineLengths(points);
   const roadKm = Math.round(cum[cum.length - 1] * ROAD_FACTOR);
-  return { points, cum, roadKm, usesFerry, nodeIds };
+  return { points, cum, roadKm, usesFerry, nodeIds, bordersCrossed, borderNames };
 }
 
 // Insert fuel/charging stops: stations are placed along the route whenever the
@@ -191,8 +194,9 @@ export function routeCities(route, corridorKm = 45, max = 8) {
 }
 
 // Suggested destinations for a truck: nearby, reachable, profitable (FR-6.4).
-export function suggestDestinations(fromLat, fromLng, count = 5) {
+export function suggestDestinations(fromLat, fromLng, count = 5, allowedCountries = null) {
   const scored = CITIES
+    .filter(c => !allowedCountries || allowedCountries.includes(c.country || 'IN'))
     .map(c => ({ c, d: haversine(fromLat, fromLng, c.lat, c.lng) }))
     .filter(x => x.d > 60 && x.d < 900)
     .sort((a, b) => (b.c.tier === 1 ? 2 : b.c.pop / 3e6) - (a.c.tier === 1 ? 2 : a.c.pop / 3e6) || a.d - b.d);
