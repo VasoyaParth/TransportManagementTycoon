@@ -11,6 +11,7 @@ import { CITIES } from '../../data/cities';
 import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
 import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, TRUCK_COLORS, TRUCK_LOGOS } from '../../data/trucks';
 import { inr, inrShort } from '../../engine/economy';
+import { APP_VERSION, checkForUpdate, downloadApk, openInstaller, fmtMB, cmpVer } from '../../net/updates';
 
 const propMeta = {
   diesel: { color: C.amber, bg: C.amberSoft, icon: 'gas-station', label: 'Diesel' },
@@ -976,14 +977,25 @@ export function DriverDetailModal({ visible, onClose, staffId, onShowOnMap }) {
           </Card>
         )}
 
-        {/* Career */}
-        <Card>
-          <Text style={[FONT.h3, { marginBottom: 4 }]}>Career</Text>
-          <SpecRow icon="steering" label="Hours driven" value={`${member.hoursDriven || 0} h`} />
-          <SpecRow icon="sleep" label="Sleep hours" value={`${member.sleepHours || 0} h`} />
-          <SpecRow icon="package-variant-closed-check" label="Deliveries" value={member.deliveries || 0} />
-          <SpecRow icon="map-marker-distance" label="Distance driven" value={`${Math.round(member.kmDriven || 0).toLocaleString('en-IN')} km`} />
-        </Card>
+        {/* Career — live: the in-progress trip is added in real time as the
+            truck drives, then committed permanently when the delivery finishes. */}
+        {(() => {
+          const tripHours = d && m ? d.route.roadKm / m.speed : 0;
+          const liveKm = Math.round((member.kmDriven || 0) + (d ? d.route.roadKm * prog / 100 : 0));
+          const liveHours = Math.round(((member.hoursDriven || 0) + tripHours * prog / 100) * 10) / 10;
+          return (
+            <Card>
+              <Row style={{ justifyContent: 'space-between', marginBottom: 4 }}>
+                <Text style={FONT.h3}>Career</Text>
+                {d ? <Pill text="Live · updating" icon="pulse" color={C.green} bg={C.greenSoft} /> : null}
+              </Row>
+              <SpecRow icon="steering" label="Hours driven" value={`${liveHours} h`} />
+              <SpecRow icon="sleep" label="Sleep hours" value={`${member.sleepHours || 0} h`} />
+              <SpecRow icon="package-variant-closed-check" label="Deliveries" value={`${member.deliveries || 0}${d ? ' · +1 in transit' : ''}`} />
+              <SpecRow icon="map-marker-distance" label="Distance driven" value={`${liveKm.toLocaleString('en-IN')} km`} />
+            </Card>
+          );
+        })()}
 
         {truck && (
           <Btn title="Show truck on map" kind="soft" icon="crosshairs-gps" style={{ marginTop: 12 }}
@@ -1134,19 +1146,197 @@ export function SettingsModal({ visible, onClose, initialTab }) {
           </>
         )}
         {tab === 'about' && (
-          <>
-            <Card style={{ alignItems: 'center', padding: 24 }}>
-              <Icon name="truck-fast" size={40} color={C.blue} />
-              <Text style={[FONT.h2, { marginTop: 8 }]}>Truck Empire Tycoon</Text>
-              <Text style={FONT.sub}>Version 1.1</Text>
-              <Text style={[FONT.sub, { textAlign: 'center', marginTop: 10 }]}>Build and run your own Indian trucking empire. Real highways, real cities, real-time hauls, cloud-synced across devices. Made in India.</Text>
-            </Card>
-            <Btn title="Replay Tutorial" kind="soft" icon="school-outline" style={{ marginTop: 12 }}
-              onPress={() => { saveSettings({ tutorialSeen: false }); toast('Tutorial will show on the map', 'info'); onClose(); }} />
-          </>
+          <AboutTab onReplayTutorial={() => { saveSettings({ tutorialSeen: false }); toast('Tutorial will show on the map', 'info'); onClose(); }} />
         )}
       </ScrollView>
     </Sheet>
+  );
+}
+
+// Credits — the open data / open source that makes the game possible.
+const CREDITS = [
+  { icon: 'map', name: 'OpenStreetMap', role: 'Map data & tiles', by: '© OpenStreetMap contributors (ODbL)' },
+  { icon: 'layers', name: 'Leaflet', role: 'Interactive map engine', by: 'Vladimir Agafonkin & contributors' },
+  { icon: 'satellite-variant', name: 'Esri World Imagery', role: 'Satellite basemap', by: 'Esri, Maxar, Earthstar Geographics' },
+  { icon: 'react', name: 'React Native', role: 'App framework', by: 'Meta Open Source' },
+  { icon: 'vector-square', name: 'Material Community Icons', role: 'Iconography', by: 'Pictogrammers (Apache 2.0)' },
+  { icon: 'road-variant', name: 'National Highways data', role: 'Route network', by: 'Compiled from public NHAI references' },
+];
+
+// The team.
+const DEVELOPERS = [
+  { name: 'Parth Vasoya', title: 'Lead Developer & Designer', icon: 'account-star', color: C.blue, bg: C.blueSoft },
+  { name: 'Jeel Gajera', title: 'Developer', icon: 'account-tie', color: C.green, bg: C.greenSoft },
+];
+
+// ============ About (version, updates, credits, team) ============
+function AboutTab({ onReplayTutorial }) {
+  const toast = useToast();
+  const [state, setState] = useState({ status: 'idle', data: null, err: null }); // idle|checking|done|error
+  const [dl, setDl] = useState(null); // {loaded,total,installing,done} | null
+  const abortRef = useRef(null);
+
+  const check = async () => {
+    setState({ status: 'checking', data: null, err: null });
+    try {
+      const data = await checkForUpdate();
+      setState({ status: 'done', data, err: null });
+      if (!data.hasUpdate) toast('You’re on the latest version', 'success');
+    } catch (e) {
+      setState({ status: 'error', data: null, err: e.message || 'Could not reach GitHub' });
+    }
+  };
+  // Auto-check once when the About tab first mounts.
+  useEffect(() => { check(); return () => { if (abortRef.current) abortRef.current(); }; }, []);
+
+  const latest = state.data?.latest;
+  const hasUpdate = state.data?.hasUpdate;
+
+  const startDownload = () => {
+    if (!latest?.apkUrl) return;
+    setDl({ loaded: 0, total: latest.apkSize || 0, installing: false, done: false });
+    const { promise, abort } = downloadApk(latest.apkUrl, {
+      onProgress: p => setDl(d => (d ? { ...d, loaded: p.loaded, total: p.total || d.total } : d)),
+    });
+    abortRef.current = abort;
+    promise
+      .then(async () => {
+        setDl(d => (d ? { ...d, done: true, installing: true } : d));
+        const r = await openInstaller(latest.apkUrl);
+        if (!r.ok) toast(r.err || 'Could not open installer', 'error');
+        else toast('Opening Android installer…', 'info');
+      })
+      .catch(e => { if (e.message !== 'aborted') toast(e.message, 'error'); setDl(null); });
+  };
+  const cancelDownload = () => { if (abortRef.current) abortRef.current(); setDl(null); };
+
+  const pct = dl && dl.total ? Math.min(100, Math.round((dl.loaded / dl.total) * 100)) : 0;
+
+  return (
+    <>
+      {/* App identity */}
+      <Card style={{ alignItems: 'center', padding: 22 }}>
+        <View style={[cs.heroIcon, { backgroundColor: C.blueSoft }]}><Icon name="truck-fast" size={34} color={C.blue} /></View>
+        <Text style={[FONT.h2, { marginTop: 10 }]}>Truck Empire Tycoon</Text>
+        <Row style={{ marginTop: 6 }}>
+          <Pill text={`Installed ${APP_VERSION}`} icon="cellphone-check" color={C.sub} bg={C.bgSoft} />
+          {state.status === 'done' && (
+            <View style={{ marginLeft: 6 }}>
+              {hasUpdate
+                ? <Pill text={`Update ${latest.version}`} icon="arrow-up-bold-circle" color={C.green} bg={C.greenSoft} />
+                : <Pill text="Up to date" icon="check-circle" color={C.blue} bg={C.blueSoft} />}
+            </View>
+          )}
+        </Row>
+        <Text style={[FONT.sub, { textAlign: 'center', marginTop: 10 }]}>
+          Build and run your own Indian trucking empire. Real highways, real cities, real-time hauls — 100% offline. Made in India.
+        </Text>
+      </Card>
+
+      {/* Updates */}
+      <Text style={cs.section}>Software Update</Text>
+      <Card>
+        <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <View style={{ flex: 1 }}>
+            <Text style={[FONT.body, { fontWeight: '700' }]}>
+              {state.status === 'checking' ? 'Checking for updates…'
+                : state.status === 'error' ? 'Couldn’t check for updates'
+                  : hasUpdate ? `New version available` : 'Latest version installed'}
+            </Text>
+            <Text style={FONT.tiny}>
+              Installed {APP_VERSION}{latest ? `  ·  Available ${latest.version}` : ''}
+              {latest?.apkSize ? `  ·  ${fmtMB(latest.apkSize)}` : ''}
+            </Text>
+            {state.status === 'error' ? <Text style={[FONT.tiny, { color: C.red }]}>{state.err}</Text> : null}
+          </View>
+          <Btn title="Check" small kind="soft" icon="refresh" disabled={state.status === 'checking'} onPress={check} />
+        </Row>
+
+        {/* Download / install flow */}
+        {hasUpdate && !dl && (
+          <Btn title={`Download & Install ${latest.version}`} kind="green" icon="download" style={{ marginTop: 12 }} onPress={startDownload} />
+        )}
+        {dl && (
+          <View style={{ marginTop: 12 }}>
+            <Progress pct={dl.done ? 100 : pct} color={C.green} />
+            <Row style={{ justifyContent: 'space-between', marginTop: 6 }}>
+              <Text style={FONT.tiny}>
+                {dl.installing ? 'Handing off to Android installer…'
+                  : `${fmtMB(dl.loaded)}${dl.total ? ` / ${fmtMB(dl.total)}` : ''} downloaded`}
+              </Text>
+              <Text style={[FONT.tiny, { fontWeight: '700', color: C.green }]}>{dl.done ? '100%' : `${pct}%`}</Text>
+            </Row>
+            {!dl.done && <Btn title="Cancel" kind="ghost" small style={{ marginTop: 6 }} onPress={cancelDownload} />}
+            {dl.installing && (
+              <Text style={[FONT.tiny, { marginTop: 6 }]}>
+                If the install screen didn’t open, allow “Install unknown apps” for this app in Android settings, then tap Download again.
+              </Text>
+            )}
+          </View>
+        )}
+        {latest?.notes ? (
+          <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 10 }}>
+            <Text style={[FONT.tiny, { fontWeight: '700', marginBottom: 4 }]}>WHAT’S NEW IN {latest.version}</Text>
+            <Text style={FONT.sub}>{latest.notes.slice(0, 400)}</Text>
+          </View>
+        ) : null}
+      </Card>
+
+      {/* Version history */}
+      {state.data?.releases?.length ? (
+        <>
+          <Text style={cs.section}>Version History</Text>
+          <Card>
+            {state.data.releases.slice(0, 12).map((r, i) => {
+              const isCurrent = cmpVer(r.version, APP_VERSION) === 0;
+              return (
+                <Row key={r.version} style={[{ justifyContent: 'space-between', paddingVertical: 9 }, i > 0 && { borderTopWidth: 1, borderTopColor: C.border }]}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Row>
+                      <Text style={[FONT.body, { fontWeight: '700' }]}>{r.version}</Text>
+                      {isCurrent ? <View style={{ marginLeft: 6 }}><Pill text="Installed" color={C.blue} bg={C.blueSoft} /></View> : null}
+                      {i === 0 && !isCurrent ? <View style={{ marginLeft: 6 }}><Pill text="Latest" color={C.green} bg={C.greenSoft} /></View> : null}
+                    </Row>
+                    <Text style={FONT.tiny} numberOfLines={2}>{r.notes ? r.notes.slice(0, 120) : 'Automated release build.'}</Text>
+                  </View>
+                  <Text style={FONT.tiny}>{r.date ? relTime(new Date(r.date).getTime()) : ''}{r.apkSize ? `\n${fmtMB(r.apkSize)}` : ''}</Text>
+                </Row>
+              );
+            })}
+          </Card>
+        </>
+      ) : null}
+
+      {/* Developers */}
+      <Text style={cs.section}>Developed By</Text>
+      <Row style={{ gap: 10 }}>
+        {DEVELOPERS.map(dev => (
+          <Card key={dev.name} style={{ flex: 1, alignItems: 'center', padding: 16 }}>
+            <View style={[cs.heroIcon, { width: 52, height: 52, backgroundColor: dev.bg }]}><Icon name={dev.icon} size={28} color={dev.color} /></View>
+            <Text style={[FONT.body, { fontWeight: '800', marginTop: 8, textAlign: 'center' }]}>{dev.name}</Text>
+            <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 2 }]}>{dev.title}</Text>
+          </Card>
+        ))}
+      </Row>
+
+      {/* Credits */}
+      <Text style={cs.section}>Credits & Open Source</Text>
+      <Card>
+        <Text style={[FONT.tiny, { marginBottom: 6 }]}>This game is built on wonderful open data and open-source software:</Text>
+        {CREDITS.map((c, i) => (
+          <Row key={c.name} style={[{ paddingVertical: 8 }, i > 0 && { borderTopWidth: 1, borderTopColor: C.border }]}>
+            <View style={[cs.heroIcon, { width: 38, height: 38, backgroundColor: C.bgSoft }]}><Icon name={c.icon} size={20} color={C.sub} /></View>
+            <View style={{ flex: 1, marginLeft: 10 }}>
+              <Text style={[FONT.body, { fontWeight: '700' }]}>{c.name}</Text>
+              <Text style={FONT.tiny}>{c.role} · {c.by}</Text>
+            </View>
+          </Row>
+        ))}
+      </Card>
+
+      <Btn title="Replay Tutorial" kind="soft" icon="school-outline" style={{ marginTop: 14 }} onPress={onReplayTutorial} />
+      <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 12 }]}>Made with ♥ in India · {APP_VERSION}</Text>
+    </>
   );
 }
 

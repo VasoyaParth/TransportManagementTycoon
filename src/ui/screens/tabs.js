@@ -320,6 +320,16 @@ function StaffCard({ member, trucks, onAssign, onFire, onOpen }) {
   const assignedTruck = member.truckId ? trucks.find(t => t.id === member.truckId) : null;
   const parked = trucks.filter(t => t.status === 'parked');
 
+  // Live in-progress trip for this driver (drives the real-time km/hours below).
+  const deliveries = useGame(s => s.deliveries);
+  const activeDelivery = assignedTruck ? deliveries.find(x => x.truckId === assignedTruck.id) : null;
+  useNow(!!activeDelivery); // 1s ticker only while a trip is running
+  const active = activeDelivery ? {
+    d: activeDelivery,
+    prog: Math.min(1, Math.max(0, (Date.now() - activeDelivery.startedAt) / (activeDelivery.endsAt - activeDelivery.startedAt))),
+    tripHrs: activeDelivery.route.roadKm / (modelById(assignedTruck.modelId).speed || 60),
+  } : null;
+
   return (
     <Card style={{ marginBottom: 10 }}>
       <Row style={{ justifyContent: 'space-between' }}>
@@ -362,15 +372,19 @@ function StaffCard({ member, trucks, onAssign, onFire, onOpen }) {
         </Row>
         <Progress pct={member.skill} color={C.blue} />
       </View>
-      {/* Driver career profile — hours driven, sleep taken, deliveries, distance */}
-      {member.role === 'driver' && (member.deliveries || member.hoursDriven) ? (
-        <Row style={{ marginTop: 10, backgroundColor: C.bgSoft, borderRadius: RADIUS.md, paddingVertical: 8 }}>
-          <DriverStat icon="steering" label="Drive hrs" value={`${member.hoursDriven || 0}h`} />
-          <DriverStat icon="sleep" label="Sleep hrs" value={`${member.sleepHours || 0}h`} />
-          <DriverStat icon="package-variant-closed-check" label="Trips" value={String(member.deliveries || 0)} />
-          <DriverStat icon="map-marker-distance" label="Distance" value={`${Math.round((member.kmDriven || 0) / 1000)}k km`} />
-        </Row>
-      ) : null}
+      {/* Driver career profile — live: the active trip is added in real time. */}
+      {member.role === 'driver' && (member.deliveries || member.hoursDriven || active) ? (() => {
+        const liveKm = (member.kmDriven || 0) + (active ? active.d.route.roadKm * active.prog : 0);
+        const liveHrs = Math.round(((member.hoursDriven || 0) + (active ? active.tripHrs * active.prog : 0)) * 10) / 10;
+        return (
+          <Row style={{ marginTop: 10, backgroundColor: C.bgSoft, borderRadius: RADIUS.md, paddingVertical: 8 }}>
+            <DriverStat icon="steering" label="Drive hrs" value={`${liveHrs}h`} />
+            <DriverStat icon="sleep" label="Sleep hrs" value={`${member.sleepHours || 0}h`} />
+            <DriverStat icon="package-variant-closed-check" label="Trips" value={String(member.deliveries || 0)} />
+            <DriverStat icon="map-marker-distance" label="Distance" value={liveKm >= 1000 ? `${(liveKm / 1000).toFixed(1)}k km` : `${Math.round(liveKm)} km`} />
+          </Row>
+        );
+      })() : null}
       <Row style={{ justifyContent: 'space-between', marginTop: 10 }}>
         <Text style={FONT.sub}>{inrShort(member.salary)}/month</Text>
         {member.role === 'driver' ? (
