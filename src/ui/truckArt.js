@@ -4,7 +4,7 @@
 // body type. The truck faces DOWN (cab at the bottom); map markers rotate the
 // art by heading+180, same convention as before.
 import React from 'react';
-import { G, Rect, Ellipse, Circle } from 'react-native-svg';
+import { G, Rect, Ellipse, Circle, Path } from 'react-native-svg';
 
 // Darken/lighten a #rrggbb colour by pct (-1..1) for pseudo-3D shading.
 export function shade(hex, pct) {
@@ -33,9 +33,22 @@ export function defaultBodyColor(model) {
 
 export const TRUCK_ART_W = 40;
 
-// Returns { w, h, shapes } — shapes are plain descriptors so they can be
+// Headlight colours per propulsion: electric = white LEDs, diesel/hybrid = pale
+// yellow halogens. `bulb` paints the lamp, ray0/ray1 the outer/inner beam cone.
+export function headlightFor(model) {
+  return model && model.propulsion === 'electric'
+    ? { bulb: '#FFFFFF', ray0: 'rgba(255,255,255,0.26)', ray1: 'rgba(255,255,255,0.45)' }
+    : { bulb: '#FFE9A8', ray0: 'rgba(255,224,120,0.30)', ray1: 'rgba(255,224,120,0.50)' };
+}
+
+// Night is 19:00–05:59 on the in-game clock.
+export function isNightHour(hour) { return hour >= 19 || hour < 6; }
+
+// Returns { w, h, bodyH, shapes } — shapes are plain descriptors so they can be
 // rendered both as react-native-svg elements and as an HTML SVG string.
-export function truckShapes(type, body, accent) {
+// opts.lights = headlightFor(model) result to switch the headlights on and add
+// cartoon torch-style beam cones in front of the truck (extends h by ~15).
+export function truckShapes(type, body, accent, opts = {}) {
   const dark = shade(body, -0.3);
   const darker = shade(body, -0.45);
   const roof = shade(body, 0.16);
@@ -50,7 +63,26 @@ export function truckShapes(type, body, accent) {
   // Twin-tyre wheel with a hub cap line.
   const wheel = (x, y, h = 5) => { R(x, y, 2.7, h, 1.2, tyre); R(x + 0.9, y + h / 2 - 0.5, 0.9, 1, 0.4, hub); };
   const mirrors = (y) => { R(8.4, y, 2.6, 1.4, 0.6, tyre); R(29, y, 2.6, 1.4, 0.6, tyre); };
-  const lamps = (y) => { R(13, y, 3.8, 1.5, 0.7, lamp); R(23.2, y, 3.8, 1.5, 0.7, lamp); };
+  const lights = opts.lights || null;
+  let lampY = 0;
+  const lamps = (y) => {
+    lampY = y;
+    const fill = lights ? lights.bulb : lamp;
+    R(13, y, 3.8, 1.5, 0.7, fill); R(23.2, y, 3.8, 1.5, 0.7, fill);
+  };
+  // Cartoon torch-style beam cones in front of both headlights; widens the
+  // canvas height so map markers/viewBoxes include the beams.
+  const finish = (H) => {
+    if (!lights) return { w: 40, h: H, bodyH: H, shapes: s };
+    const len = 14, y0 = lampY + 1.6, y1 = y0 + len;
+    [14.9, 25.1].forEach(cx => {
+      s.push({ k: 'path', fill: lights.ray0,
+        d: `M ${cx - 1.9} ${y0} L ${cx - 6} ${y1} Q ${cx} ${y1 + 2.4} ${cx + 6} ${y1} L ${cx + 1.9} ${y0} Z` });
+      s.push({ k: 'path', fill: lights.ray1,
+        d: `M ${cx - 1.2} ${y0} L ${cx - 3.4} ${y1 - 3} Q ${cx} ${y1 - 1.4} ${cx + 3.4} ${y1 - 3} L ${cx + 1.2} ${y0} Z` });
+    });
+    return { w: 40, h: Math.max(H, y1 + 3), bodyH: H, shapes: s };
+  };
 
   if (type === 'mini') {
     // Small pickup (Tata Ace class) — short cab + open cargo bed.
@@ -68,7 +100,7 @@ export function truckShapes(type, body, accent) {
     R(13.4, 29.8, 13.2, 3.6, 1.2, glass);                     // windshield
     mirrors(30.2); lamps(34.4);
     R(11.8, 36, 16.4, 1.8, 0.9, chrome);                      // bumper
-    return { w: 40, h: H, shapes: s };
+    return finish(H);
   }
 
   if (type === 'box') {
@@ -91,7 +123,7 @@ export function truckShapes(type, body, accent) {
     R(13.4, 39, 13.2, 3.8, 1.2, glass);
     mirrors(39.4); lamps(43.4);
     R(11.8, 45.2, 16.4, 1.8, 0.9, chrome);
-    return { w: 40, h: H, shapes: s };
+    return finish(H);
   }
 
   if (type === 'semi') {
@@ -120,7 +152,7 @@ export function truckShapes(type, body, accent) {
     R(13.2, 52.6, 13.6, 4, 1.4, glass);                       // windshield
     mirrors(53); lamps(57.6);
     R(11.4, 59.4, 17.2, 2, 1, chrome);                        // bumper
-    return { w: 40, h: H, shapes: s };
+    return finish(H);
   }
 
   // 'rigid' — medium/heavy straight truck, long body + tandem rear axles.
@@ -143,32 +175,36 @@ export function truckShapes(type, body, accent) {
   R(13.4, 44.4, 13.2, 3.8, 1.2, glass);
   mirrors(44.8); lamps(49);
   R(11.6, 50.8, 16.8, 1.9, 0.9, chrome);
-  return { w: 40, h: H, shapes: s };
+  return finish(H);
 }
 
 // React renderer (react-native-svg) — place inside an <Svg>/<G>. Origin is the
 // art's top-left; centre it yourself with translate(-20, -h/2).
-export function TruckTopShapes({ type, body, accent }) {
-  const { shapes } = truckShapes(type, body, accent);
+export function TruckTopShapes({ type, body, accent, lights }) {
+  const { shapes } = truckShapes(type, body, accent, { lights });
   return (
     <G>
       {shapes.map((p, i) => p.k === 'rect'
         ? <Rect key={i} x={p.x} y={p.y} width={p.w} height={p.h} rx={p.rx} fill={p.fill} stroke={p.stroke} strokeWidth={p.sw} />
         : p.k === 'circle'
           ? <Circle key={i} cx={p.cx} cy={p.cy} r={p.r} fill={p.fill} />
-          : <Ellipse key={i} cx={p.cx} cy={p.cy} rx={p.rx} ry={p.ry} fill={p.fill} />)}
+          : p.k === 'path'
+            ? <Path key={i} d={p.d} fill={p.fill} />
+            : <Ellipse key={i} cx={p.cx} cy={p.cy} rx={p.rx} ry={p.ry} fill={p.fill} />)}
     </G>
   );
 }
 
 // HTML SVG string for the Leaflet WebView marker (includes a ground shadow).
-export function truckSvgString(type, body, accent) {
-  const { w, h, shapes } = truckShapes(type, body, accent);
+export function truckSvgString(type, body, accent, opts = {}) {
+  const { w, h, bodyH, shapes } = truckShapes(type, body, accent, opts);
   const els = shapes.map(p => p.k === 'rect'
     ? `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="${p.rx}" fill="${p.fill}"${p.stroke ? ` stroke="${p.stroke}" stroke-width="${p.sw}"` : ''}/>`
     : p.k === 'circle'
       ? `<circle cx="${p.cx}" cy="${p.cy}" r="${p.r}" fill="${p.fill}"/>`
-      : `<ellipse cx="${p.cx}" cy="${p.cy}" rx="${p.rx}" ry="${p.ry}" fill="${p.fill}"/>`).join('');
-  const shadow = `<ellipse cx="${w / 2 + 2}" cy="${h - 5}" rx="${w / 2 - 7}" ry="4.5" fill="rgba(0,0,0,0.22)"/>`;
+      : p.k === 'path'
+        ? `<path d="${p.d}" fill="${p.fill}"/>`
+        : `<ellipse cx="${p.cx}" cy="${p.cy}" rx="${p.rx}" ry="${p.ry}" fill="${p.fill}"/>`).join('');
+  const shadow = `<ellipse cx="${w / 2 + 2}" cy="${bodyH - 5}" rx="${w / 2 - 7}" ry="4.5" fill="rgba(0,0,0,0.22)"/>`;
   return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${shadow}${els}</svg>`;
 }
