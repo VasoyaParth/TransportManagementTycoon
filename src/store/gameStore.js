@@ -113,6 +113,14 @@ function makeNotification(type, icon, message) {
   return { id: uid('n'), type, icon, message, ts: Date.now(), read: false };
 }
 
+// Maps each contract flavour to the CARGO_TYPES id it actually represents, so
+// the New Delivery sheet can pre-select the right cargo instead of always
+// defaulting to "General Goods" for every contract.
+const FLAVOR_CARGO = {
+  bulk: 'construction', longhaul: 'general', government: 'general', mining: 'steel',
+  urgent: 'retail', pharma: 'pharma', green: 'electronics', island: 'general',
+};
+
 function randomContracts(dayNumber, count = CONTRACTS_PER_DAY) {
   const out = [];
   for (let i = 0; i < count; i++) {
@@ -128,7 +136,7 @@ function randomContracts(dayNumber, count = CONTRACTS_PER_DAY) {
     const expiresAt = Date.now() + (4 + Math.random() * 8) * 3600 * 1000;
     out.push({
       id: uid('c'), flavorId: flavor.id, day: dayNumber,
-      destCityId: dest.id, cargoTons, mult: flavor.mult,
+      destCityId: dest.id, cargoTons, cargoType: FLAVOR_CARGO[flavor.id] || 'general', mult: flavor.mult,
       expiresAt, status: 'available', deliveryId: null, rewardPaid: 0,
     });
   }

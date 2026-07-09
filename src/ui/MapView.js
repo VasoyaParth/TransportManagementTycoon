@@ -159,7 +159,14 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
     const d = deliveries.find(x => x.truckId === t.id);
     if (!d) return { lat: t.lat, lng: t.lng, heading: 0, ferryOn: false, ferryLoading: false };
     const now = Date.now();
-    const prog = Math.min(1, Math.max(0, (now - d.startedAt) / (d.endsAt - d.startedAt)));
+    // While an accident/theft incident is unresolved, freeze the truck in place
+    // instead of letting it keep crawling forward — it visibly stops until the
+    // mechanic arrives (or the incident times out), then resumes with no jump.
+    let effNow = now;
+    if (d.incident) {
+      effNow = now < d.incident.resolveAt ? d.incident.startedAt : now - (d.incident.resolveAt - d.incident.startedAt);
+    }
+    const prog = Math.min(1, Math.max(0, (effNow - d.startedAt) / (d.endsAt - d.startedAt)));
     const pos = pointAlong(d.route.points, d.route.cum, prog);
     const fs = d.route.ferrySegment;
     let ferryOn = false, ferryLoading = false;

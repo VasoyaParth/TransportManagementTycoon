@@ -42,7 +42,14 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
       const d = deliveries.find(x => x.truckId === t.id);
       let lat = t.lat, lng = t.lng, heading = 0, ferryOn = false, ferryLoading = false;
       if (d) {
-        const prog = Math.min(1, Math.max(0, (now - d.startedAt) / (d.endsAt - d.startedAt)));
+        // Freeze the truck in place while an accident/theft incident is
+        // unresolved instead of letting it keep crawling — resumes with no
+        // position jump once the mechanic arrives or the incident clears.
+        let effNow = now;
+        if (d.incident) {
+          effNow = now < d.incident.resolveAt ? d.incident.startedAt : now - (d.incident.resolveAt - d.incident.startedAt);
+        }
+        const prog = Math.min(1, Math.max(0, (effNow - d.startedAt) / (d.endsAt - d.startedAt)));
         const p = pointAlong(d.route.points, d.route.cum, prog);
         lat = p.lat; lng = p.lng; heading = p.heading;
         const fs = d.route.ferrySegment;

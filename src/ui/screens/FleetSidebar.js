@@ -2,7 +2,7 @@
 // Running / Parked / Pending (building+broken), with a one-tap "Depart All"
 // to dispatch every idle truck. Pill-shaped, frosted, Samsung-style.
 import React, { useRef, useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Animated, ScrollView, Dimensions } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Animated, ScrollView, FlatList, Dimensions } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import Svg from 'react-native-svg';
 import { C, FONT, SHADOW } from '../theme';
@@ -145,33 +145,45 @@ export default function FleetSidebar({ visible, onClose, onTruckPress, onToast }
           })}
         </ScrollView>
 
-        <ScrollView contentContainerStyle={{ paddingBottom: 30, paddingTop: 12 }} showsVerticalScrollIndicator={false}>
-          {(() => {
-            const g = GROUPS.find(x => x.key === tab);
-            const items = trucks.filter(g.match);
-            if (items.length === 0) {
-              return <Text style={[FONT.tiny, { color: C.faint, paddingVertical: 20, textAlign: 'center' }]}>No {g.title.toLowerCase()} trucks.</Text>;
-            }
-            return items.map(t => {
-              const model = modelById(t.modelId);
-              const d = deliveries.find(x => x.truckId === t.id);
-              const to = d ? cityById(d.toCityId) : cityById(t.cityId);
-              return (
-                <Pressable key={t.id} style={st.row} onPress={() => { haptic('light'); onTruckPress(t); onClose(); }}>
-                  <View style={[st.rowIcon, { backgroundColor: g.color + '18' }]}>
-                    <RowTruckArt model={model} color={t.color} />
-                  </View>
-                  <View style={{ flex: 1, marginLeft: 10 }}>
-                    <Text style={[FONT.body, { fontWeight: '700' }]} numberOfLines={1}>{t.customName || model.name}</Text>
-                    <Text style={FONT.tiny} numberOfLines={1}>{statusLabel(t)}{to ? ` · ${to.name}` : ''}</Text>
-                    <ConditionBar truck={t} onService={() => doService(t)} />
-                  </View>
-                  <Icon name="chevron-right" size={18} color={C.faint} />
-                </Pressable>
-              );
-            });
-          })()}
-        </ScrollView>
+        {(() => {
+          const g = GROUPS.find(x => x.key === tab);
+          const items = trucks.filter(g.match);
+          if (items.length === 0) {
+            return <Text style={[FONT.tiny, { color: C.faint, paddingVertical: 20, textAlign: 'center' }]}>No {g.title.toLowerCase()} trucks.</Text>;
+          }
+          // FlatList lazily renders/recycles rows instead of mounting the whole
+          // fleet at once — keeps the drawer smooth once a fleet grows large.
+          return (
+            <FlatList
+              data={items}
+              keyExtractor={t => t.id}
+              contentContainerStyle={{ paddingBottom: 30, paddingTop: 12 }}
+              showsVerticalScrollIndicator={false}
+              initialNumToRender={8}
+              maxToRenderPerBatch={8}
+              windowSize={7}
+              removeClippedSubviews
+              renderItem={({ item: t }) => {
+                const model = modelById(t.modelId);
+                const d = deliveries.find(x => x.truckId === t.id);
+                const to = d ? cityById(d.toCityId) : cityById(t.cityId);
+                return (
+                  <Pressable style={st.row} onPress={() => { haptic('light'); onTruckPress(t); onClose(); }}>
+                    <View style={[st.rowIcon, { backgroundColor: g.color + '18' }]}>
+                      <RowTruckArt model={model} color={t.color} />
+                    </View>
+                    <View style={{ flex: 1, marginLeft: 10 }}>
+                      <Text style={[FONT.body, { fontWeight: '700' }]} numberOfLines={1}>{t.customName || model.name}</Text>
+                      <Text style={FONT.tiny} numberOfLines={1}>{statusLabel(t)}{to ? ` · ${to.name}` : ''}</Text>
+                      <ConditionBar truck={t} onService={() => doService(t)} />
+                    </View>
+                    <Icon name="chevron-right" size={18} color={C.faint} />
+                  </Pressable>
+                );
+              }}
+            />
+          );
+        })()}
       </Animated.View>
     </View>
   );

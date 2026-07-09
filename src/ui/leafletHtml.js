@@ -48,7 +48,7 @@ function truck3d(color,accent,heading){
   return '<div style="transform:perspective(150px) rotateX(34deg)">'
    +'<div class="truck3d" style="transform:rotate('+((heading||0)+180)+'deg);width:40px;height:48px">'
    +'<svg width="40" height="48" viewBox="0 0 40 48">'
-   +'<ellipse cx="22" cy="42" rx="13" ry="5" fill="rgba(0,0,0,0.22)"/>'
+   +'<ellipse cx="22" cy="42" rx="10" ry="3" fill="rgba(0,0,0,0.12)"/>'
    +'<rect x="9" y="5" width="24" height="30" rx="5" fill="'+dark+'"/>'
    +'<rect x="8" y="3" width="24" height="26" rx="5" fill="'+color+'" stroke="#fff" stroke-width="2"/>'
    +'<rect x="12" y="6" width="16" height="7" rx="2" fill="'+roof+'" transform="skewX(-6)"/>'

@@ -6,11 +6,31 @@ import { C, FONT, RADIUS } from '../theme';
 import {
   Card, Btn, IconBtn, Pill, statusMeta, Progress, Money, Stat, Row, Icon, useToast, relTime,
 } from '../components';
+import Svg from 'react-native-svg';
 import { useGame, modelById, cargoById, GAME_HOUR_MS } from '../../store/gameStore';
 import { CAMPAIGNS, CARGO_TYPES } from '../../data/trucks';
 import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
 import { inr, inrShort } from '../../engine/economy';
 import { cityById } from '../../engine/routing';
+import { TruckTopShapes, truckShapes, bodyTypeFor, defaultBodyColor, sizeScaleFor } from '../truckArt';
+
+// Real truck-model thumbnail for a fleet card — same renderer used on the map
+// and in the Showroom, so the fleet list shows the actual model, not a
+// generic glyph. Scaled per model so bigger rigs read bigger even here.
+const FLEET_ICON = 42;
+function FleetTruckArt({ model, color }) {
+  const bt = bodyTypeFor(model);
+  const body = color || defaultBodyColor(model);
+  const { w, h } = truckShapes(bt, body, '#9DB2D6');
+  const scale = ((FLEET_ICON - 6) / h) * sizeScaleFor(model);
+  return (
+    <View style={{ width: FLEET_ICON, height: FLEET_ICON, alignItems: 'center', justifyContent: 'center' }}>
+      <Svg width={w * scale} height={h * scale} viewBox={`0 0 ${w} ${h}`}>
+        <TruckTopShapes type={bt} body={body} accent="#9DB2D6" />
+      </Svg>
+    </View>
+  );
+}
 
 // 1s ticker for live countdowns/progress
 function useNow(active = true) {
@@ -55,10 +75,10 @@ function FilterChips({ options, value, onChange }) {
           return (
             <Pressable key={o.key} onPress={() => onChange(o.key)}
               style={[st.filterChip, on && { backgroundColor: C.blue, borderColor: C.blue }]}>
-              <Text style={{ fontSize: 12.5, fontWeight: '700', color: on ? '#fff' : C.sub }}>{o.label}</Text>
+              <Text style={{ fontSize: 12.5, fontWeight: '700', color: on ? '#fff' : C.sub }} numberOfLines={1}>{o.label}</Text>
               {o.count != null && (
                 <View style={[st.filterCount, { backgroundColor: on ? 'rgba(255,255,255,0.25)' : C.bgSoft }]}>
-                  <Text style={{ fontSize: 10.5, fontWeight: '800', color: on ? '#fff' : C.sub }}>{o.count}</Text>
+                  <Text style={{ fontSize: 10.5, fontWeight: '800', color: on ? '#fff' : C.sub }} numberOfLines={1}>{o.count}</Text>
                 </View>
               )}
             </Pressable>
@@ -143,7 +163,7 @@ export function FleetTab({ onTruckPress, onBuyTruck }) {
         <Row style={{ justifyContent: 'space-between' }}>
           <Row style={{ flex: 1 }}>
             <View style={[st.iconCircle, { backgroundColor: meta.bg }]}>
-              <Icon name={model.icon} size={22} color={meta.color} />
+              <FleetTruckArt model={model} color={t.color} />
             </View>
             <View style={{ marginLeft: 10, flex: 1 }}>
               <Text style={FONT.h3} numberOfLines={1}>{model.name}</Text>
@@ -920,6 +940,7 @@ const st = StyleSheet.create({
   filterChip: {
     flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8,
     borderRadius: 22, borderWidth: 1, borderColor: C.border, backgroundColor: '#fff',
+    flexShrink: 1,
   },
   filterCount: { marginLeft: 6, minWidth: 20, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 10, alignItems: 'center' },
   loadMore: {
