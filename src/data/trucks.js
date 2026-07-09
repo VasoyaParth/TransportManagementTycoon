@@ -290,6 +290,37 @@ export const TRUCK_MODELS = [
     desc: 'Tech-loaded intermediate truck delivering strong payload and uptime.',
     speed: 82, cargo: 9, tank: 160, eff: 5.5, range: 880, maint: 7, price: 2700000, build: 840,
   },
+  // ——— High-performance / mega-hauler flagships (fast, big, high cargo) ———
+  {
+    id: 'volvo-fh16-mega', name: 'Volvo FH16 750 Globetrotter', brand: 'Volvo Trucks',
+    tier: 3, propulsion: 'diesel', rating: 4.9, icon: 'truck-trailer',
+    desc: '750 hp monster — the fastest heavy long-hauler on the highway.',
+    speed: 115, cargo: 42, tank: 700, eff: 3.6, range: 2520, maint: 15, price: 16500000, build: 4200,
+  },
+  {
+    id: 'scania-r770-v8', name: 'Scania R770 V8', brand: 'Scania',
+    tier: 3, propulsion: 'diesel', rating: 5.0, icon: 'truck-trailer',
+    desc: 'The legendary 770 hp V8 — colossal payload at serious speed.',
+    speed: 118, cargo: 45, tank: 720, eff: 3.5, range: 2520, maint: 16, price: 18000000, build: 4200,
+  },
+  {
+    id: 'benz-actros-2663', name: 'Mercedes-Benz Actros 2663', brand: 'Mercedes-Benz',
+    tier: 3, propulsion: 'diesel', rating: 4.9, icon: 'truck-trailer',
+    desc: '625 hp flagship tractor with a giant multi-axle trailer.',
+    speed: 110, cargo: 48, tank: 800, eff: 3.4, range: 2720, maint: 15, price: 17000000, build: 4200,
+  },
+  {
+    id: 'tata-prima-5540-mega', name: 'Tata Prima 5540.S Mega', brand: 'Tata Motors',
+    tier: 3, propulsion: 'diesel', rating: 4.7, icon: 'truck-trailer',
+    desc: 'India\'s biggest Prima hauler — huge cargo, highway-fast.',
+    speed: 100, cargo: 50, tank: 760, eff: 3.6, range: 2736, maint: 13, price: 9500000, build: 3600,
+  },
+  {
+    id: 'byd-t9-eplus', name: 'BYD T9 e-Titan', brand: 'BYD',
+    tier: 3, propulsion: 'electric', rating: 4.8, icon: 'lightning-bolt-circle',
+    desc: 'Flagship electric mega-hauler — silent, massive and quick.',
+    speed: 108, cargo: 40, battery: 1000, range: 900, maint: 6, price: 14000000, build: 3900,
+  },
 ];
 
 // Truck livery colours for customization (id + hex + display name).
