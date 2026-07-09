@@ -14,7 +14,7 @@
     "@react-native-async-storage/async-storage": "^1.24.0",
     "react": "18.3.1",
     "react-native": "0.76.5",
-    "react-native-google-mobile-ads": "^16.4.0",
+    "react-native-google-mobile-ads": "^14.11.0",
     "react-native-sound": "^0.11.2",
     "react-native-svg": "^15.8.0",
     "react-native-vector-icons": "^10.3.0",
