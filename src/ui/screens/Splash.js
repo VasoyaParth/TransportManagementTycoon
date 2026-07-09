@@ -1,14 +1,15 @@
 // Splash screen — premium light entry point.
 import React, { useEffect, useRef } from 'react';
-import { View, Text, Animated, Easing, StyleSheet, SafeAreaView } from 'react-native';
+import { View, Text, Pressable, Animated, Easing, StyleSheet, SafeAreaView } from 'react-native';
 import { C, FONT, SHADOW, RADIUS } from '../theme';
-import { Btn, Icon, Row } from '../components';
+import { Btn, Icon, Row, useEasterEggTap } from '../components';
 
 export default function Splash({ onNew, onContinue, hasSave }) {
   const fade = useRef(new Animated.Value(0)).current;
   const slide = useRef(new Animated.Value(24)).current;
   const btnFade = useRef(new Animated.Value(0)).current;
   const btnSlide = useRef(new Animated.Value(30)).current;
+  const tapLogoEgg = useEasterEggTap('not_a_bug', 10);
 
   useEffect(() => {
     Animated.stagger(220, [
@@ -27,9 +28,9 @@ export default function Splash({ onNew, onContinue, hasSave }) {
     <SafeAreaView style={st.safe}>
       <View style={st.center}>
         <Animated.View style={{ alignItems: 'center', opacity: fade, transform: [{ translateY: slide }] }}>
-          <View style={[st.iconCircle, SHADOW.pop]}>
+          <Pressable style={[st.iconCircle, SHADOW.pop]} onPress={tapLogoEgg}>
             <Icon name="truck-fast" size={64} color="#fff" />
-          </View>
+          </Pressable>
           <Text style={st.title}>Truck Empire</Text>
           <Text style={st.titleAccent}>Tycoon</Text>
           <Text style={st.tagline}>Build your empire. Rule the roads.{'\n'}Conquer every highway.</Text>

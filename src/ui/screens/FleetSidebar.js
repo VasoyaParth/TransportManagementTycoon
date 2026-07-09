@@ -11,6 +11,7 @@ import { cityById } from '../../engine/routing';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
 import { TruckTopShapes, truckShapes, bodyTypeFor, defaultBodyColor, sizeScaleFor } from '../truckArt';
+import { useEasterEggTap } from '../components';
 
 // Small side/3-quarter truck thumbnail for a fleet row — same renderer as the
 // map/showroom (never a generic icon) so each model reads as its real shape,
@@ -75,6 +76,7 @@ export default function FleetSidebar({ visible, onClose, onTruckPress, onToast }
   const fade = useRef(new Animated.Value(0)).current;
   const [mounted, setMounted] = useState(visible);
   const [tab, setTab] = useState('running');
+  const tapPatientParkerEgg = useEasterEggTap('patient_parker', 3);
 
   useEffect(() => {
     if (visible) setMounted(true);
@@ -134,7 +136,7 @@ export default function FleetSidebar({ visible, onClose, onTruckPress, onToast }
             const on = tab === g.key;
             return (
               <Pressable key={g.key} style={[st.tab, on && { backgroundColor: g.color }]}
-                onPress={() => { haptic('light'); setTab(g.key); }}>
+                onPress={() => { haptic('light'); if (g.key === 'parked' && tab === 'parked') tapPatientParkerEgg(); setTab(g.key); }}>
                 <Icon name={g.icon} size={15} color={on ? '#fff' : g.color} />
                 <Text style={[st.tabTxt, { color: on ? '#fff' : C.sub }]}>{g.title}</Text>
                 <View style={[st.countPill, { backgroundColor: on ? 'rgba(255,255,255,0.25)' : g.color + '22' }]}>

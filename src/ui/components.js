@@ -9,8 +9,29 @@ import { C, FONT, SHADOW, RADIUS } from './theme';
 import { inr, inrShort } from '../engine/economy';
 import { play } from '../engine/sound';
 import { haptic } from '../engine/haptics';
+import { useGame } from '../store/gameStore';
 
 export { Icon };
+
+// Hidden-gem tap detector — call the returned function from an existing
+// onPress; once it sees `times` taps within `windowMs` of each other it
+// fires the one-time easter-egg reward and resets. Safe no-op after the egg
+// is already found (store just returns { ok: false, already: true }).
+export function useEasterEggTap(eggId, times = 5, windowMs = 1400) {
+  const ref = useRef({ count: 0, timer: null });
+  const findEasterEgg = useGame(s => s.findEasterEgg);
+  return () => {
+    const st = ref.current;
+    st.count += 1;
+    if (st.timer) clearTimeout(st.timer);
+    st.timer = setTimeout(() => { st.count = 0; }, windowMs);
+    if (st.count >= times) {
+      st.count = 0;
+      return findEasterEgg(eggId);
+    }
+    return null;
+  };
+}
 
 // ---------- Animated money counter (NFR-6) ----------
 export function Money({ value, short = false, style, prefixIcon, size }) {
