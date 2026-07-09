@@ -10,7 +10,6 @@ import Onboarding from './ui/screens/Onboarding';
 import GameScreen from './ui/screens/GameScreen';
 import { initSound, setSoundEnabled } from './engine/sound';
 import { setHapticsEnabled } from './engine/haptics';
-import { initAds, showInterstitial } from './ads';
 
 export default function App() {
   const [hydrated, setHydrated] = useState(useGame.persist?.hasHydrated?.() ?? false);
@@ -30,7 +29,6 @@ export default function App() {
     initSound();
     setSoundEnabled(useGame.getState().settings.sound !== false);
     setHapticsEnabled(useGame.getState().settings.haptics !== false);
-    initAds();
   }, [hydrated]);
 
   // Ask for notification permission on first launch (Android 13+).
@@ -64,7 +62,7 @@ export default function App() {
         <Splash
           hasSave={!!company}
           onNew={() => setPhase('onboarding')}
-          onContinue={() => { showInterstitial('interstitial').finally(() => setPhase('game')); }}
+          onContinue={() => setPhase('game')}
         />
       )}
     </ToastProvider>

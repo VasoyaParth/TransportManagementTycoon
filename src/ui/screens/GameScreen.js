@@ -11,11 +11,13 @@ import { cityById } from '../../engine/routing';
 import { FleetTab, RoutesTab, StaffTab, EconomyTab, MarketingTab, CollabTab } from './tabs';
 import {
   NewDeliveryModal, TruckDetailModal, BuyTruckModal, ContractsModal,
-  PowerupsModal, NotificationsModal, SettingsModal, HubsModal, DriverDetailModal, CountriesModal,
+  PowerupsModal, NotificationsModal, SettingsModal, HubsModal, DriverDetailModal, CountriesModal, MiniGamesModal,
 } from './modals';
 import { haptic } from '../../engine/haptics';
 import Tutorial from './Tutorial';
 import FleetSidebar from './FleetSidebar';
+import { checkForUpdate } from '../../net/updates';
+import { useDownloadState, startDownload, installDownloaded } from '../../net/downloadManager';
 
 const TABS = [
   { id: 'fleet', icon: 'truck', label: 'Fleet' },
@@ -43,6 +45,17 @@ export default function GameScreen() {
   const [sidebar, setSidebar] = useState(false);
   const [clock, setClock] = useState({ day: 1, hour: 8 });
   const lastToastN = useRef(null);
+
+  // ---- In-app update: check once on load, surface a prompt + background pill ----
+  const dl = useDownloadState();
+  const [update, setUpdate] = useState(null); // latest release when newer than installed
+  const [updateDismissed, setUpdateDismissed] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    checkForUpdate().then(r => { if (alive && r.hasUpdate && r.latest) setUpdate(r.latest); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  const beginUpdate = () => { if (update?.apkUrl) { startDownload(update.apkUrl, update.version); haptic('light'); } };
 
   // ---- Game loop: 1s tick — finish builds/deliveries, day events ----
   useEffect(() => {
@@ -167,6 +180,29 @@ export default function GameScreen() {
             <Text style={[FONT.tiny, { color: C.sub }]} numberOfLines={1}>{hq?.name}, {hq?.state}</Text>
           </View>
         </Pressable>
+        {/* Update pill under the profile: new-version prompt → live download % →
+            Install. The download runs in the background manager, so this keeps
+            showing progress no matter which screen/drawer you're on. */}
+        {dl.status === 'downloading' ? (
+          <Pressable style={[st.updatePill, { borderColor: C.blue }]} onPress={() => setModal({ kind: 'settings', tab: 'about' })}>
+            <Icon name="progress-download" size={14} color={C.blue} />
+            <Text style={[FONT.tiny, { fontWeight: '800', marginLeft: 5, color: C.blue }]}>Updating {dl.pct}%</Text>
+          </Pressable>
+        ) : dl.status === 'done' ? (
+          <Pressable style={[st.updatePill, { borderColor: C.green, backgroundColor: '#EAF7EF' }]}
+            onPress={async () => { haptic('light'); await installDownloaded(); }}>
+            <Icon name="cellphone-arrow-down" size={14} color={C.green} />
+            <Text style={[FONT.tiny, { fontWeight: '800', marginLeft: 5, color: C.green }]}>Install update</Text>
+          </Pressable>
+        ) : (update && !updateDismissed) ? (
+          <Pressable style={[st.updatePill, { borderColor: C.green }]} onPress={beginUpdate}>
+            <Icon name="rocket-launch" size={14} color={C.green} />
+            <Text style={[FONT.tiny, { fontWeight: '800', marginLeft: 5, color: C.text }]}>New {update.version} · Update</Text>
+            <Pressable hitSlop={8} onPress={() => setUpdateDismissed(true)} style={{ marginLeft: 6 }}>
+              <Icon name="close" size={13} color={C.faint} />
+            </Pressable>
+          </Pressable>
+        ) : null}
         {/* Left-edge fleet-manager strip with arrow (opens sidebar) */}
         <Pressable style={[st.mgrStrip, SHADOW.pop]} onPress={() => { haptic('light'); setSidebar(true); }}>
           <Icon name="truck" size={18} color={C.blue} />
@@ -219,10 +255,11 @@ export default function GameScreen() {
         onShowOnMap={(t) => { setModal(null); setTab(null); showOnMap(t); }}
       />
       <CountriesModal visible={modal?.kind === 'countries'} onClose={() => setModal(null)} />
+      <MiniGamesModal visible={modal?.kind === 'games'} onClose={() => setModal(null)} />
       <BuyTruckModal visible={modal?.kind === 'buy'} onClose={() => setModal(null)} />
       <ContractsModal visible={modal?.kind === 'contracts'} onClose={() => setModal(null)}
         onAccept={(c) => openNewDelivery(undefined, c.destCityId, c)} />
-      <PowerupsModal visible={modal?.kind === 'powerups'} onClose={() => setModal(null)} />
+      <PowerupsModal visible={modal?.kind === 'powerups'} onClose={() => setModal(null)} onOpenGames={() => setModal({ kind: 'games' })} />
       <NotificationsModal visible={modal?.kind === 'notifications'} onClose={() => setModal(null)} />
       <HubsModal visible={modal?.kind === 'hubs'} onClose={() => setModal(null)} onShowOnMap={(f) => { setModal(null); setFocus(f); }} />
       <SettingsModal visible={modal?.kind === 'settings'} onClose={() => setModal(null)} initialTab={modal?.tab} />
@@ -266,6 +303,12 @@ const st = StyleSheet.create({
   goldChip: {
     flexDirection: 'row', alignItems: 'center', marginLeft: 10,
     backgroundColor: C.bgSoft, paddingHorizontal: 9, paddingVertical: 3, borderRadius: 14,
+  },
+  // Background-update pill, sits just under the profile capsule.
+  updatePill: {
+    position: 'absolute', top: 116, left: 12, flexDirection: 'row', alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.96)', paddingHorizontal: 10, paddingVertical: 6,
+    borderRadius: 16, borderWidth: 1.5,
   },
   // Floating company profile capsule (top-left, below the header pill).
   profileCap: {

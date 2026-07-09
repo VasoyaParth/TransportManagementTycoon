@@ -26,6 +26,31 @@ const nextRefreshDelay = () =>
   CONTRACT_REFRESH_MIN_MS + Math.random() * (CONTRACT_REFRESH_MAX_MS - CONTRACT_REFRESH_MIN_MS);
 // Gold → cash exchange rate (₹ per Gold). Gold is premium, so it converts rich.
 export const GOLD_TO_CASH = 50000;
+
+// ---- Free daily gold mini-games (replace watch-to-earn ads) ----
+export const DAILY_PLAYS = 10; // per game, per in-game day
+// Roulette wheel — fixed segment order (UI spins to the landed index). Weighted
+// so big prizes are rare; most spins give little or nothing.
+export const ROULETTE_SEGMENTS = [
+  { label: '+1 Gold', type: 'gold', amount: 1, color: '#2563EB', w: 24 },
+  { label: 'Try again', type: 'nothing', color: '#98A1AD', w: 18 },
+  { label: '+2 Gold', type: 'gold', amount: 2, color: '#0E9F5B', w: 16 },
+  { label: 'Speed 1h', type: 'speed', color: '#D97706', w: 10 },
+  { label: '+3 Gold', type: 'gold', amount: 3, color: '#7D3C98', w: 11 },
+  { label: 'Try again', type: 'nothing', color: '#98A1AD', w: 13 },
+  { label: '2× Next', type: 'double', color: '#C0392B', w: 5 },
+  { label: '+5 Gold', type: 'gold', amount: 5, color: '#B7791F', w: 3 },
+];
+// Scratch-card payout rules — a random rule is applied to the 6 revealed tiles.
+const SCRATCH_RULES = [
+  { id: 'avg', label: 'Average of all 6', calc: t => Math.floor(t.reduce((a, b) => a + b, 0) / 6) },
+  { id: 'min', label: 'Lowest tile', calc: t => Math.min(...t) },
+  { id: 'max', label: 'Highest tile', calc: t => Math.max(...t) },
+  { id: 'sum3', label: 'First 3 added up', calc: t => t[0] + t[1] + t[2] },
+  { id: 'min3', label: 'Lowest of first 3', calc: t => Math.min(t[0], t[1], t[2]) },
+  { id: 'pick', label: 'One lucky tile', calc: t => t[Math.floor(Math.random() * 6)] },
+];
+const clampGold = v => Math.max(0, Math.min(5, Math.round(v))); // scratch caps at 5
 // International customs charged per border crossing (v1.4.0 expansion).
 const CUSTOMS_FEE_BASE = 15000;   // ₹ paperwork/duty per crossing
 const CUSTOMS_FEE_PER_TON = 800;  // ₹ per ton per crossing
@@ -112,7 +137,7 @@ const initialState = {
   company: null, // {name, ceo, logo, avatar, hqCityId, code, createdAt}
   balance: 0,
   gold: 0,
-  adGoldCount: 0, // how many rewarded gold ads watched (drives the payout tier)
+  games: { day: 0, scratchUsed: 0, spinUsed: 0 }, // daily free gold mini-games
   trucks: [], // {id, modelId, status, lat, lng, cityId, fuelPct, buildEndsAt, buildTotalSec, km, deliveries, driverId, brokenSince}
   deliveries: [], // active: {id, truckId, fromCityId, toCityId, cargoType, cargoTons, route:{points,cum,roadKm,usesFerry}, stops, startedAt, endsAt, econ, contractId}
   history: [], // completed deliveries (most recent first, capped)
@@ -820,6 +845,56 @@ export const useGame = create(
         set({ trucks: s.trucks.map(x => x.id === truckId ? { ...x, status: 'parked', buildEndsAt: null } : x) });
         get().notify('truck', 'fast-forward', `${modelById(t.modelId).name} build finished instantly!`);
         return { ok: true };
+      },
+
+      // ---------- daily free-gold mini-games ----------
+      // Remaining plays today (auto-resets each in-game day).
+      gamesToday() {
+        const s = get();
+        const day = get().gameDay().day;
+        const g = s.games && s.games.day === day ? s.games : { day, scratchUsed: 0, spinUsed: 0 };
+        return { day, scratchLeft: Math.max(0, DAILY_PLAYS - g.scratchUsed), spinLeft: Math.max(0, DAILY_PLAYS - g.spinUsed), scratchUsed: g.scratchUsed, spinUsed: g.spinUsed };
+      },
+      _bumpGame(kind) {
+        const day = get().gameDay().day;
+        const s = get();
+        const g = s.games && s.games.day === day ? { ...s.games } : { day, scratchUsed: 0, spinUsed: 0 };
+        g[kind] = (g[kind] || 0) + 1;
+        set({ games: g });
+      },
+
+      // Scratch card: 6 tiles (0–5 gold), a random rule decides the payout (≤5).
+      playScratch() {
+        const t = get().gamesToday();
+        if (t.scratchLeft <= 0) return { ok: false, err: 'No scratch cards left today — come back tomorrow!' };
+        const tiles = Array.from({ length: 6 }, () => Math.floor(Math.random() * 6)); // 0..5 each
+        const rule = SCRATCH_RULES[Math.floor(Math.random() * SCRATCH_RULES.length)];
+        const reward = clampGold(rule.calc(tiles));
+        get()._bumpGame('scratchUsed');
+        if (reward > 0) { set({ gold: get().gold + reward }); play('coin', 0.8); }
+        get().notify('system', 'ticket-confirmation', `Scratch card: ${rule.label} → +${reward} Gold.`);
+        return { ok: true, tiles, ruleId: rule.id, ruleLabel: rule.label, reward, left: t.scratchLeft - 1 };
+      },
+
+      // Lucky spin: weighted roulette → gold / speed boost / 2× next / nothing.
+      playRoulette() {
+        const t = get().gamesToday();
+        if (t.spinLeft <= 0) return { ok: false, err: 'No spins left today — come back tomorrow!' };
+        const total = ROULETTE_SEGMENTS.reduce((a, x) => a + x.w, 0);
+        let roll = Math.random() * total, index = 0;
+        for (let i = 0; i < ROULETTE_SEGMENTS.length; i++) { roll -= ROULETTE_SEGMENTS[i].w; if (roll <= 0) { index = i; break; } }
+        const seg = ROULETTE_SEGMENTS[index];
+        get()._bumpGame('spinUsed');
+        const now = Date.now();
+        if (seg.type === 'gold') { set({ gold: get().gold + seg.amount }); play('coin', 0.8); }
+        else if (seg.type === 'speed') {
+          set({ boosts: { ...get().boosts, speedUntil: now + 3600 * 1000 } });
+          set({ deliveries: get().deliveries.map(d => ({ ...d, endsAt: now + (d.endsAt - now) / 2 })) });
+        } else if (seg.type === 'double') {
+          set({ boosts: { ...get().boosts, doubleNext: true } });
+        }
+        get().notify('system', 'diamond-stone', `Lucky spin: ${seg.label}!`);
+        return { ok: true, index, prize: seg.type, label: seg.label, left: t.spinLeft - 1 };
       },
 
       // ---------- gold exchange ----------

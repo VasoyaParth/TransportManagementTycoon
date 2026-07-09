@@ -1,19 +1,19 @@
 // Modal flows — all rendered inside the shared <Sheet>. New delivery, truck
 // detail, buy truck, contracts, power-ups, notifications, settings.
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Switch } from 'react-native';
-import Svg, { Polyline, Circle, Path } from 'react-native-svg';
+import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Switch, Animated, Easing } from 'react-native';
+import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS } from '../../store/gameStore';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
 import { CITIES } from '../../data/cities';
 import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
 import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, TRUCK_COLORS, TRUCK_LOGOS } from '../../data/trucks';
 import { inr, inrShort } from '../../engine/economy';
-import { APP_VERSION, checkForUpdate, downloadApk, openInstaller, fmtMB, cmpVer } from '../../net/updates';
+import { APP_VERSION, checkForUpdate, fmtMB, cmpVer } from '../../net/updates';
+import { useDownloadState, startDownload, installDownloaded, cancelDownload } from '../../net/downloadManager';
 import { COUNTRIES, COUNTRY_BY_CODE } from '../../data/expansion';
-import { AdBanner, showRewarded } from '../../ads';
 
 const propMeta = {
   diesel: { color: C.amber, bg: C.amberSoft, icon: 'gas-station', label: 'Diesel' },
@@ -482,21 +482,7 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
   const customizeTruck = useGame(s => s.customizeTruck);
   const sellTruck = useGame(s => s.sellTruck);
   const truckResale = useGame(s => s.truckResale);
-  const boostDeliveryWithAd = useGame(s => s.boostDeliveryWithAd);
-  const adRepairTruck = useGame(s => s.adRepairTruck);
-  const adSkipBuild = useGame(s => s.adSkipBuild);
   const [confirmSell, setConfirmSell] = useState(false);
-  const [boosting, setBoosting] = useState(false);
-  const watchThenDo = async (unit, action, okMsg) => {
-    if (boosting) return;
-    setBoosting(true);
-    try {
-      const r = await showRewarded(unit);
-      if (r.earned) { const res = action(); toast(res && res.ok === false ? res.err : okMsg, res && res.ok === false ? 'error' : 'success'); }
-      else if (r.unavailable) toast('Ads are not available right now', 'warn');
-      else toast('Watch the full ad first', 'info');
-    } finally { setBoosting(false); }
-  };
   useEffect(() => { if (!visible) setConfirmSell(false); }, [visible]);
   const truck = trucks.find(t => t.id === truckId);
   useTick(visible && !!truck && (truck.status === 'delivering' || truck.status === 'building'));
@@ -504,16 +490,6 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
   const m = modelById(truck.modelId);
   const meta = statusMeta[truck.status];
   const d = deliveries.find(x => x.truckId === truck.id);
-  const watchToSpeedUp = async () => {
-    if (boosting || !d) return;
-    setBoosting(true);
-    try {
-      const r = await showRewarded('rewardedDelivery');
-      if (r.earned) { const b = boostDeliveryWithAd(d.id); toast(b.completed ? 'Delivery completed!' : 'Sped up 25%!', 'success'); }
-      else if (r.unavailable) toast('Ads are not available right now', 'warn');
-      else toast('Watch the full ad to speed up', 'info');
-    } finally { setBoosting(false); }
-  };
   const now = Date.now();
   const prog = d ? Math.min(100, ((now - d.startedAt) / (d.endsAt - d.startedAt)) * 100) : 0;
   const eta = d ? fmtDur((d.endsAt - now) / 1000) : null;
@@ -575,23 +551,10 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
             <JourneyTracker delivery={d} model={m} />
           </Card>
         )}
-        {truck.status === 'delivering' && d && (
-          <Card style={{ marginBottom: 12, backgroundColor: C.greenSoft }}>
-            <Row>
-              <Icon name="fast-forward" size={18} color={C.green} />
-              <Text style={[FONT.sub, { marginLeft: 6, flex: 1, fontWeight: '700', color: C.text }]}>In a hurry? Watch an ad to cut 25% off the remaining time. Watch a few to finish instantly.</Text>
-            </Row>
-            <Btn title={boosting ? 'Loading ad…' : 'Watch ad → 25% faster'} kind="green" icon="play-circle"
-              style={{ marginTop: 10 }} disabled={boosting} onPress={watchToSpeedUp} />
-          </Card>
-        )}
         {truck.status === 'building' && (
           <Card style={{ marginBottom: 12 }}>
             <Row style={{ justifyContent: 'space-between' }}><Text style={FONT.h3}>Building...</Text><Text style={FONT.mono}>{Math.ceil(buildLeft)}s</Text></Row>
             <Progress pct={buildPct} color={C.amber} style={{ marginTop: 8 }} />
-            <Btn title={boosting ? 'Loading ad…' : 'Watch ad → finish build now'} kind="green" icon="play-circle"
-              style={{ marginTop: 10 }} disabled={boosting}
-              onPress={() => watchThenDo('rewardedDelivery', () => adSkipBuild(truck.id), 'Build finished!')} />
           </Card>
         )}
         {truck.status === 'broken' && (
@@ -601,9 +564,6 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
               <Btn title={`Repair ${inr(fee)}`} kind="soft" small onPress={() => doRepair(false)} style={{ flex: 1 }} />
               <Btn title="Repair · 15 Gold" kind="blue" small onPress={() => doRepair(true)} style={{ flex: 1 }} />
             </Row>
-            <Btn title={boosting ? 'Loading ad…' : 'Repair free · Watch ad'} kind="green" small icon="play-circle"
-              style={{ marginTop: 8 }} disabled={boosting}
-              onPress={() => watchThenDo('rewardedDelivery', () => adRepairTruck(truck.id), 'Repaired!')} />
           </Card>
         )}
 
@@ -731,7 +691,6 @@ export function BuyTruckModal({ visible, onClose }) {
       <FlatList
         data={list} keyExtractor={m => m.id} showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 30 }}
-        ListFooterComponent={<AdBanner style={{ marginTop: 8 }} />}
         renderItem={({ item: m }) => {
           const pm = propMeta[m.propulsion];
           const afford = balance >= m.price;
@@ -797,7 +756,6 @@ export function ContractsModal({ visible, onClose, onAccept }) {
       <FlatList
         data={sorted} keyExtractor={c => c.id} showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 30 }}
-        ListFooterComponent={<AdBanner style={{ marginTop: 8 }} />}
         ListHeaderComponent={
           <Text style={[FONT.sub, { marginBottom: 10 }]}>
             Contracts pay a <Text style={{ fontWeight: '800', color: C.green }}>bonus on top</Text> of normal delivery profit. Accept one, then dispatch a parked truck to fulfil it before it expires.
@@ -878,30 +836,14 @@ function ContractStat({ icon, label, value, color = C.text }) {
 }
 
 // ============ Power-Ups ============
-export function PowerupsModal({ visible, onClose }) {
+export function PowerupsModal({ visible, onClose, onOpenGames }) {
   const toast = useToast();
   const gold = useGame(s => s.gold);
   const trucks = useGame(s => s.trucks);
   const buyPowerup = useGame(s => s.buyPowerup);
   const convertGoldToCash = useGame(s => s.convertGoldToCash);
-  const grantAdGold = useGame(s => s.grantAdGold);
-  const adGoldCount = useGame(s => s.adGoldCount || 0);
-  const [watchingAd, setWatchingAd] = useState(false);
   const [expand, setExpand] = useState(null);
   const [xGold, setXGold] = useState(5);
-
-  const watchForGold = async () => {
-    if (watchingAd) return;
-    setWatchingAd(true);
-    try {
-      const r = await showRewarded('rewardedGold');
-      if (r.earned) { const g = grantAdGold(); toast(`+${g.amount} Gold!`, 'success'); }
-      else if (r.unavailable) toast('Ads are not available right now', 'warn');
-      else toast('Watch the full ad to earn Gold', 'info');
-    } finally { setWatchingAd(false); }
-  };
-  // Payout tier hint based on ads watched so far.
-  const tierText = adGoldCount >= 10 ? '30–40 Gold' : adGoldCount >= 5 ? '20–30 Gold (30–40 after 10)' : '10–20 Gold (rises after 5 & 10)';
   useEffect(() => { if (visible) setXGold(g => Math.min(Math.max(1, g), Math.max(1, gold))); }, [visible, gold]);
   const xClamp = Math.min(Math.max(1, xGold), Math.max(1, gold));
   const exchange = () => {
@@ -935,12 +877,12 @@ export function PowerupsModal({ visible, onClose }) {
           <Row><Icon name="gold" size={20} color={C.gold} /><Text style={[FONT.h3, { marginLeft: 6 }]}>Your Gold</Text></Row>
           <Text style={[FONT.h2, { color: C.gold }]}>{gold}</Text>
         </Row>
-        {/* Free Gold by watching a rewarded ad — payout tier grows as you watch more. */}
-        <Btn title={watchingAd ? 'Loading ad…' : 'Watch ad → free Gold'} kind="green" icon="play-circle" small={false}
-          style={{ marginTop: 10 }} disabled={watchingAd} onPress={watchForGold} />
+        {/* Earn free Gold by playing the daily mini-games (scratch + roulette). */}
+        <Btn title="Play for free Gold" kind="green" icon="dice-multiple" small={false}
+          style={{ marginTop: 10 }} onPress={() => { onClose(); onOpenGames && onOpenGames(); }} />
         <Row style={{ marginTop: 6 }}>
           <Icon name="information-outline" size={12} color={C.sub} />
-          <Text style={[FONT.tiny, { marginLeft: 4, flex: 1 }]}>Earn {tierText}. Watched {adGoldCount} ad{adGoldCount === 1 ? '' : 's'}.</Text>
+          <Text style={[FONT.tiny, { marginLeft: 4, flex: 1 }]}>Scratch cards & lucky spin — 10 free plays of each, every day.</Text>
         </Row>
       </Card>
 
@@ -1002,7 +944,153 @@ export function PowerupsModal({ visible, onClose }) {
             </Card>
           );
         })}
-        <AdBanner style={{ marginTop: 8 }} />
+      </ScrollView>
+    </Sheet>
+  );
+}
+
+// ============ Free-Gold Mini-Games (scratch + lucky spin) ============
+function polar(cx, cy, r, deg) { const a = (deg - 90) * Math.PI / 180; return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) }; }
+function slicePath(cx, cy, r, a0, a1) {
+  const s = polar(cx, cy, r, a0), e = polar(cx, cy, r, a1);
+  const large = a1 - a0 > 180 ? 1 : 0;
+  return `M${cx},${cy} L${s.x},${s.y} A${r},${r} 0 ${large} 1 ${e.x},${e.y} Z`;
+}
+
+function ScratchGame({ toast }) {
+  const playScratch = useGame(s => s.playScratch);
+  const games = useGame(s => s.games); // re-render on play
+  const gamesToday = useGame(s => s.gamesToday);
+  const left = gamesToday().scratchLeft;
+  const [card, setCard] = useState(null);
+  const [revealed, setRevealed] = useState([]);
+
+  const newCard = () => {
+    const r = playScratch();
+    if (!r.ok) { toast(r.err, 'warn'); return; }
+    setCard(r); setRevealed([false, false, false, false, false, false]);
+  };
+  const reveal = i => setRevealed(rv => rv.map((v, k) => (k === i ? true : v)));
+  const allRevealed = card && revealed.every(Boolean);
+
+  return (
+    <View>
+      <Text style={[FONT.sub, { textAlign: 'center', marginBottom: 4 }]}>Scratch all 6 tiles — a lucky rule decides your Gold (max 5).</Text>
+      <Text style={[FONT.tiny, { textAlign: 'center', marginBottom: 10 }]}>{left} of {DAILY_PLAYS} free cards left today</Text>
+      {card ? (
+        <>
+          <Row style={{ flexWrap: 'wrap', justifyContent: 'center', gap: 10 }}>
+            {card.tiles.map((v, i) => (
+              <Pressable key={i} onPress={() => reveal(i)} style={[cs.scratchTile, revealed[i] && { backgroundColor: C.greenSoft, borderColor: C.green }]}>
+                {revealed[i]
+                  ? <><Icon name="gold" size={16} color={C.gold} /><Text style={[FONT.h3, { color: C.text }]}>{v}</Text></>
+                  : <Icon name="help" size={22} color={C.faint} />}
+              </Pressable>
+            ))}
+          </Row>
+          <View style={{ alignItems: 'center', marginTop: 12, minHeight: 46 }}>
+            {allRevealed ? (
+              <>
+                <Text style={[FONT.sub, { fontWeight: '700' }]}>{card.ruleLabel}</Text>
+                <Text style={[FONT.h2, { color: card.reward > 0 ? C.green : C.sub }]}>{card.reward > 0 ? `+${card.reward} Gold` : 'No Gold — try again!'}</Text>
+              </>
+            ) : <Btn title="Reveal all" kind="soft" small onPress={() => setRevealed([true, true, true, true, true, true])} />}
+          </View>
+        </>
+      ) : (
+        <View style={{ alignItems: 'center', paddingVertical: 20 }}>
+          <Icon name="ticket-confirmation-outline" size={40} color={C.faint} />
+          <Text style={[FONT.sub, { marginTop: 8 }]}>Tap below to get a fresh scratch card.</Text>
+        </View>
+      )}
+      <Btn title={card && !allRevealed ? 'Scratch it!' : 'New scratch card'} kind="green" icon="ticket-confirmation"
+        style={{ marginTop: 16 }} disabled={left <= 0 && (!card || allRevealed)} onPress={newCard} />
+      {left <= 0 ? <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 6 }]}>Come back tomorrow for 10 more.</Text> : null}
+    </View>
+  );
+}
+
+function SpinGame({ toast }) {
+  const playRoulette = useGame(s => s.playRoulette);
+  const games = useGame(s => s.games);
+  const gamesToday = useGame(s => s.gamesToday);
+  const left = gamesToday().spinLeft;
+  const spin = useRef(new Animated.Value(0)).current;
+  const angleRef = useRef(0);
+  const [spinning, setSpinning] = useState(false);
+  const [result, setResult] = useState(null);
+
+  const W = 250, cx = W / 2, cy = W / 2, r = W / 2 - 6, n = ROULETTE_SEGMENTS.length, seg = 360 / n;
+
+  const doSpin = () => {
+    if (spinning) return;
+    const res = playRoulette();
+    if (!res.ok) { toast(res.err, 'warn'); return; }
+    setSpinning(true); setResult(null);
+    const target = 360 * 5 + (360 - (res.index * seg + seg / 2)); // land segment center at top
+    const start = angleRef.current;
+    const end = start + (target - (start % 360) + 360) % 360 + 360 * 5;
+    Animated.timing(spin, { toValue: end, duration: 3600, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start(() => {
+      angleRef.current = end; setSpinning(false); setResult(res);
+      toast(res.prize === 'nothing' ? 'No luck this time!' : `Won: ${res.label}`, res.prize === 'nothing' ? 'info' : 'success');
+    });
+  };
+  const rotate = spin.interpolate({ inputRange: [0, 360], outputRange: ['0deg', '360deg'] });
+
+  return (
+    <View style={{ alignItems: 'center' }}>
+      <Text style={[FONT.tiny, { marginBottom: 8 }]}>{left} of {DAILY_PLAYS} free spins left today</Text>
+      <View style={{ width: W, height: W }}>
+        {/* pointer */}
+        <View style={{ position: 'absolute', top: -2, left: cx - 8, zIndex: 2 }}>
+          <Icon name="menu-down" size={30} color={C.text} />
+        </View>
+        <Animated.View style={{ transform: [{ rotate }] }}>
+          <Svg width={W} height={W}>
+            <G>
+              {ROULETTE_SEGMENTS.map((sgm, i) => {
+                const mid = polar(cx, cy, r * 0.62, i * seg + seg / 2);
+                return (
+                  <G key={i}>
+                    <Path d={slicePath(cx, cy, r, i * seg, (i + 1) * seg)} fill={sgm.color} stroke="#fff" strokeWidth={2} />
+                    <SvgText x={mid.x} y={mid.y} fill="#fff" fontSize="11" fontWeight="bold" textAnchor="middle">{sgm.label}</SvgText>
+                  </G>
+                );
+              })}
+              <Circle cx={cx} cy={cy} r={16} fill="#fff" stroke={C.border} strokeWidth={2} />
+            </G>
+          </Svg>
+        </Animated.View>
+      </View>
+      <View style={{ minHeight: 30, marginTop: 10, alignItems: 'center' }}>
+        {result ? <Text style={[FONT.h3, { color: result.prize === 'nothing' ? C.sub : C.green }]}>{result.prize === 'nothing' ? 'Try again!' : `Won ${result.label}!`}</Text> : null}
+      </View>
+      <Btn title={spinning ? 'Spinning…' : 'Spin the wheel'} kind="green" icon="rotate-right" style={{ marginTop: 8, alignSelf: 'stretch' }}
+        disabled={spinning || left <= 0} onPress={doSpin} />
+      {left <= 0 ? <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 6 }]}>Come back tomorrow for 10 more.</Text> : null}
+    </View>
+  );
+}
+
+export function MiniGamesModal({ visible, onClose }) {
+  const toast = useToast();
+  const gold = useGame(s => s.gold);
+  const [tab, setTab] = useState('scratch');
+  useEffect(() => { if (visible) setTab('scratch'); }, [visible]);
+  return (
+    <Sheet visible={visible} onClose={onClose} title="Free Gold Games" height="86%">
+      <Card style={{ marginBottom: 12, backgroundColor: C.bgSoft }}>
+        <Row style={{ justifyContent: 'space-between' }}>
+          <Row><Icon name="gold" size={20} color={C.gold} /><Text style={[FONT.h3, { marginLeft: 6 }]}>Your Gold</Text></Row>
+          <Text style={[FONT.h2, { color: C.gold }]}>{gold}</Text>
+        </Row>
+      </Card>
+      <Row style={{ gap: 6, marginBottom: 14 }}>
+        <Chip label="Scratch Card" icon="ticket-confirmation" active={tab === 'scratch'} onPress={() => setTab('scratch')} />
+        <Chip label="Lucky Spin" icon="rotate-right" active={tab === 'spin'} onPress={() => setTab('spin')} />
+      </Row>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+        {tab === 'scratch' ? <ScratchGame toast={toast} /> : <SpinGame toast={toast} />}
       </ScrollView>
     </Sheet>
   );
@@ -1295,8 +1383,8 @@ function SkeletonList({ rows = 4, lines = 2 }) {
 function AboutTab({ onReplayTutorial }) {
   const toast = useToast();
   const [state, setState] = useState({ status: 'idle', data: null, err: null }); // idle|checking|done|error
-  const [dl, setDl] = useState(null); // {loaded,total,installing,done} | null
-  const abortRef = useRef(null);
+  // Live download state comes from the background manager (survives tab switches).
+  const download = useDownloadState();
 
   const check = async () => {
     setState({ status: 'checking', data: null, err: null });
@@ -1309,30 +1397,16 @@ function AboutTab({ onReplayTutorial }) {
     }
   };
   // Auto-check once when the About tab first mounts.
-  useEffect(() => { check(); return () => { if (abortRef.current) abortRef.current(); }; }, []);
+  useEffect(() => { check(); }, []);
 
   const latest = state.data?.latest;
   const hasUpdate = state.data?.hasUpdate;
 
-  const startDownload = () => {
-    if (!latest?.apkUrl) return;
-    setDl({ loaded: 0, total: latest.apkSize || 0, installing: false, done: false });
-    const { promise, abort } = downloadApk(latest.apkUrl, {
-      onProgress: p => setDl(d => (d ? { ...d, loaded: p.loaded, total: p.total || d.total } : d)),
-    });
-    abortRef.current = abort;
-    promise
-      .then(async () => {
-        setDl(d => (d ? { ...d, done: true, installing: true } : d));
-        const r = await openInstaller(latest.apkUrl);
-        if (!r.ok) toast(r.err || 'Could not open installer', 'error');
-        else toast('Opening Android installer…', 'info');
-      })
-      .catch(e => { if (e.message !== 'aborted') toast(e.message, 'error'); setDl(null); });
-  };
-  const cancelDownload = () => { if (abortRef.current) abortRef.current(); setDl(null); };
-
-  const pct = dl && dl.total ? Math.min(100, Math.round((dl.loaded / dl.total) * 100)) : 0;
+  const beginDownload = () => { if (latest?.apkUrl) startDownload(latest.apkUrl, latest.version); };
+  const doInstall = async () => { const r = await installDownloaded(); if (!r.ok) toast(r.err || 'Could not open installer', 'error'); else toast('Opening installer…', 'info'); };
+  // This tab's download UI reflects the manager only for the version we're viewing.
+  const dl = (download.status !== 'idle' && (!latest || download.version === latest.version)) ? download : null;
+  const pct = dl ? dl.pct : 0;
 
   return (
     <>
@@ -1374,27 +1448,27 @@ function AboutTab({ onReplayTutorial }) {
           <Btn title="Check" small kind="soft" icon="refresh" disabled={state.status === 'checking'} onPress={check} />
         </Row>
 
-        {/* Download / install flow */}
-        {hasUpdate && !dl && (
-          <Btn title={`Download & Install ${latest.version}`} kind="green" icon="download" style={{ marginTop: 12 }} onPress={startDownload} />
+        {/* Download / install flow — backed by the background download manager,
+            so progress continues if you leave this screen and resumes here. */}
+        {hasUpdate && (!dl || dl.status === 'error') && (
+          <Btn title={`Download & Install ${latest.version}`} kind="green" icon="download" style={{ marginTop: 12 }} onPress={beginDownload} />
         )}
-        {dl && (
+        {dl && dl.status !== 'error' && (
           <View style={{ marginTop: 12 }}>
-            <Progress pct={dl.done ? 100 : pct} color={C.green} />
+            <Progress pct={pct} color={C.green} />
             <Row style={{ justifyContent: 'space-between', marginTop: 6 }}>
               <Text style={FONT.tiny}>
-                {dl.installing ? 'Handing off to Android installer…'
+                {dl.status === 'done' ? 'Downloaded — ready to install'
                   : `${fmtMB(dl.loaded)}${dl.total ? ` / ${fmtMB(dl.total)}` : ''} downloaded`}
               </Text>
-              <Text style={[FONT.tiny, { fontWeight: '700', color: C.green }]}>{dl.done ? '100%' : `${pct}%`}</Text>
+              <Text style={[FONT.tiny, { fontWeight: '700', color: C.green }]}>{pct}%</Text>
             </Row>
-            {!dl.done && <Btn title="Cancel" kind="ghost" small style={{ marginTop: 6 }} onPress={cancelDownload} />}
-            {dl.done && (
+            {dl.status === 'downloading' && <Btn title="Cancel" kind="ghost" small style={{ marginTop: 6 }} onPress={cancelDownload} />}
+            {dl.status === 'done' && (
               <>
-                <Btn title="Install now" kind="green" icon="cellphone-arrow-down" style={{ marginTop: 8 }}
-                  onPress={async () => { const r = await openInstaller(latest.apkUrl); toast(r.ok ? 'Opening installer…' : r.err, r.ok ? 'info' : 'error'); }} />
+                <Btn title="Install now" kind="green" icon="cellphone-arrow-down" style={{ marginTop: 8 }} onPress={doInstall} />
                 <Text style={[FONT.tiny, { marginTop: 6 }]}>
-                  Tap “Install now”. When Android asks, allow “Install unknown apps” for this app, then open the downloaded APK from your notifications to finish.
+                  Tap “Install now”. If Android asks, allow “Install unknown apps” for Truck Empire, then confirm the install.
                 </Text>
               </>
             )}
@@ -1465,7 +1539,6 @@ function AboutTab({ onReplayTutorial }) {
         ))}
       </Card>
 
-      <AdBanner style={{ marginTop: 14 }} />
       <Btn title="Replay Tutorial" kind="soft" icon="school-outline" style={{ marginTop: 14 }} onPress={onReplayTutorial} />
       <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 12 }]}>Made with ♥ in India · {APP_VERSION}</Text>
     </>
@@ -1619,7 +1692,6 @@ export function HubsModal({ visible, onClose, onShowOnMap }) {
             );
           })}
         </View>
-        <AdBanner style={{ marginTop: 4, marginBottom: 20 }} />
       </ScrollView>
     </Sheet>
   );
@@ -1705,7 +1777,6 @@ export function CountriesModal({ visible, onClose }) {
             </Card>
           );
         })}
-        <AdBanner style={{ marginTop: 8 }} />
       </ScrollView>
     </Sheet>
   );
@@ -1724,4 +1795,5 @@ const cs = StyleSheet.create({
   notifIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.border },
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.blue },
   iconTile: { width: 52, height: 52, borderRadius: 14, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
+  scratchTile: { width: 78, height: 66, borderRadius: 14, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.bgSoft, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 4 },
 });

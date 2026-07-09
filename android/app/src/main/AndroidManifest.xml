@@ -14,9 +14,6 @@
       android:allowBackup="false"
       android:theme="@style/AppTheme"
       android:supportsRtl="true">
-      <!-- The AdMob APPLICATION_ID meta-data is injected automatically by
-           react-native-google-mobile-ads from the android_app_id in app.json.
-           Do NOT add it here too — duplicate meta-data breaks the manifest merge. -->
       <activity
         android:name=".MainActivity"
         android:label="@string/app_name"
