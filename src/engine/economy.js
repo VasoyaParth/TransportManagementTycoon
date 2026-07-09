@@ -43,19 +43,37 @@ export function tollCost(model, distanceKm) {
   return distanceKm * ECON.tollPerKm * axleFactor;
 }
 
+// Small trucks (mini / last-mile) run LTL freight, which in reality is priced
+// far higher per ton-km than a full truckload — you pay for the trip, not the
+// tonnage. Without this a 1–1.2 t mini truck's freight can't even cover its
+// fuel + tolls, so every delivery lands in the red. This premium fades out by
+// ~6 t capacity, restoring realistic economics across the whole fleet.
+export function payloadPremium(model) {
+  const cap = model.cargo || 1;
+  if (cap >= 6) return 1;
+  return 1 + (6 - cap) * 0.55; // 1 t => ~3.75x, 1.2 t => ~3.64x, 4.5 t => ~1.83x
+}
+
 // Full realistic P&L for a delivery. Revenue is cargo-driven (rate = ₹/km/ton
 // for THIS cargo type) and truck-driven: a higher-rated truck earns a small
 // handling premium, while a bigger truck pays more fuel/maintenance/tolls.
+// A small-vehicle payload premium keeps mini trucks profitable, and a hard
+// floor guarantees a legitimate haul always clears a small margin over cost
+// (no hauler would run a loss-making job).
 // boosts: { marketing: 0..0.5, doubleNext: bool }
 export function deliveryEconomics({ model, distanceKm, cargoTons, rate = ECON.baseRate, boosts = {} }) {
   const marketing = 1 + (boosts.marketing || 0);
   const revBoost = boosts.doubleNext ? 2 : 1;
   // Better-rated trucks command a slightly higher freight rate (client trust).
   const handling = 1 + (((model.rating || 4) - 4) * 0.04);
-  const gross = distanceKm * cargoTons * rate * marketing * revBoost * handling;
   const fuel = fuelCost(model, distanceKm);
   const maint = maintenanceCost(model, distanceKm);
   const tolls = tollCost(model, distanceKm);
+  let gross = distanceKm * cargoTons * rate * marketing * revBoost * handling * payloadPremium(model);
+  // Minimum freight floor: gross must beat total cost by ~8% so a real haul
+  // never completes at a loss (the doubleNext/marketing boosts still stack above).
+  const costFloor = Math.round((fuel + maint + tolls) * 1.08 * revBoost);
+  if (gross < costFloor) gross = costFloor;
   const net = gross - fuel - maint - tolls;
   return {
     gross: Math.round(gross),

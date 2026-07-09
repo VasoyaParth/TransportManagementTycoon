@@ -2,7 +2,7 @@
 // toasts, modals, skeletons. Pure RN Animated (no extra native deps).
 import React, { useEffect, useRef, useState, createContext, useContext } from 'react';
 import {
-  View, Text, Pressable, Animated, Easing, StyleSheet, Modal as RNModal, ScrollView,
+  View, Text, Pressable, Animated, Easing, StyleSheet, Modal as RNModal, ScrollView, SafeAreaView, StatusBar, Platform,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { C, FONT, SHADOW, RADIUS } from './theme';
@@ -33,7 +33,7 @@ export function Money({ value, short = false, style, prefixIcon, size }) {
     }
     prev.current = value;
     return () => anim.removeListener(id);
-  }, [value]);
+  }, [value, anim, flash, floatA]);
 
   const color = flash.interpolate({ inputRange: [0, 1], outputRange: [C.text, C.green] });
   return (
@@ -56,7 +56,7 @@ export function Progress({ pct, color = C.blue, height = 6, style }) {
   const anim = useRef(new Animated.Value(pct)).current;
   useEffect(() => {
     Animated.timing(anim, { toValue: pct, duration: 400, easing: Easing.out(Easing.quad), useNativeDriver: false }).start();
-  }, [pct]);
+  }, [pct, anim]);
   return (
     <View style={[{ height, borderRadius: height / 2, backgroundColor: C.bgSoft, overflow: 'hidden' }, style]}>
       <Animated.View style={{
@@ -147,7 +147,7 @@ export function Skeleton({ w = '100%', h = 14, r = 6, style }) {
       Animated.timing(anim, { toValue: 1, duration: 700, useNativeDriver: true }),
       Animated.timing(anim, { toValue: 0.4, duration: 700, useNativeDriver: true }),
     ])).start();
-  }, []);
+  }, [anim]);
   return <Animated.View style={[{ width: w, height: h, borderRadius: r, backgroundColor: C.border, opacity: anim }, style]} />;
 }
 
@@ -156,7 +156,7 @@ export function Sheet({ visible, onClose, title, children, height = '82%' }) {
   const slide = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.timing(slide, { toValue: visible ? 1 : 0, duration: 260, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
-  }, [visible]);
+  }, [visible, slide]);
   return (
     <RNModal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={st.dim} onPress={onClose} />
@@ -185,9 +185,15 @@ export function ToastProvider({ children }) {
   return (
     <ToastCtx.Provider value={push}>
       {children}
-      <View pointerEvents="none" style={st.toastWrap}>
-        {toasts.map(t => <ToastItem key={t.id} {...t} />)}
-      </View>
+      {/* Toasts live in their own top-level Modal so they always float ABOVE any
+          open Sheet (a native Modal), and drop in just below the header. */}
+      <RNModal visible={toasts.length > 0} transparent animationType="none" onRequestClose={() => {}}>
+        <SafeAreaView pointerEvents="box-none" style={{ flex: 1 }}>
+          <View pointerEvents="box-none" style={st.toastWrap}>
+            {toasts.map(t => <ToastItem key={t.id} {...t} />)}
+          </View>
+        </SafeAreaView>
+      </RNModal>
     </ToastCtx.Provider>
   );
 }
@@ -197,7 +203,7 @@ function ToastItem({ msg, kind }) {
   useEffect(() => {
     Animated.spring(anim, { toValue: 1, useNativeDriver: true, speed: 20, bounciness: 8 }).start();
     haptic(kind === 'error' ? 'error' : kind === 'warn' ? 'warn' : kind === 'success' ? 'success' : 'light');
-  }, []);
+  }, [anim, kind]);
   const meta = {
     info: { icon: 'information', color: C.blue },
     success: { icon: 'check-circle', color: C.green },
@@ -206,7 +212,7 @@ function ToastItem({ msg, kind }) {
   }[kind] || { icon: 'information', color: C.blue };
   return (
     <Animated.View style={[st.toast, SHADOW.pop, {
-      opacity: anim, transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
+      opacity: anim, transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [-20, 0] }) }],
     }]}>
       <Icon name={meta.icon} size={18} color={meta.color} style={{ marginRight: 8 }} />
       <Text style={[FONT.body, { flex: 1, fontWeight: '600' }]} numberOfLines={2}>{msg}</Text>
@@ -260,7 +266,12 @@ const st = StyleSheet.create({
     borderTopLeftRadius: RADIUS.xl, borderTopRightRadius: RADIUS.xl, padding: 16, paddingBottom: 24,
   },
   sheetHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  toastWrap: { position: 'absolute', bottom: 90, left: 16, right: 16 },
+  // Below the floating header pill, at the very top. On Android SafeAreaView
+  // doesn't inset, so add the status-bar height manually.
+  toastWrap: {
+    position: 'absolute', left: 16, right: 16,
+    top: 62 + (Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0),
+  },
   toast: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: C.bg, borderRadius: RADIUS.md,
     borderWidth: 1, borderColor: C.border, paddingVertical: 10, paddingHorizontal: 12, marginTop: 8,

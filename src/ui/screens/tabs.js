@@ -305,7 +305,7 @@ function DriverStat({ icon, label, value }) {
   );
 }
 
-function StaffCard({ member, trucks, onAssign, onFire }) {
+function StaffCard({ member, trucks, onAssign, onFire, onOpen }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [confirmFire, setConfirmFire] = useState(false);
   useEffect(() => {
@@ -323,7 +323,7 @@ function StaffCard({ member, trucks, onAssign, onFire }) {
   return (
     <Card style={{ marginBottom: 10 }}>
       <Row style={{ justifyContent: 'space-between' }}>
-        <Row style={{ flex: 1 }}>
+        <Pressable style={[{ flexDirection: 'row', alignItems: 'center', flex: 1 }]} onPress={() => onOpen && onOpen(member)}>
           <View style={[st.iconCircle, { backgroundColor: C.blueSoft }]}>
             <Icon name={avatar} size={22} color={C.blue} />
           </View>
@@ -334,9 +334,15 @@ function StaffCard({ member, trucks, onAssign, onFire }) {
                 text={`${level ? level.name : member.level} ${role ? role.name : member.role}`}
                 icon={role ? role.icon : 'account'}
               />
+              {member.role === 'driver' ? (
+                <Row style={{ marginLeft: 6 }}>
+                  <Icon name="map-marker-path" size={12} color={C.blue} />
+                  <Text style={[FONT.tiny, { color: C.blue, marginLeft: 2 }]}>Tap for live route</Text>
+                </Row>
+              ) : null}
             </Row>
           </View>
-        </Row>
+        </Pressable>
         <IconBtn
           name="account-remove"
           color={C.red}
@@ -401,7 +407,7 @@ function StaffCard({ member, trucks, onAssign, onFire }) {
 }
 
 const STAFF_PAGE = 6;
-export function StaffTab() {
+export function StaffTab({ onOpenDriver }) {
   const staff = useGame(s => s.staff);
   const candidates = useGame(s => s.candidates);
   const trucks = useGame(s => s.trucks);
@@ -455,6 +461,7 @@ export function StaffTab() {
               trucks={trucks}
               onAssign={(mem, t) => { assignDriver(mem.id, t.id); toast && toast(`${mem.name} assigned to ${modelById(t.modelId).name}`, 'success'); }}
               onFire={mem => { fire(mem.id); toast && toast(`${mem.name} has been let go`, 'warn'); }}
+              onOpen={mem => onOpenDriver && onOpenDriver(mem)}
             />
           ))}
           <LoadMore shown={shown.length} total={roster.length} onMore={() => setPage(p => p + 1)} />
@@ -566,31 +573,46 @@ export function EconomyTab() {
         </Card>
       )}
 
-      <SectionTitle icon="tune" text="Pricing Configuration" />
+      <SectionTitle icon="tune" text="Freight Pricing (₹ / km · ton)" />
+      <Card style={{ marginBottom: 10, backgroundColor: C.blueSoft }}>
+        <Row>
+          <Icon name="information-outline" size={14} color={C.blue} />
+          <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.text }]}>
+            Set your own rate per cargo type. It applies instantly to every new delivery's freight revenue and profit preview — raise a rate to ₹20 and that cargo pays far more per ton per km.
+          </Text>
+        </Row>
+      </Card>
       <Card>
         {CARGO_TYPES.map((cg, i) => {
+          const custom = pricing[cg.id] != null && pricing[cg.id] !== cg.rate;
           const v = pricing[cg.id] != null ? pricing[cg.id] : cg.rate;
           const round1 = n => Math.round(n * 10) / 10;
+          const MINR = 2, MAXR = 25;
           return (
-            <Row key={cg.id} style={[{ justifyContent: 'space-between', paddingVertical: 10 }, i > 0 && st.divider]}>
-              <Row style={{ flex: 1 }}>
-                <Icon name={cg.icon} size={18} color={C.sub} />
-                <Text style={[FONT.body, { marginLeft: 8, flex: 1 }]} numberOfLines={1}>{cg.name}</Text>
+            <View key={cg.id} style={[{ paddingVertical: 10 }, i > 0 && st.divider]}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Row style={{ flex: 1 }}>
+                  <Icon name={cg.icon} size={18} color={C.sub} />
+                  <View style={{ marginLeft: 8, flex: 1 }}>
+                    <Row>
+                      <Text style={[FONT.body, { fontWeight: '600' }]} numberOfLines={1}>{cg.name}</Text>
+                      {custom ? <View style={{ marginLeft: 6 }}><Pill text="Custom" icon="tune" color={C.green} bg={C.greenSoft} /></View> : null}
+                    </Row>
+                    <Text style={FONT.tiny}>Default ₹{cg.rate}{custom ? ` · reset available` : ''}</Text>
+                  </View>
+                </Row>
+                <Row style={{ alignItems: 'center' }}>
+                  <IconBtn name="minus-circle-outline" color={v <= MINR ? C.faint : C.text}
+                    onPress={() => { if (v > MINR) savePricing({ [cg.id]: round1(v - 1) }); }} />
+                  <Text style={[FONT.mono, { fontWeight: '800', minWidth: 62, textAlign: 'center', color: custom ? C.green : C.text }]}>₹{v}</Text>
+                  <IconBtn name="plus-circle-outline" color={v >= MAXR ? C.faint : C.text}
+                    onPress={() => { if (v < MAXR) savePricing({ [cg.id]: round1(v + 1) }); }} />
+                  {custom ? (
+                    <IconBtn name="restore" color={C.sub} onPress={() => savePricing({ [cg.id]: cg.rate })} />
+                  ) : <View style={{ width: 34 }} />}
+                </Row>
               </Row>
-              <Row>
-                <IconBtn
-                  name="minus-circle-outline"
-                  color={v <= 2 ? C.faint : C.text}
-                  onPress={() => { if (v > 2) savePricing({ [cg.id]: round1(v - 0.5) }); }}
-                />
-                <Text style={[FONT.mono, { fontWeight: '700', minWidth: 86, textAlign: 'center' }]}>₹{v}/km·t</Text>
-                <IconBtn
-                  name="plus-circle-outline"
-                  color={v >= 20 ? C.faint : C.text}
-                  onPress={() => { if (v < 20) savePricing({ [cg.id]: round1(v + 0.5) }); }}
-                />
-              </Row>
-            </Row>
+            </View>
           );
         })}
       </Card>

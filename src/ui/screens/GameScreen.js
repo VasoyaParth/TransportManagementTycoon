@@ -11,7 +11,7 @@ import { cityById } from '../../engine/routing';
 import { FleetTab, RoutesTab, StaffTab, EconomyTab, MarketingTab, CollabTab } from './tabs';
 import {
   NewDeliveryModal, TruckDetailModal, BuyTruckModal, ContractsModal,
-  PowerupsModal, NotificationsModal, SettingsModal, HubsModal,
+  PowerupsModal, NotificationsModal, SettingsModal, HubsModal, DriverDetailModal,
 } from './modals';
 import { haptic } from '../../engine/haptics';
 import Tutorial from './Tutorial';
@@ -164,18 +164,6 @@ export default function GameScreen() {
             <Text style={[FONT.tiny, { color: C.sub }]} numberOfLines={1}>{hq?.name}, {hq?.state}</Text>
           </View>
         </Pressable>
-        {/* Right-side action stack — moved out of the header for a clean menu bar */}
-        <View style={st.actionStack}>
-          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'hubs' }); }}>
-            <Icon name="garage" size={19} color={C.text} />
-          </Pressable>
-          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'contracts' }); }}>
-            <Icon name="file-document-outline" size={19} color={C.text} />
-          </Pressable>
-          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'powerups' }); }}>
-            <Icon name="star-four-points" size={19} color={C.gold} />
-          </Pressable>
-        </View>
         {/* Left-edge fleet-manager strip with arrow (opens sidebar) */}
         <Pressable style={[st.mgrStrip, SHADOW.pop]} onPress={() => { haptic('light'); setSidebar(true); }}>
           <Icon name="truck" size={18} color={C.blue} />
@@ -203,7 +191,7 @@ export default function GameScreen() {
         {tab === 'routes' && <RoutesTab
           onTrack={d => { setTab(null); const t = trucks.find(x => x.id === d.truckId); if (t) showOnMap(t); }}
           onNewDelivery={() => openNewDelivery()} />}
-        {tab === 'staff' && <StaffTab />}
+        {tab === 'staff' && <StaffTab onOpenDriver={(mem) => setModal({ kind: 'driver', staffId: mem.id })} />}
         {tab === 'economy' && <EconomyTab />}
         {tab === 'marketing' && <MarketingTab />}
         {tab === 'collab' && <CollabTab />}
@@ -222,6 +210,10 @@ export default function GameScreen() {
         visible={modal?.kind === 'truck'} onClose={() => setModal(null)} truckId={modal?.truckId}
         onNewDelivery={(tid) => openNewDelivery(tid)}
         onShowOnMap={showOnMap}
+      />
+      <DriverDetailModal
+        visible={modal?.kind === 'driver'} onClose={() => setModal(null)} staffId={modal?.staffId}
+        onShowOnMap={(t) => { setModal(null); setTab(null); showOnMap(t); }}
       />
       <BuyTruckModal visible={modal?.kind === 'buy'} onClose={() => setModal(null)} />
       <ContractsModal visible={modal?.kind === 'contracts'} onClose={() => setModal(null)}
