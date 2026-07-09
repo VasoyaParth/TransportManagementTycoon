@@ -82,8 +82,8 @@ android {
         applicationId "com.truckempiretycoon"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 146
-        versionName "1.6.0"
+        versionCode 147
+        versionName "1.6.1"
     }
     signingConfigs {
         debug {

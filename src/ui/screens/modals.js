@@ -4,8 +4,8 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Switch, Animated, Easing } from 'react-native';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
-import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS } from '../../store/gameStore';
+import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap } from '../components';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, EASTER_EGGS } from '../../store/gameStore';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
 import { CITIES } from '../../data/cities';
 import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
@@ -257,6 +257,18 @@ function JourneyTracker({ delivery, model }) {
   );
 }
 
+function SectionTitle({ icon, text, right }) {
+  return (
+    <Row style={{ justifyContent: 'space-between', marginBottom: 10, marginTop: 4 }}>
+      <Row>
+        {icon ? <Icon name={icon} size={17} color={C.sub} style={{ marginRight: 6 }} /> : null}
+        <Text style={FONT.h3}>{text}</Text>
+      </Row>
+      {right || null}
+    </Row>
+  );
+}
+
 function SpecRow({ icon, label, value }) {
   return (
     <Row style={{ justifyContent: 'space-between', paddingVertical: 5 }}>
@@ -289,6 +301,7 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
   const [query, setQuery] = useState('');
   const [cargo, setCargo] = useState('general');
   const [tons, setTons] = useState(null);
+  const tapKalavadEgg = useEasterEggTap('kalavad_roots', 3);
 
   useEffect(() => {
     if (!visible) return;
@@ -379,7 +392,7 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
             </Row>
             )}
             {!locked && results.map(c => (
-              <Pressable key={c.id} onPress={() => { setDest(c.id); setQuery(c.name); }} style={cs.resRow}>
+              <Pressable key={c.id} onPress={() => { setDest(c.id); setQuery(c.name); if (c.id === 'kalavad') tapKalavadEgg(); }} style={cs.resRow}>
                 <Icon name="map-marker" size={16} color={(c.country || 'IN') === 'IN' ? C.blue : C.amber} />
                 <View style={{ marginLeft: 8, flex: 1 }}>
                   <Text style={[FONT.body, { fontWeight: '600' }]}>{c.name}</Text>
@@ -798,6 +811,7 @@ export function BuyTruckModal({ visible, onClose }) {
   const buyTruck = useGame(s => s.buyTruck);
   const [tier, setTier] = useState(0);
   const [sort, setSort] = useState('default');
+  const tapWindowShopperEgg = useEasterEggTap('window_shopper', 8);
   const SORTS = [
     ['default', 'Default'],
     ['name-asc', 'Name A-Z'],
@@ -823,7 +837,7 @@ export function BuyTruckModal({ visible, onClose }) {
     <Sheet visible={visible} onClose={onClose} title="Truck Showroom" height="86%">
       <Row style={{ gap: 6, marginBottom: 10 }}>
         {[[0, 'All'], [1, 'Starter'], [2, 'Advanced'], [3, 'Premium']].map(([t, l]) => (
-          <Chip key={t} label={l} active={tier === t} onPress={() => setTier(t)} />
+          <Chip key={t} label={l} active={tier === t} onPress={() => { if (t === 0 && tier === 0) tapWindowShopperEgg(); setTier(t); }} />
         ))}
       </Row>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
@@ -1326,13 +1340,14 @@ export function MiniGamesModal({ visible, onClose }) {
   const toast = useToast();
   const gold = useGame(s => s.gold);
   const [tab, setTab] = useState('scratch');
+  const tapMidasEgg = useEasterEggTap('midas_touch', 7);
   useEffect(() => { if (visible) setTab('scratch'); }, [visible]);
   return (
     <Sheet visible={visible} onClose={onClose} title="Free Gold Games" height="86%">
       <Card style={{ marginBottom: 12, backgroundColor: C.bgSoft }}>
         <Row style={{ justifyContent: 'space-between' }}>
           <Row><Icon name="gold" size={20} color={C.gold} /><Text style={[FONT.h3, { marginLeft: 6 }]}>Your Gold</Text></Row>
-          <Text style={[FONT.h2, { color: C.gold }]}>{gold}</Text>
+          <Pressable onPress={tapMidasEgg}><Text style={[FONT.h2, { color: C.gold }]}>{gold}</Text></Pressable>
         </Row>
       </Card>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 14 }}>
@@ -1504,6 +1519,11 @@ export function SettingsModal({ visible, onClose, initialTab }) {
   const [cname, setCname] = useState(company?.name || '');
   const [logo, setLogo] = useState(company?.logo);
   const [confirmReset, setConfirmReset] = useState(false);
+  const tapMirrorEgg = useEasterEggTap('mirror_mirror', 5);
+  const tapBrandedEgg = useEasterEggTap('branded', 4);
+  const tapCuriousEgg = useEasterEggTap('curious_mind', 5);
+  const tapSteadyEgg = useEasterEggTap('steady_hands', 4);
+  const tapDangerEgg = useEasterEggTap('nice_try', 6);
 
   useEffect(() => {
     if (visible && company) { setCeo(company.ceo); setAvatar(company.avatar); setCname(company.name); setLogo(company.logo); setConfirmReset(false); }
@@ -1512,14 +1532,15 @@ export function SettingsModal({ visible, onClose, initialTab }) {
   const TABS = [
     ['profile', 'Profile', 'account-circle'], ['company', 'Company', 'domain'],
     ['gameplay', 'Gameplay', 'controller-classic'], ['notif', 'Alerts', 'bell-ring-outline'],
-    ['about', 'About', 'information-outline'],
+    ['eggs', 'Easter Eggs', 'egg-easter'], ['about', 'About', 'information-outline'],
   ];
   const day = gameDay().day;
+  const foundEggs = useGame(s => s.easterEggs?.found || []);
 
   return (
     <Sheet visible={visible} onClose={onClose} title="Settings" height="88%">
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 12 }}>
-        <Row style={{ gap: 6 }}>{TABS.map(([id, l, icon]) => <Chip key={id} label={l} icon={icon} active={tab === id} onPress={() => setTab(id)} />)}</Row>
+        <Row style={{ gap: 6 }}>{TABS.map(([id, l, icon]) => <Chip key={id} label={l} icon={icon} active={tab === id} onPress={() => { if (id === 'about' && tab === 'about') tapCuriousEgg(); setTab(id); }} />)}</Row>
       </ScrollView>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
         {tab === 'profile' && (
@@ -1529,7 +1550,7 @@ export function SettingsModal({ visible, onClose, initialTab }) {
               <Text style={[FONT.tiny, { marginBottom: 4 }]}>CEO NAME</Text>
               <TextInput value={ceo} onChangeText={setCeo} maxLength={30} style={cs.input} />
               <Text style={[FONT.tiny, { marginTop: 14, marginBottom: 4 }]}>AVATAR</Text>
-              <IconGrid options={AVATARS} value={avatar} onChange={setAvatar} />
+              <IconGrid options={AVATARS} value={avatar} onChange={o => { if (o === avatar) tapMirrorEgg(); setAvatar(o); }} />
             </Card>
             <SectionTitle icon="chart-box-outline" text="Lifetime Stats" />
             <Card>
@@ -1550,7 +1571,7 @@ export function SettingsModal({ visible, onClose, initialTab }) {
               <Text style={[FONT.tiny, { marginBottom: 4 }]}>COMPANY NAME</Text>
               <TextInput value={cname} onChangeText={setCname} maxLength={40} style={cs.input} />
               <Text style={[FONT.tiny, { marginTop: 14, marginBottom: 4 }]}>LOGO</Text>
-              <IconGrid options={LOGOS} value={logo} onChange={setLogo} />
+              <IconGrid options={LOGOS} value={logo} onChange={o => { if (o === logo) tapBrandedEgg(); setLogo(o); }} />
             </Card>
             <SectionTitle icon="account-multiple-plus-outline" text="Collaboration" />
             <Card>
@@ -1573,7 +1594,7 @@ export function SettingsModal({ visible, onClose, initialTab }) {
               </Row>
               <Text style={[FONT.tiny, { marginTop: 14, marginBottom: 6 }]}>DIFFICULTY</Text>
               <Row style={{ gap: 6 }}>
-                {['easy', 'normal', 'hard'].map(d => <Chip key={d} label={d[0].toUpperCase() + d.slice(1)} active={settings.difficulty === d} onPress={() => saveSettings({ difficulty: d })} />)}
+                {['easy', 'normal', 'hard'].map(d => <Chip key={d} label={d[0].toUpperCase() + d.slice(1)} active={settings.difficulty === d} onPress={() => { if (d === 'normal' && settings.difficulty === 'normal') tapSteadyEgg(); saveSettings({ difficulty: d }); }} />)}
               </Row>
               <Text style={[FONT.tiny, { marginTop: 14, marginBottom: 6 }]}>RANDOM EVENTS (theft, accidents...)</Text>
               <Row style={{ gap: 6 }}>
@@ -1614,7 +1635,9 @@ export function SettingsModal({ visible, onClose, initialTab }) {
             </Card>
             <SectionTitle icon="alert-octagon-outline" text="Danger Zone" />
             <Card style={{ borderColor: C.red }}>
-              <Text style={[FONT.sub, { marginBottom: 8 }]}>This permanently deletes your empire and all progress.</Text>
+              <Pressable onPress={tapDangerEgg}>
+                <Text style={[FONT.sub, { marginBottom: 8 }]}>This permanently deletes your empire and all progress.</Text>
+              </Pressable>
               <Btn title={confirmReset ? 'Tap again to confirm reset' : 'Reset Game Data'} kind="danger" icon="delete-forever-outline"
                 onPress={() => { if (confirmReset) { resetGame(); onClose(); } else setConfirmReset(true); }} />
             </Card>
@@ -1628,6 +1651,31 @@ export function SettingsModal({ visible, onClose, initialTab }) {
                 <ToggleRow key={k} label={l} value={settings.notif[k]} onChange={v => saveSettings({ notif: { ...settings.notif, [k]: v } })} />
               ))}
             </Card>
+          </>
+        )}
+        {tab === 'eggs' && (
+          <>
+            <SectionTitle icon="egg-easter" text={`Hidden Gems — ${foundEggs.length}/${EASTER_EGGS.length} found`} />
+            <Card style={{ marginBottom: 12, backgroundColor: C.bgSoft }}>
+              <Text style={FONT.sub}>Scattered around the app are {EASTER_EGGS.length} hidden gems. Each one is found by repeatedly tapping something specific, fast. Find one and it pays out big — once. The rest stay a secret until you stumble onto them.</Text>
+            </Card>
+            {EASTER_EGGS.map(egg => {
+              const found = foundEggs.includes(egg.id);
+              return (
+                <Card key={egg.id} style={{ marginBottom: 8, opacity: found ? 1 : 0.75 }}>
+                  <Row style={{ justifyContent: 'space-between' }}>
+                    <Row style={{ flex: 1 }}>
+                      <Icon name={found ? 'diamond-stone' : 'help-rhombus-outline'} size={20} color={found ? C.gold : C.faint} />
+                      <View style={{ marginLeft: 10, flex: 1 }}>
+                        <Text style={[FONT.body, { fontWeight: '700' }]}>{found ? egg.title : '???'}</Text>
+                        <Text style={FONT.tiny}>{found ? egg.where : egg.hint}</Text>
+                      </View>
+                    </Row>
+                    <Pill text={found ? 'Found' : 'Locked'} icon={found ? 'check-circle' : 'lock-outline'} color={found ? C.green : C.faint} bg={found ? C.greenSoft : C.bgSoft} />
+                  </Row>
+                </Card>
+              );
+            })}
           </>
         )}
         {tab === 'about' && (
@@ -1681,6 +1729,7 @@ function AboutTab({ onReplayTutorial }) {
   const [state, setState] = useState({ status: 'idle', data: null, err: null }); // idle|checking|done|error
   // Live download state comes from the background manager (survives tab switches).
   const download = useDownloadState();
+  const tapVersionEgg = useEasterEggTap('version_detective', 6);
 
   const check = async () => {
     setState({ status: 'checking', data: null, err: null });
@@ -1711,7 +1760,7 @@ function AboutTab({ onReplayTutorial }) {
         <View style={[cs.heroIcon, { backgroundColor: C.blueSoft }]}><Icon name="truck-fast" size={34} color={C.blue} /></View>
         <Text style={[FONT.h2, { marginTop: 10 }]}>Truck Empire Tycoon</Text>
         <Row style={{ marginTop: 6 }}>
-          <Pill text={`Installed ${APP_VERSION}`} icon="cellphone-check" color={C.sub} bg={C.bgSoft} />
+          <Pressable onPress={tapVersionEgg}><Pill text={`Installed ${APP_VERSION}`} icon="cellphone-check" color={C.sub} bg={C.bgSoft} /></Pressable>
           {state.status === 'done' && (
             <View style={{ marginLeft: 6 }}>
               {hasUpdate

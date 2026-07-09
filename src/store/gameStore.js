@@ -121,6 +121,26 @@ const FLAVOR_CARGO = {
   urgent: 'retail', pharma: 'pharma', green: 'electronics', island: 'general',
 };
 
+// Hidden gems — tap a specific existing UI element a set number of times in a
+// row (within a short window) to find one, once ever, for a big one-time
+// reward. `hint` stays vague and is all the player sees until it's found;
+// `where` is only shown after discovery, for the Settings checklist.
+export const EASTER_EGGS = [
+  { id: 'hq_home', title: 'Home Sweet Home', hint: 'Somewhere on the map, home is where the heart is...', where: 'Tap the HQ (home) button on the map 5 times fast.' },
+  { id: 'kalavad_roots', title: 'Gujarat Roots', hint: 'A small town holds a big secret.', where: 'Search "Kalavad" in New Delivery and tap the result 3 times fast.' },
+  { id: 'mirror_mirror', title: 'Mirror Mirror', hint: 'Vanity has its rewards.', where: 'Tap your own CEO avatar in Settings → Profile 5 times fast.' },
+  { id: 'branded', title: 'Branded', hint: 'Your logo is worth more than you think.', where: 'Tap your own company logo in Settings → Company 4 times fast.' },
+  { id: 'midas_touch', title: 'Midas Touch', hint: 'Some numbers are luckier than others.', where: 'Tap your Gold total in the Mini-Games screen 7 times fast.' },
+  { id: 'version_detective', title: 'Version Detective', hint: 'Read the fine print closely enough.', where: 'Tap the "Installed vX.X" pill in Settings → About 6 times fast.' },
+  { id: 'window_shopper', title: 'Window Shopper', hint: 'Looking at everything, buying nothing.', where: 'Tap the "All" filter in the Truck Showroom 8 times fast.' },
+  { id: 'curious_mind', title: 'Curious Mind', hint: 'Curiosity about yourself pays off.', where: 'Tap the "About" tab in Settings 5 times fast.' },
+  { id: 'steady_hands', title: 'Steady Hands', hint: 'Balance in all things.', where: 'Tap "Normal" difficulty in Settings → Gameplay 4 times fast.' },
+  { id: 'patient_parker', title: 'Patient Parker', hint: 'Good things come to those who wait — parked.', where: 'Tap the "Parked" tab in the Fleet Manager drawer 3 times fast.' },
+  { id: 'not_a_bug', title: 'Not a Bug, a Feature', hint: 'The mascot has a sense of humour.', where: 'Tap the truck logo on the splash screen 10 times fast.' },
+  { id: 'nice_try', title: 'Nice Try', hint: 'Reading the warning label a little too closely.', where: 'Tap the Danger Zone warning text in Settings → Gameplay 6 times fast (doesn’t actually reset anything).' },
+];
+const EASTER_EGG_REWARD = { cash: 10000000, gold: 50 }; // ₹1 crore + 50 Gold, per egg, one-time
+
 function randomContracts(dayNumber, count = CONTRACTS_PER_DAY) {
   const out = [];
   for (let i = 0; i < count; i++) {
@@ -203,6 +223,7 @@ const initialState = {
     notif: { delivery: true, truck: true, fuel: true, collab: true, daily: true },
   },
   partners: [], // {code, name, since}
+  easterEggs: { found: [] }, // ids of discovered hidden gems (persisted, one-time rewards)
 };
 
 export const useGame = create(
@@ -1147,6 +1168,23 @@ export const useGame = create(
       },
       savePricing(patch) { set({ pricing: { ...get().pricing, ...patch } }); },
       saveCompany(patch) { set({ company: { ...get().company, ...patch } }); },
+
+      // Hidden gem discovered — one-time only, big cash + gold reward.
+      findEasterEgg(id) {
+        const s = get();
+        const egg = EASTER_EGGS.find(e => e.id === id);
+        if (!egg) return { ok: false, err: 'Unknown easter egg' };
+        const found = s.easterEggs?.found || [];
+        if (found.includes(id)) return { ok: false, already: true };
+        set({
+          easterEggs: { found: [...found, id] },
+          balance: s.balance + EASTER_EGG_REWARD.cash,
+          gold: s.gold + EASTER_EGG_REWARD.gold,
+        });
+        get().notify('system', 'diamond-stone', `Hidden gem found — "${egg.title}"! +₹1,00,00,000 & +${EASTER_EGG_REWARD.gold} Gold.`);
+        play('coin', 1);
+        return { ok: true, egg, reward: EASTER_EGG_REWARD, foundCount: found.length + 1, total: EASTER_EGGS.length };
+      },
 
       // ---------- collaboration (offline-stub: local partners registry) ----------
       addPartner(code) {

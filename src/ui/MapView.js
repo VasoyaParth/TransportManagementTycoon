@@ -15,6 +15,7 @@ import { C } from './theme';
 import { useGame, modelById } from '../store/gameStore';
 import { cityById } from '../engine/routing';
 import { TruckTopShapes, truckShapes, bodyTypeFor, defaultBodyColor, headlightFor, isNightHour, FerryTopShape } from './truckArt';
+import { useEasterEggTap } from './components';
 
 // Darken/lighten a #rrggbb colour by pct (-1..1) for pseudo-3D shading.
 function shade(hex, pct) {
@@ -185,12 +186,14 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
     setView({ scale: ns, x: cx - size.w / 2 / ns, y: cy - size.h / 2 / ns });
   };
 
+  const tapHqEgg = useEasterEggTap('hq_home', 5);
   const centerHQ = () => {
     if (!company) return;
     const hq = cityById(company.hqCityId);
     const p = project(hq.lat, hq.lng);
     const scale = 4;
     setView({ scale, x: p.x - size.w / 2 / scale, y: p.y - size.h / 2 / scale });
+    tapHqEgg();
   };
 
   const hq = company ? cityById(company.hqCityId) : null;
