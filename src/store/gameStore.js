@@ -24,6 +24,24 @@ const uid = p => `${p}-${Date.now().toString(36)}-${(idSeq++).toString(36)}`;
 export const modelById = id => TRUCK_MODELS.find(m => m.id === id);
 export const cargoById = id => CARGO_TYPES.find(c => c.id === id);
 
+// ---------- Garage / hub economics (price & upkeep vary by city) ----------
+const HUB_BASE_COST = { 1: 25000000, 2: 12000000, 3: 6000000 }; // ₹ by tier
+const HUB_MONTHLY_MAINT = { 1: 150000, 2: 80000, 3: 40000 };     // ₹/month by tier
+// Deterministic ±10% wobble per city so every city has its own distinct price.
+function cityWobble(id) {
+  let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return (h % 21 - 10) / 100;
+}
+export function hubCostForCity(city) {
+  if (!city) return 0;
+  const base = HUB_BASE_COST[city.tier] || 6000000;
+  return Math.round((base * (1 + cityWobble(city.id))) / 100000) * 100000;
+}
+export function hubMaintForCity(city) {
+  if (!city) return 0;
+  return HUB_MONTHLY_MAINT[city.tier] || 40000;
+}
+
 function makeNotification(type, icon, message) {
   return { id: uid('n'), type, icon, message, ts: Date.now(), read: false };
 }
@@ -198,13 +216,17 @@ export const useGame = create(
         const s = get();
         if (s.phase !== 'game') return;
         const { day } = get().gameDay();
-        // salaries every 30 in-game days
-        if (day - s.lastSalaryDay >= SALARY_EVERY_DAYS && s.staff.length) {
-          const total = s.staff.reduce((a, x) => a + x.salary, 0);
-          set({ balance: s.balance - total, lastSalaryDay: day });
-          get().notify('system', 'cash-minus', `Monthly salaries paid: ${inr(total)} to ${s.staff.length} staff.`);
-        } else if (day - s.lastSalaryDay >= SALARY_EVERY_DAYS) {
-          set({ lastSalaryDay: day });
+        // Monthly running costs: staff salaries + garage maintenance (non-HQ).
+        if (day - s.lastSalaryDay >= SALARY_EVERY_DAYS) {
+          const salaries = s.staff.reduce((a, x) => a + x.salary, 0);
+          const upkeep = (s.hubs || []).filter(h => !h.hq).reduce((a, h) => a + (h.maint || hubMaintForCity(cityById(h.cityId))), 0);
+          const total = salaries + upkeep;
+          if (total > 0) {
+            set({ balance: s.balance - total, lastSalaryDay: day });
+            get().notify('system', 'cash-minus', `Monthly costs: ${inr(salaries)} salaries + ${inr(upkeep)} garage upkeep = ${inr(total)}.`);
+          } else {
+            set({ lastSalaryDay: day });
+          }
         }
         // fresh contracts each day + flavor event
         if (day > s.lastContractDay) {
@@ -344,19 +366,56 @@ export const useGame = create(
         set({ trucks: get().trucks.map(t => t.id === truckId ? { ...t, ...patch } : t) });
       },
 
-      // Buy a regional hub/garage in a city — a new base for your operations.
-      HUB_COST: 1500000,
+      // Buy a regional garage in a city — price & upkeep depend on the city tier.
       buyHub(cityId) {
         const s = get();
-        if (s.hubs.some(h => h.cityId === cityId)) return { ok: false, err: 'You already have a hub here' };
-        if (s.balance < 1500000) return { ok: false, err: 'Insufficient funds (need ₹15,00,000)' };
+        if (s.hubs.some(h => h.cityId === cityId)) return { ok: false, err: 'You already have a garage here' };
         const city = cityById(cityId);
+        const cost = hubCostForCity(city);
+        if (s.balance < cost) return { ok: false, err: `Insufficient funds (need ${inr(cost)})` };
         set({
-          balance: s.balance - 1500000,
-          hubs: [...s.hubs, { cityId, name: city.name + ' Hub', hq: false, since: Date.now() }],
+          balance: s.balance - cost,
+          hubs: [...s.hubs, {
+            cityId, name: city.name + ' Garage', hq: false, since: Date.now(),
+            tier: city.tier, cost, maint: hubMaintForCity(city),
+          }],
         });
-        get().notify('system', 'garage', `New hub opened in ${city.name}! Your network is growing.`);
+        get().notify('system', 'garage', `New garage opened in ${city.name} for ${inr(cost)}! Free refuelling + fast-travel here.`);
         return { ok: true };
+      },
+
+      // Free refuel for a truck parked at any of your garages/HQ.
+      refuelAtHub(truckId) {
+        const s = get();
+        const t = s.trucks.find(x => x.id === truckId);
+        if (!t) return { ok: false, err: 'Truck not found' };
+        if (t.status !== 'parked') return { ok: false, err: 'Truck must be parked to refuel' };
+        if (!s.hubs.some(h => h.cityId === t.cityId)) return { ok: false, err: 'No garage in this city — free refuel only at your garages' };
+        if ((t.fuelPct || 0) >= 100) return { ok: false, err: 'Tank is already full' };
+        set({ trucks: s.trucks.map(x => x.id === truckId ? { ...x, fuelPct: 100 } : x) });
+        get().notify('truck', 'gas-station', `${t.customName || modelById(t.modelId).name} refuelled free at your garage.`);
+        return { ok: true };
+      },
+
+      // Instantly relocate a parked truck between two of your garages (small fee).
+      fastTravel(truckId, toCityId) {
+        const s = get();
+        const t = s.trucks.find(x => x.id === truckId);
+        if (!t) return { ok: false, err: 'Truck not found' };
+        if (t.status !== 'parked') return { ok: false, err: 'Only a parked truck can fast-travel' };
+        if (!s.hubs.some(h => h.cityId === t.cityId)) return { ok: false, err: 'Truck must be at one of your garages' };
+        if (!s.hubs.some(h => h.cityId === toCityId)) return { ok: false, err: 'Destination must be one of your garages' };
+        if (t.cityId === toCityId) return { ok: false, err: 'Truck is already here' };
+        const from = cityById(t.cityId), to = cityById(toCityId);
+        const km = Math.round(computeRoute(from.lat, from.lng, to.lat, to.lng)?.roadKm || 0);
+        const fee = Math.max(2000, Math.round(km * 8)); // repositioning fee
+        if (s.balance < fee) return { ok: false, err: `Need ${inr(fee)} for the transfer` };
+        set({
+          balance: s.balance - fee,
+          trucks: s.trucks.map(x => x.id === truckId ? { ...x, lat: to.lat, lng: to.lng, cityId: to.id } : x),
+        });
+        get().notify('truck', 'transfer', `${t.customName || modelById(t.modelId).name} fast-travelled to ${to.name} for ${inr(fee)}.`);
+        return { ok: true, fee, km };
       },
 
       // ---------- deliveries ----------

@@ -5,7 +5,7 @@ import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Swi
 import Svg, { Polyline, Circle, Path } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta } from '../components';
-import { useGame, modelById, cargoById, GAME_HOUR_MS } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS } from '../../store/gameStore';
 import { cityById, suggestDestinations } from '../../engine/routing';
 import { CITIES } from '../../data/cities';
 import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, TRUCK_COLORS, TRUCK_LOGOS } from '../../data/trucks';
@@ -901,69 +901,125 @@ function IconGrid({ options, value, onChange }) {
 }
 
 // ============ Hubs & Garages ============
+const TIER_LABEL = { 1: 'Metro', 2: 'Major City', 3: 'Regional' };
 export function HubsModal({ visible, onClose, onShowOnMap }) {
   const toast = useToast();
   const hubs = useGame(s => s.hubs || []);
   const balance = useGame(s => s.balance);
   const buyHub = useGame(s => s.buyHub);
+  const fastTravel = useGame(s => s.fastTravel);
+  const refuelAtHub = useGame(s => s.refuelAtHub);
   const trucks = useGame(s => s.trucks);
   const [query, setQuery] = useState('');
+  const [travelFor, setTravelFor] = useState(null); // hub cityId whose picker is open
   const owned = new Set(hubs.map(h => h.cityId));
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return CITIES.filter(c => c.tier <= 2 && !owned.has(c.id)).slice(0, 12);
-    return CITIES.filter(c => !owned.has(c.id) && (c.name.toLowerCase().includes(q) || c.state.toLowerCase().includes(q))).slice(0, 12);
+    const base = CITIES.filter(c => !owned.has(c.id));
+    if (!q) return base.filter(c => c.tier <= 2).slice(0, 15);
+    return base.filter(c => c.name.toLowerCase().includes(q) || c.state.toLowerCase().includes(q)).slice(0, 15);
   }, [query, hubs.length]);
-  const buy = (c) => { const r = buyHub(c.id); toast(r.ok ? `Hub opened in ${c.name}!` : r.err, r.ok ? 'success' : 'error'); };
+  const buy = (c) => { const r = buyHub(c.id); toast(r.ok ? `Garage opened in ${c.name}!` : r.err, r.ok ? 'success' : 'error'); };
 
   return (
-    <Sheet visible={visible} onClose={onClose} title="Hubs & Garages" height="86%">
+    <Sheet visible={visible} onClose={onClose} title="Garages & Network" height="88%">
       <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <Card style={{ marginBottom: 12, backgroundColor: C.bgSoft }}>
           <Row style={{ justifyContent: 'space-between' }}>
-            <Row><Icon name="garage" size={18} color={C.blue} /><Text style={[FONT.h3, { marginLeft: 6 }]}>Your Network</Text></Row>
+            <Row style={{ flex: 1 }}>
+              <Icon name="garage" size={18} color={C.blue} />
+              <Text style={[FONT.h3, { marginLeft: 6 }]}>Your Network</Text>
+            </Row>
             <Text style={FONT.sub}>{hubs.length} location{hubs.length === 1 ? '' : 's'}</Text>
           </Row>
+          <Row style={{ marginTop: 6 }}>
+            <Icon name="information-outline" size={13} color={C.sub} />
+            <Text style={[FONT.tiny, { marginLeft: 5, flex: 1 }]}>Garages give free refuelling and let trucks fast-travel between them. Each has a monthly upkeep cost.</Text>
+          </Row>
         </Card>
+
         {hubs.map(h => {
           const c = cityById(h.cityId);
           const here = trucks.filter(t => t.cityId === h.cityId);
-          const parked = here.filter(t => t.status === 'parked').length;
+          const parked = here.filter(t => t.status === 'parked');
+          const needFuel = parked.filter(t => (t.fuelPct || 0) < 100);
+          const elsewhere = trucks.filter(t => t.status === 'parked' && t.cityId !== h.cityId && owned.has(t.cityId));
+          const upkeep = h.hq ? 0 : (h.maint || hubMaintForCity(c));
           return (
-            <Card key={h.cityId} style={{ marginBottom: 8, padding: 12 }}>
+            <Card key={h.cityId} style={{ marginBottom: 8 }}>
               <Row style={{ justifyContent: 'space-between' }}>
                 <Row style={{ flex: 1 }}>
-                  <Icon name={h.hq ? 'office-building-marker' : 'garage-variant'} size={22} color={h.hq ? C.blue : C.sub} />
+                  <View style={[cs.heroIcon, { width: 40, height: 40, backgroundColor: h.hq ? C.blueSoft : C.bgSoft }]}>
+                    <Icon name={h.hq ? 'office-building-marker' : 'garage-variant'} size={22} color={h.hq ? C.blue : C.text} />
+                  </View>
                   <View style={{ marginLeft: 10, flex: 1 }}>
-                    <Text style={[FONT.body, { fontWeight: '700' }]}>{h.name}</Text>
-                    <Text style={FONT.tiny}>{c ? `${c.name}, ${c.state}` : ''}{h.hq ? ' · Headquarters' : ''}</Text>
+                    <Text style={[FONT.body, { fontWeight: '800' }]}>{h.name}</Text>
+                    <Text style={FONT.tiny}>{c ? `${c.name}, ${c.state}` : ''}</Text>
                   </View>
                 </Row>
+                <Pill text={h.hq ? 'HQ' : TIER_LABEL[c?.tier] || 'Garage'} color={h.hq ? C.blue : C.sub} bg={h.hq ? C.blueSoft : C.bgSoft} />
+              </Row>
+              <Row style={{ marginTop: 10, gap: 14, flexWrap: 'wrap' }}>
+                <Row><Icon name="truck" size={14} color={C.sub} /><Text style={[FONT.sub, { marginLeft: 4 }]}>{here.length} here</Text></Row>
+                <Row><Icon name="parking" size={14} color={C.blue} /><Text style={[FONT.sub, { marginLeft: 4 }]}>{parked.length} parked</Text></Row>
+                {!h.hq && <Row><Icon name="wrench-clock" size={14} color={C.amber} /><Text style={[FONT.sub, { marginLeft: 4 }]}>{inrShort(upkeep)}/mo upkeep</Text></Row>}
+              </Row>
+              <Row style={{ marginTop: 10, gap: 8, flexWrap: 'wrap' }}>
                 {c && <Btn title="Map" kind="soft" small icon="crosshairs-gps" onPress={() => { onClose(); onShowOnMap && onShowOnMap({ lat: c.lat, lng: c.lng, scale: 5, key: Date.now() }); }} />}
+                {needFuel.length > 0 && (
+                  <Btn title={`Refuel ${needFuel.length} free`} kind="green" small icon="gas-station"
+                    onPress={() => { needFuel.forEach(t => refuelAtHub(t.id)); toast(`Refuelled ${needFuel.length} truck(s) free`, 'success'); }} />
+                )}
+                {elsewhere.length > 0 && (
+                  <Btn title="Send truck here" kind="blue" small icon="transfer"
+                    onPress={() => setTravelFor(travelFor === h.cityId ? null : h.cityId)} />
+                )}
               </Row>
-              <Row style={{ marginTop: 10, gap: 14 }}>
-                <Row><Icon name="truck" size={14} color={C.sub} /><Text style={[FONT.sub, { marginLeft: 4 }]}>{here.length} trucks</Text></Row>
-                <Row><Icon name="parking" size={14} color={C.blue} /><Text style={[FONT.sub, { marginLeft: 4 }]}>{parked} parked</Text></Row>
-                {c && <Row><Icon name="star" size={14} color={C.amber} /><Text style={[FONT.sub, { marginLeft: 4 }]}>Tier {c.tier}</Text></Row>}
-              </Row>
+              {travelFor === h.cityId && (
+                <View style={cs.pickerBox}>
+                  <Text style={[FONT.tiny, { marginBottom: 6 }]}>PICK A PARKED TRUCK TO FAST-TRAVEL HERE</Text>
+                  {elsewhere.map(t => {
+                    const m = modelById(t.modelId), from = cityById(t.cityId);
+                    return (
+                      <Pressable key={t.id} style={cs.resRow} onPress={() => {
+                        const r = fastTravel(t.id, h.cityId);
+                        toast(r.ok ? `Moved to ${c.name} for ${inr(r.fee)}` : r.err, r.ok ? 'success' : 'error');
+                        if (r.ok) setTravelFor(null);
+                      }}>
+                        <Icon name={m.icon} size={16} color={C.sub} />
+                        <Text style={[FONT.body, { flex: 1, marginLeft: 8 }]} numberOfLines={1}>{t.customName || m.name}</Text>
+                        <Text style={FONT.tiny}>{from?.name}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
             </Card>
           );
         })}
 
-        <Text style={cs.section}>Open a New Hub · ₹15,00,000 each</Text>
-        <TextInput value={query} onChangeText={setQuery} placeholder="Search a city to expand into..."
+        <Text style={cs.section}>Open a New Garage — price varies by city</Text>
+        <TextInput value={query} onChangeText={setQuery} placeholder="Search any city to expand into..."
           placeholderTextColor={C.faint} style={cs.input} />
         <View style={{ marginTop: 8, paddingBottom: 24 }}>
           {results.map(c => {
-            const afford = balance >= 1500000;
+            const cost = hubCostForCity(c);
+            const upkeep = hubMaintForCity(c);
+            const afford = balance >= cost;
             return (
               <Card key={c.id} style={{ marginBottom: 8, padding: 12 }}>
                 <Row style={{ justifyContent: 'space-between' }}>
                   <View style={{ flex: 1 }}>
-                    <Text style={[FONT.body, { fontWeight: '600' }]}>{c.name}</Text>
-                    <Text style={FONT.tiny}>{c.state} · Tier {c.tier}</Text>
+                    <Row><Text style={[FONT.body, { fontWeight: '700' }]}>{c.name}</Text>
+                      <View style={{ marginLeft: 6 }}><Pill text={TIER_LABEL[c.tier] || 'Regional'} color={C.sub} bg={C.bgSoft} /></View>
+                    </Row>
+                    <Text style={FONT.tiny}>{c.state}</Text>
+                    <Row style={{ marginTop: 4, gap: 12 }}>
+                      <Text style={[FONT.sub, { fontWeight: '800', color: C.text }]}>{inr(cost)}</Text>
+                      <Row><Icon name="wrench-clock" size={12} color={C.amber} /><Text style={[FONT.tiny, { marginLeft: 3 }]}>{inrShort(upkeep)}/mo</Text></Row>
+                    </Row>
                   </View>
-                  <Btn title={afford ? 'Buy Hub' : 'Low funds'} kind={afford ? 'primary' : 'soft'} small disabled={!afford} icon="garage-variant" onPress={() => buy(c)} />
+                  <Btn title={afford ? 'Buy' : 'Low funds'} kind={afford ? 'primary' : 'soft'} small disabled={!afford} icon="garage-variant" onPress={() => buy(c)} />
                 </Row>
               </Card>
             );
@@ -981,6 +1037,7 @@ const cs = StyleSheet.create({
   truckCard: { width: 120, padding: 10, borderRadius: RADIUS.md, borderWidth: 1, borderColor: C.border, marginRight: 8, backgroundColor: '#fff' },
   heroIcon: { width: 64, height: 64, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   resRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border },
+  pickerBox: { marginTop: 10, backgroundColor: C.bgSoft, borderRadius: RADIUS.md, borderWidth: 1, borderColor: C.border, padding: 10 },
   suggChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1, borderColor: C.border, backgroundColor: C.bgSoft, alignItems: 'center' },
   notif: { flexDirection: 'row', alignItems: 'center', padding: 10, borderRadius: RADIUS.md, marginBottom: 6 },
   notifIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.border },
