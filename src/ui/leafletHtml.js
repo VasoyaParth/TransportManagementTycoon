@@ -78,10 +78,12 @@ function boot(){
     html:'<div class="hq-marker">'+bldgSvg()+'</div>',iconSize:[40,40],iconAnchor:[20,20]}),zIndexOffset:1000})
     .addTo(map).bindPopup('<b>'+DATA.companyName+'</b><br>HQ — '+DATA.hq.name);
 
-  // Cities
+  // Cities — only show dots for unlocked countries (null = show all).
+  var allowedCountries = null;
   function plotCities(){
     cityLayer.clearLayers();
     DATA.cities.forEach(function(c){
+      if(allowedCountries && allowedCountries.indexOf(c.country||'IN')<0) return;
       var big = c.tier===1;
       var m=L.marker([c.lat,c.lng],{icon:L.divIcon({className:'',
         html:'<div class="city-dot'+(big?' big':'')+'"></div>',iconSize:[big?12:8,big?12:8],iconAnchor:[big?6:4,big?6:4]}),
@@ -91,6 +93,7 @@ function boot(){
     });
   }
   plotCities();
+  window.setVisibleCountries=function(arr){ allowedCountries = arr && arr.length ? arr : null; plotCities(); };
 
   function renderStations(){
     stationLayer.clearLayers();

@@ -93,16 +93,16 @@ export function downloadApk(url, { onProgress } = {}) {
   return { promise, abort: () => xhr.abort() };
 }
 
-// Hand the APK to Android's package installer via the system download manager.
+// Hand the APK to the OS: opening the release download URL lets Android's
+// download manager fetch it and fire the package installer (the app declares
+// REQUEST_INSTALL_PACKAGES). We do NOT gate on canOpenURL — it can wrongly
+// return false for https intents and leave the user stuck at "100%".
 export async function openInstaller(url) {
   if (!url) return { ok: false, err: 'No download link' };
-  if (Platform.OS !== 'android') {
-    // iOS can't sideload — just open the release page.
+  try {
     await Linking.openURL(url);
-    return { ok: true, external: true };
+    return { ok: true, external: Platform.OS !== 'android' };
+  } catch (e) {
+    return { ok: false, err: 'Could not open the installer. Open the link in your browser to finish.' };
   }
-  const can = await Linking.canOpenURL(url).catch(() => true);
-  if (!can) return { ok: false, err: 'Cannot open the installer link' };
-  await Linking.openURL(url);
-  return { ok: true };
 }

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Switch } from 'react-native';
 import Svg, { Polyline, Circle, Path } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
-import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta } from '../components';
+import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton } from '../components';
 import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH } from '../../store/gameStore';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
 import { CITIES } from '../../data/cities';
@@ -1187,6 +1187,27 @@ const DEVELOPERS = [
   { name: 'Jeel Gajera', title: 'Developer', icon: 'account-tie', color: C.green, bg: C.greenSoft },
 ];
 
+// A shimmering placeholder row (icon block + two text lines) used while remote
+// data loads — mirrors the real row layout so the UI doesn't jump.
+function SkeletonRow({ lines = 2 }) {
+  return (
+    <Row style={{ paddingVertical: 8, alignItems: 'center' }}>
+      <Skeleton w={38} h={38} r={12} />
+      <View style={{ flex: 1, marginLeft: 10 }}>
+        <Skeleton w="55%" h={12} />
+        {lines > 1 ? <Skeleton w="80%" h={9} style={{ marginTop: 6 }} /> : null}
+      </View>
+    </Row>
+  );
+}
+function SkeletonList({ rows = 4, lines = 2 }) {
+  return (
+    <Card>
+      {Array.from({ length: rows }).map((_, i) => <SkeletonRow key={i} lines={lines} />)}
+    </Card>
+  );
+}
+
 // ============ About (version, updates, credits, team) ============
 function AboutTab({ onReplayTutorial }) {
   const toast = useToast();
@@ -1285,10 +1306,14 @@ function AboutTab({ onReplayTutorial }) {
               <Text style={[FONT.tiny, { fontWeight: '700', color: C.green }]}>{dl.done ? '100%' : `${pct}%`}</Text>
             </Row>
             {!dl.done && <Btn title="Cancel" kind="ghost" small style={{ marginTop: 6 }} onPress={cancelDownload} />}
-            {dl.installing && (
-              <Text style={[FONT.tiny, { marginTop: 6 }]}>
-                If the install screen didn’t open, allow “Install unknown apps” for this app in Android settings, then tap Download again.
-              </Text>
+            {dl.done && (
+              <>
+                <Btn title="Install now" kind="green" icon="cellphone-arrow-down" style={{ marginTop: 8 }}
+                  onPress={async () => { const r = await openInstaller(latest.apkUrl); toast(r.ok ? 'Opening installer…' : r.err, r.ok ? 'info' : 'error'); }} />
+                <Text style={[FONT.tiny, { marginTop: 6 }]}>
+                  Tap “Install now”. When Android asks, allow “Install unknown apps” for this app, then open the downloaded APK from your notifications to finish.
+                </Text>
+              </>
             )}
           </View>
         )}
@@ -1301,7 +1326,12 @@ function AboutTab({ onReplayTutorial }) {
       </Card>
 
       {/* Version history */}
-      {state.data?.releases?.length ? (
+      {state.status === 'checking' ? (
+        <>
+          <Text style={cs.section}>Version History</Text>
+          <SkeletonList rows={5} lines={2} />
+        </>
+      ) : state.data?.releases?.length ? (
         <>
           <Text style={cs.section}>Version History</Text>
           <Card>

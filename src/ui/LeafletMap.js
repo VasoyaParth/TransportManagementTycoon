@@ -13,7 +13,7 @@ import { useGame, modelById } from '../store/gameStore';
 import { cityById } from '../engine/routing';
 import { statusMeta } from './components';
 
-const CITY_DATA = CITIES.map(c => ({ id: c.id, name: c.name, state: c.state, lat: c.lat, lng: c.lng, tier: c.tier }));
+const CITY_DATA = CITIES.map(c => ({ id: c.id, name: c.name, state: c.state, lat: c.lat, lng: c.lng, tier: c.tier, country: c.country || 'IN' }));
 const STATION_DATA = STATIONS.map(s => ({ lat: s.lat, lng: s.lng, type: s.type, price: s.price, name: s.name }));
 
 export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focus, onTruckTap, onReady, onOffline }) {
@@ -21,6 +21,7 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
   const company = useGame(s => s.company);
   const trucks = useGame(s => s.trucks);
   const deliveries = useGame(s => s.deliveries);
+  const unlockedCountries = useGame(s => s.unlockedCountries || ['IN']);
   const [ready, setReady] = useState(false);
 
   const hq = company ? cityById(company.hqCityId) : { lat: 22, lng: 79, name: 'HQ' };
@@ -66,6 +67,9 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
     const iv = setInterval(() => inject(`window.applyState(${JSON.stringify(liveState())})`), 900);
     return () => clearInterval(iv);
   }, [ready, deliveries.length, trucks.length, liveState, inject]);
+
+  // Only show city dots for countries the player has unlocked.
+  useEffect(() => { if (ready) inject(`window.setVisibleCountries(${JSON.stringify(unlockedCountries)})`); }, [ready, unlockedCountries]);
 
   useEffect(() => { if (ready) inject(`window.setPickMode(${!!pickingMode})`); }, [pickingMode, ready]);
   useEffect(() => { if (ready && focus) inject(`window.focusOn(${focus.lat},${focus.lng},${focus.scale ? 9 : 7})`); }, [focus, ready]);
