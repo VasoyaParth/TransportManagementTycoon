@@ -64,6 +64,20 @@ You've successfully run and modified your React Native App. :partying_face:
 - If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
 - If you're curious to learn more about React Native, check out the [Introduction to React Native](https://reactnative.dev/docs/getting-started).
 
+# Versioning & Releases
+
+> Read this before changing the app version — for humans and AI assistants alike.
+
+The version must stay in sync in **three** places:
+
+1. `src/net/updates.js` → `APP_VERSION` (e.g. `'v1.3.7'`) — what the app reports and compares against GitHub for the in-app "Check for Update".
+2. `android/app/build.gradle` → `versionName` (`"1.3.7"`) and `versionCode` (integer, e.g. `137`).
+3. The GitHub Release tag `vX.Y.Z` — created **automatically** by `.github/workflows/release.yml`.
+
+**CI bump rule:** every merge to `main` reads the latest `vX.Y.Z` tag, bumps the **patch** by one, builds a signed APK (`TruckEmpireTycoon-vX.Y.Z.apk`) and publishes a GitHub Release. So the next release = latest tag + 1 patch.
+
+**When preparing a branch for merge:** set `APP_VERSION` and the gradle version to the version CI *will* produce (latest tag + 1 patch), so the shipped build doesn't flag itself as out of date. The About tab reads releases from `https://api.github.com/repos/VasoyaParth/TransportManagementTycoon/releases`.
+
 # Troubleshooting
 
 If you can't get this to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
