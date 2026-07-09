@@ -347,10 +347,8 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
         </View>
       )}
 
-      {/* Map controls */}
+      {/* Map controls (pinch to zoom — no +/- buttons) */}
       <View style={st.controls}>
-        <Ctl icon="plus" onPress={() => zoomBy(1.5)} />
-        <Ctl icon="minus" onPress={() => zoomBy(1 / 1.5)} />
         <Ctl icon="home-map-marker" onPress={centerHQ} />
         <Ctl icon="gas-station" active={showStations} onPress={() => setShowStations(v => !v)} />
         <Ctl icon="city-variant-outline" active={showCities} onPress={() => setShowCities(v => !v)} />

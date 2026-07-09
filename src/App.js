@@ -1,6 +1,5 @@
-// App root — cloud auth gate + phase routing (splash / onboarding / game).
-// Cloud-only: the player must log in; game state is loaded from and synced to
-// the Node/MongoDB backend.
+// App root — phase routing (splash / onboarding / game) + persistence gate.
+// Fully offline / local — no cloud, no login.
 import React, { useEffect, useState } from 'react';
 import { View, Text, StatusBar, ActivityIndicator, PermissionsAndroid, Platform } from 'react-native';
 import { useGame } from './store/gameStore';

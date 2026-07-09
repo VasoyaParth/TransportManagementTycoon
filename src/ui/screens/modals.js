@@ -5,7 +5,7 @@ import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Swi
 import Svg, { Polyline, Circle, Path } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta } from '../components';
-import { useGame, modelById, cargoById, GAME_HOUR_MS } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS } from '../../store/gameStore';
 import { cityById, suggestDestinations } from '../../engine/routing';
 import { CITIES } from '../../data/cities';
 import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, TRUCK_COLORS, TRUCK_LOGOS } from '../../data/trucks';
@@ -79,6 +79,28 @@ function Gauge({ value, max, label, unit, color = C.blue }) {
       </View>
       <Text style={[FONT.sub, { fontWeight: '700', marginTop: 2 }]}>{label}</Text>
     </View>
+  );
+}
+
+// One step in the Amazon-style shipment tracker (vertical timeline).
+function TrackerStep({ icon, color, title, sub, done, active, line }) {
+  return (
+    <Row style={{ alignItems: 'flex-start' }}>
+      <View style={{ alignItems: 'center', width: 30 }}>
+        <View style={{
+          width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
+          backgroundColor: (done || active) ? color : C.bgSoft,
+          borderWidth: active ? 2 : 0, borderColor: '#fff',
+        }}>
+          <Icon name={done ? 'check' : icon} size={15} color={(done || active) ? '#fff' : C.faint} />
+        </View>
+        {line && <View style={{ width: 2, flex: 1, minHeight: 22, backgroundColor: done ? color : C.border, marginVertical: 2 }} />}
+      </View>
+      <View style={{ flex: 1, marginLeft: 10, paddingBottom: line ? 8 : 0 }}>
+        <Text style={[FONT.body, { fontWeight: active ? '800' : '600', color: (done || active) ? C.text : C.sub }]}>{title}</Text>
+        {sub ? <Text style={FONT.tiny}>{sub}</Text> : null}
+      </View>
+    </Row>
   );
 }
 
@@ -353,6 +375,12 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
   const now = Date.now();
   const prog = d ? Math.min(100, ((now - d.startedAt) / (d.endsAt - d.startedAt)) * 100) : 0;
   const eta = d ? fmtDur((d.endsAt - now) / 1000) : null;
+  // Live fuel drains from the departure tank down to the arrival fuel as it drives.
+  const startFuel = d && d.startFuelPct != null ? d.startFuelPct : truck.fuelPct;
+  const arriveFuel = d && d.arriveFuelPct != null ? d.arriveFuelPct : startFuel;
+  const curFuel = d ? Math.max(3, Math.round(startFuel + (arriveFuel - startFuel) * (prog / 100))) : Math.round(truck.fuelPct);
+  const totalKm = d ? d.route.roadKm : 0;
+  const kmCovered = d ? Math.round(totalKm * (prog / 100)) : 0;
   const buildLeft = truck.status === 'building' ? Math.max(0, (truck.buildEndsAt - now) / 1000) : 0;
   const buildPct = truck.status === 'building' ? 100 * (1 - buildLeft / truck.buildTotalSec) : 0;
   const fee = Math.round(m.price * 0.04);
@@ -378,12 +406,32 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
               <Text style={[FONT.mono, { color: C.blue }]}>ETA {eta}</Text>
             </Row>
             <Progress pct={prog} color={C.green} style={{ marginTop: 8 }} />
-            {/* Live gauges — speed varies realistically with the road */}
+            <Row style={{ justifyContent: 'space-between', marginTop: 4 }}>
+              <Text style={FONT.tiny}>{kmCovered} / {totalKm} km</Text>
+              <Text style={FONT.tiny}>{Math.round(prog)}%</Text>
+            </Row>
+            {/* Live gauges — speed varies realistically, fuel drains as it drives */}
             <Row style={{ marginTop: 10 }}>
               <Gauge value={liveSpeed(m.speed)} max={Math.round(m.speed * 1.15)} label="Speed" unit="km/h" color={C.green} />
-              <Gauge value={truck.fuelPct} max={100} label={m.propulsion === 'electric' ? 'Charge' : 'Fuel'} unit="%"
-                color={truck.fuelPct > 50 ? C.green : truck.fuelPct > 20 ? C.amber : C.red} />
+              <Gauge value={curFuel} max={100} label={m.propulsion === 'electric' ? 'Charge' : 'Fuel'} unit="%"
+                color={curFuel > 50 ? C.green : curFuel > 20 ? C.amber : C.red} />
             </Row>
+          </Card>
+        )}
+
+        {/* Amazon-style route tracker */}
+        {truck.status === 'delivering' && d && (
+          <Card style={{ marginBottom: 12 }}>
+            <Text style={[FONT.h3, { marginBottom: 10 }]}>Shipment Tracking</Text>
+            <TrackerStep icon="package-variant-closed" color={C.green} done
+              title={`Picked up · ${cityById(d.fromCityId)?.name}`} sub="Departed origin" line />
+            <TrackerStep icon="gas-station" color={prog > 15 ? C.green : C.amber} done={prog > 15}
+              title={`${d.refuelCount ? d.refuelCount : 0} fuel stop${(d.refuelCount || 0) === 1 ? '' : 's'} en route`}
+              sub={d.sleepBreaks ? `${d.sleepBreaks} sleep break${d.sleepBreaks === 1 ? '' : 's'} · ${d.shortBreaks || 0} short breaks` : 'No rest breaks needed'} line />
+            <TrackerStep icon="truck-fast" color={C.blue} done={false} active
+              title={`In transit — ${kmCovered} km covered`} sub={`${Math.round(prog)}% · ETA ${eta}`} line />
+            <TrackerStep icon="map-marker-check" color={prog >= 100 ? C.green : C.faint} done={prog >= 100}
+              title={`Deliver to ${cityById(d.toCityId)?.name}`} sub={prog >= 100 ? 'Arrived' : 'Pending arrival'} />
           </Card>
         )}
         {truck.status === 'building' && (
@@ -411,7 +459,7 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
             : <SpecRow icon="fuel" label="Fuel tank" value={`${m.tank} L`} />}
           <SpecRow icon="map-marker-distance" label="Full range" value={`${m.range} km`} />
           <SpecRow icon="fuel" label={m.propulsion === 'electric' ? 'Charge now' : 'Fuel now'}
-            value={`${Math.round(truck.fuelPct)}% · ~${Math.round((truck.fuelPct / 100) * m.range)} km left`} />
+            value={`${curFuel}% · ~${Math.round((curFuel / 100) * m.range)} km left`} />
           <SpecRow icon="wrench" label="Maintenance" value={`${inr(m.maint)}/km`} />
           <SpecRow icon="cash" label="Purchase price" value={inr(m.price)} />
         </Card>
@@ -422,6 +470,28 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
           <SpecRow icon="package-variant-closed-check" label="Deliveries" value={truck.deliveries} />
           <SpecRow icon="map-marker" label="Location" value={cityById(truck.cityId)?.name || '—'} />
         </Card>
+
+        {/* This truck's own delivery history */}
+        {(truck.log || []).length > 0 && (
+          <Card style={{ marginTop: 10 }}>
+            <Text style={[FONT.h3, { marginBottom: 8 }]}>Delivery History</Text>
+            {(truck.log || []).slice(0, 8).map(h => {
+              const f = cityById(h.fromCityId), t2 = cityById(h.toCityId);
+              return (
+                <Row key={h.id} style={{ justifyContent: 'space-between', paddingVertical: 6, borderTopWidth: 1, borderTopColor: C.border }}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Row><Text style={FONT.body} numberOfLines={1}>{f?.name || '?'}</Text>
+                      <Icon name="arrow-right" size={12} color={C.faint} style={{ marginHorizontal: 4 }} />
+                      <Text style={FONT.body} numberOfLines={1}>{t2?.name || '?'}</Text>
+                    </Row>
+                    <Text style={FONT.tiny}>{h.km} km · {h.hours ? `${h.hours}h · ` : ''}{relTime(h.ts)}</Text>
+                  </View>
+                  <Text style={[FONT.mono, { fontWeight: '700', color: h.net >= 0 ? C.green : C.red }]}>{inr(h.net)}</Text>
+                </Row>
+              );
+            })}
+          </Card>
+        )}
 
         <Card style={{ marginTop: 10 }}>
           <Text style={[FONT.h3, { marginBottom: 8 }]}>Customize</Text>
@@ -867,7 +937,7 @@ export function SettingsModal({ visible, onClose, initialTab }) {
               <Icon name="truck-fast" size={40} color={C.blue} />
               <Text style={[FONT.h2, { marginTop: 8 }]}>Truck Empire Tycoon</Text>
               <Text style={FONT.sub}>Version 1.1</Text>
-              <Text style={[FONT.sub, { textAlign: 'center', marginTop: 10 }]}>Build and run your own Indian trucking empire. Real highways, real cities, real-time hauls, fully offline. Made in India.</Text>
+              <Text style={[FONT.sub, { textAlign: 'center', marginTop: 10 }]}>Build and run your own Indian trucking empire. Real highways, real cities, real-time hauls, cloud-synced across devices. Made in India.</Text>
             </Card>
             <Btn title="Replay Tutorial" kind="soft" icon="school-outline" style={{ marginTop: 12 }}
               onPress={() => { saveSettings({ tutorialSeen: false }); toast('Tutorial will show on the map', 'info'); onClose(); }} />
@@ -901,69 +971,125 @@ function IconGrid({ options, value, onChange }) {
 }
 
 // ============ Hubs & Garages ============
+const TIER_LABEL = { 1: 'Metro', 2: 'Major City', 3: 'Regional' };
 export function HubsModal({ visible, onClose, onShowOnMap }) {
   const toast = useToast();
   const hubs = useGame(s => s.hubs || []);
   const balance = useGame(s => s.balance);
   const buyHub = useGame(s => s.buyHub);
+  const fastTravel = useGame(s => s.fastTravel);
+  const refuelAtHub = useGame(s => s.refuelAtHub);
   const trucks = useGame(s => s.trucks);
   const [query, setQuery] = useState('');
+  const [travelFor, setTravelFor] = useState(null); // hub cityId whose picker is open
   const owned = new Set(hubs.map(h => h.cityId));
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return CITIES.filter(c => c.tier <= 2 && !owned.has(c.id)).slice(0, 12);
-    return CITIES.filter(c => !owned.has(c.id) && (c.name.toLowerCase().includes(q) || c.state.toLowerCase().includes(q))).slice(0, 12);
+    const base = CITIES.filter(c => !owned.has(c.id));
+    if (!q) return base.filter(c => c.tier <= 2).slice(0, 15);
+    return base.filter(c => c.name.toLowerCase().includes(q) || c.state.toLowerCase().includes(q)).slice(0, 15);
   }, [query, hubs.length]);
-  const buy = (c) => { const r = buyHub(c.id); toast(r.ok ? `Hub opened in ${c.name}!` : r.err, r.ok ? 'success' : 'error'); };
+  const buy = (c) => { const r = buyHub(c.id); toast(r.ok ? `Garage opened in ${c.name}!` : r.err, r.ok ? 'success' : 'error'); };
 
   return (
-    <Sheet visible={visible} onClose={onClose} title="Hubs & Garages" height="86%">
+    <Sheet visible={visible} onClose={onClose} title="Garages & Network" height="88%">
       <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <Card style={{ marginBottom: 12, backgroundColor: C.bgSoft }}>
           <Row style={{ justifyContent: 'space-between' }}>
-            <Row><Icon name="garage" size={18} color={C.blue} /><Text style={[FONT.h3, { marginLeft: 6 }]}>Your Network</Text></Row>
+            <Row style={{ flex: 1 }}>
+              <Icon name="garage" size={18} color={C.blue} />
+              <Text style={[FONT.h3, { marginLeft: 6 }]}>Your Network</Text>
+            </Row>
             <Text style={FONT.sub}>{hubs.length} location{hubs.length === 1 ? '' : 's'}</Text>
           </Row>
+          <Row style={{ marginTop: 6 }}>
+            <Icon name="information-outline" size={13} color={C.sub} />
+            <Text style={[FONT.tiny, { marginLeft: 5, flex: 1 }]}>Garages give free refuelling and let trucks fast-travel between them. Each has a monthly upkeep cost.</Text>
+          </Row>
         </Card>
+
         {hubs.map(h => {
           const c = cityById(h.cityId);
           const here = trucks.filter(t => t.cityId === h.cityId);
-          const parked = here.filter(t => t.status === 'parked').length;
+          const parked = here.filter(t => t.status === 'parked');
+          const needFuel = parked.filter(t => (t.fuelPct || 0) < 100);
+          const elsewhere = trucks.filter(t => t.status === 'parked' && t.cityId !== h.cityId && owned.has(t.cityId));
+          const upkeep = h.hq ? 0 : (h.maint || hubMaintForCity(c));
           return (
-            <Card key={h.cityId} style={{ marginBottom: 8, padding: 12 }}>
+            <Card key={h.cityId} style={{ marginBottom: 8 }}>
               <Row style={{ justifyContent: 'space-between' }}>
                 <Row style={{ flex: 1 }}>
-                  <Icon name={h.hq ? 'office-building-marker' : 'garage-variant'} size={22} color={h.hq ? C.blue : C.sub} />
+                  <View style={[cs.heroIcon, { width: 40, height: 40, backgroundColor: h.hq ? C.blueSoft : C.bgSoft }]}>
+                    <Icon name={h.hq ? 'office-building-marker' : 'garage-variant'} size={22} color={h.hq ? C.blue : C.text} />
+                  </View>
                   <View style={{ marginLeft: 10, flex: 1 }}>
-                    <Text style={[FONT.body, { fontWeight: '700' }]}>{h.name}</Text>
-                    <Text style={FONT.tiny}>{c ? `${c.name}, ${c.state}` : ''}{h.hq ? ' · Headquarters' : ''}</Text>
+                    <Text style={[FONT.body, { fontWeight: '800' }]}>{h.name}</Text>
+                    <Text style={FONT.tiny}>{c ? `${c.name}, ${c.state}` : ''}</Text>
                   </View>
                 </Row>
+                <Pill text={h.hq ? 'HQ' : TIER_LABEL[c?.tier] || 'Garage'} color={h.hq ? C.blue : C.sub} bg={h.hq ? C.blueSoft : C.bgSoft} />
+              </Row>
+              <Row style={{ marginTop: 10, gap: 14, flexWrap: 'wrap' }}>
+                <Row><Icon name="truck" size={14} color={C.sub} /><Text style={[FONT.sub, { marginLeft: 4 }]}>{here.length} here</Text></Row>
+                <Row><Icon name="parking" size={14} color={C.blue} /><Text style={[FONT.sub, { marginLeft: 4 }]}>{parked.length} parked</Text></Row>
+                {!h.hq && <Row><Icon name="wrench-clock" size={14} color={C.amber} /><Text style={[FONT.sub, { marginLeft: 4 }]}>{inrShort(upkeep)}/mo upkeep</Text></Row>}
+              </Row>
+              <Row style={{ marginTop: 10, gap: 8, flexWrap: 'wrap' }}>
                 {c && <Btn title="Map" kind="soft" small icon="crosshairs-gps" onPress={() => { onClose(); onShowOnMap && onShowOnMap({ lat: c.lat, lng: c.lng, scale: 5, key: Date.now() }); }} />}
+                {needFuel.length > 0 && (
+                  <Btn title={`Refuel ${needFuel.length} free`} kind="green" small icon="gas-station"
+                    onPress={() => { needFuel.forEach(t => refuelAtHub(t.id)); toast(`Refuelled ${needFuel.length} truck(s) free`, 'success'); }} />
+                )}
+                {elsewhere.length > 0 && (
+                  <Btn title="Send truck here" kind="blue" small icon="transfer"
+                    onPress={() => setTravelFor(travelFor === h.cityId ? null : h.cityId)} />
+                )}
               </Row>
-              <Row style={{ marginTop: 10, gap: 14 }}>
-                <Row><Icon name="truck" size={14} color={C.sub} /><Text style={[FONT.sub, { marginLeft: 4 }]}>{here.length} trucks</Text></Row>
-                <Row><Icon name="parking" size={14} color={C.blue} /><Text style={[FONT.sub, { marginLeft: 4 }]}>{parked} parked</Text></Row>
-                {c && <Row><Icon name="star" size={14} color={C.amber} /><Text style={[FONT.sub, { marginLeft: 4 }]}>Tier {c.tier}</Text></Row>}
-              </Row>
+              {travelFor === h.cityId && (
+                <View style={cs.pickerBox}>
+                  <Text style={[FONT.tiny, { marginBottom: 6 }]}>PICK A PARKED TRUCK TO FAST-TRAVEL HERE</Text>
+                  {elsewhere.map(t => {
+                    const m = modelById(t.modelId), from = cityById(t.cityId);
+                    return (
+                      <Pressable key={t.id} style={cs.resRow} onPress={() => {
+                        const r = fastTravel(t.id, h.cityId);
+                        toast(r.ok ? `Moved to ${c.name} for ${inr(r.fee)}` : r.err, r.ok ? 'success' : 'error');
+                        if (r.ok) setTravelFor(null);
+                      }}>
+                        <Icon name={m.icon} size={16} color={C.sub} />
+                        <Text style={[FONT.body, { flex: 1, marginLeft: 8 }]} numberOfLines={1}>{t.customName || m.name}</Text>
+                        <Text style={FONT.tiny}>{from?.name}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
             </Card>
           );
         })}
 
-        <Text style={cs.section}>Open a New Hub · ₹15,00,000 each</Text>
-        <TextInput value={query} onChangeText={setQuery} placeholder="Search a city to expand into..."
+        <Text style={cs.section}>Open a New Garage — price varies by city</Text>
+        <TextInput value={query} onChangeText={setQuery} placeholder="Search any city to expand into..."
           placeholderTextColor={C.faint} style={cs.input} />
         <View style={{ marginTop: 8, paddingBottom: 24 }}>
           {results.map(c => {
-            const afford = balance >= 1500000;
+            const cost = hubCostForCity(c);
+            const upkeep = hubMaintForCity(c);
+            const afford = balance >= cost;
             return (
               <Card key={c.id} style={{ marginBottom: 8, padding: 12 }}>
                 <Row style={{ justifyContent: 'space-between' }}>
                   <View style={{ flex: 1 }}>
-                    <Text style={[FONT.body, { fontWeight: '600' }]}>{c.name}</Text>
-                    <Text style={FONT.tiny}>{c.state} · Tier {c.tier}</Text>
+                    <Row><Text style={[FONT.body, { fontWeight: '700' }]}>{c.name}</Text>
+                      <View style={{ marginLeft: 6 }}><Pill text={TIER_LABEL[c.tier] || 'Regional'} color={C.sub} bg={C.bgSoft} /></View>
+                    </Row>
+                    <Text style={FONT.tiny}>{c.state}</Text>
+                    <Row style={{ marginTop: 4, gap: 12 }}>
+                      <Text style={[FONT.sub, { fontWeight: '800', color: C.text }]}>{inr(cost)}</Text>
+                      <Row><Icon name="wrench-clock" size={12} color={C.amber} /><Text style={[FONT.tiny, { marginLeft: 3 }]}>{inrShort(upkeep)}/mo</Text></Row>
+                    </Row>
                   </View>
-                  <Btn title={afford ? 'Buy Hub' : 'Low funds'} kind={afford ? 'primary' : 'soft'} small disabled={!afford} icon="garage-variant" onPress={() => buy(c)} />
+                  <Btn title={afford ? 'Buy' : 'Low funds'} kind={afford ? 'primary' : 'soft'} small disabled={!afford} icon="garage-variant" onPress={() => buy(c)} />
                 </Row>
               </Card>
             );
@@ -981,6 +1107,7 @@ const cs = StyleSheet.create({
   truckCard: { width: 120, padding: 10, borderRadius: RADIUS.md, borderWidth: 1, borderColor: C.border, marginRight: 8, backgroundColor: '#fff' },
   heroIcon: { width: 64, height: 64, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   resRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border },
+  pickerBox: { marginTop: 10, backgroundColor: C.bgSoft, borderRadius: RADIUS.md, borderWidth: 1, borderColor: C.border, padding: 10 },
   suggChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1, borderColor: C.border, backgroundColor: C.bgSoft, alignItems: 'center' },
   notif: { flexDirection: 'row', alignItems: 'center', padding: 10, borderRadius: RADIUS.md, marginBottom: 6 },
   notifIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.border },
