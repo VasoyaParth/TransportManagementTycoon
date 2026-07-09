@@ -117,6 +117,7 @@ export function computeRoute(fromLat, fromLng, toLat, toLng) {
   let bordersCrossed = 0;
   const borderNames = [];
   const nodeIds = [s.id];
+  let ferryStartIdx = -1, ferryEndIdx = -1; // point-index span of the ferry hop, for the map layer
 
   if (s.id !== e.id) {
     const path = dijkstra(s.id, e.id);
@@ -124,9 +125,15 @@ export function computeRoute(fromLat, fromLng, toLat, toLng) {
     const sn = ROAD_NODES[s.id];
     points.push({ lat: sn.lat, lng: sn.lng });
     for (const { hop } of path.hops) {
+      const isFerry = hop.ferry || (hop.edge && hop.edge.ferry);
+      const startIdx = points.length - 1;
       const pts = edgePoints(hop.edge, hop.reversed);
       points.push(...pts.slice(1)); // skip duplicated start point
-      if (hop.ferry || (hop.edge && hop.edge.ferry)) usesFerry = true;
+      if (isFerry) {
+        usesFerry = true;
+        if (ferryStartIdx === -1) ferryStartIdx = startIdx;
+        ferryEndIdx = points.length - 1;
+      }
       if (hop.edge && hop.edge.border) { bordersCrossed++; if (hop.edge.nh) borderNames.push(hop.edge.nh); }
       nodeIds.push(hop.to);
     }
@@ -137,12 +144,23 @@ export function computeRoute(fromLat, fromLng, toLat, toLng) {
   points.push({ lat: toLat, lng: toLng });
 
   // dedupe consecutive identical points
+  const before = points.length;
   points = points.filter((p, i) => i === 0 ||
     Math.abs(p.lat - points[i - 1].lat) > 1e-6 || Math.abs(p.lng - points[i - 1].lng) > 1e-6);
+  // adjust ferry indices if dedupe dropped points ahead of them (rare)
+  const dropped = before - points.length;
+  if (ferryEndIdx !== -1) { ferryStartIdx = Math.max(0, ferryStartIdx - dropped); ferryEndIdx = Math.max(ferryStartIdx, ferryEndIdx - dropped); }
 
   const cum = polylineLengths(points);
   const roadKm = Math.round(cum[cum.length - 1] * ROAD_FACTOR);
-  return { points, cum, roadKm, usesFerry, nodeIds, bordersCrossed, borderNames };
+  // ferrySegment as a fraction range of the route's raw cum length (same 0..1
+  // scale as the `prog` used by pointAlong), so the map layer can cheaply
+  // check `prog >= startFrac && prog <= endFrac` to know it's over the sea hop.
+  const total = cum[cum.length - 1] || 1;
+  const ferrySegment = ferryEndIdx !== -1 && cum[ferryStartIdx] != null && cum[ferryEndIdx] != null
+    ? { startFrac: cum[ferryStartIdx] / total, endFrac: cum[ferryEndIdx] / total }
+    : null;
+  return { points, cum, roadKm, usesFerry, nodeIds, bordersCrossed, borderNames, ferrySegment };
 }
 
 // Insert fuel/charging stops: stations are placed along the route whenever the

@@ -321,6 +321,55 @@ export const TRUCK_MODELS = [
     desc: 'Flagship electric mega-hauler — silent, massive and quick.',
     speed: 108, cargo: 40, battery: 1000, range: 900, maint: 6, price: 14000000, build: 3900,
   },
+  // ——— American long-nose conventionals, road-trains and mega-haulers ———
+  {
+    id: 'kenworth-w990', name: 'Kenworth W990', brand: 'Kenworth',
+    tier: 3, propulsion: 'diesel', rating: 4.8, icon: 'truck-trailer', shape: 'conventional',
+    desc: 'American long-nose conventional — big hood, big attitude, big torque.',
+    speed: 100, cargo: 38, tank: 550, eff: 3.3, range: 1815, maint: 14, price: 11500000, build: 3600,
+  },
+  {
+    id: 'freightliner-cascadia', name: 'Freightliner Cascadia', brand: 'Freightliner',
+    tier: 3, propulsion: 'diesel', rating: 4.7, icon: 'truck-trailer', shape: 'conventional',
+    desc: 'Aero-tuned American long-hauler with a spacious long-nose cab.',
+    speed: 100, cargo: 36, tank: 530, eff: 3.4, range: 1802, maint: 13, price: 10800000, build: 3600,
+  },
+  {
+    id: 'volvo-fh-roadtrain', name: 'Volvo FH B-Double Road Train', brand: 'Volvo Trucks',
+    tier: 3, propulsion: 'diesel', rating: 4.9, icon: 'truck-trailer', shape: 'doubletrailer',
+    desc: 'Twin-trailer road-train rig — two boxes chained for maximum tonnage per trip.',
+    speed: 95, cargo: 55, tank: 800, eff: 2.8, range: 2240, maint: 18, price: 19000000, build: 4800,
+  },
+  {
+    id: 'man-tgx-roadtrain', name: 'MAN TGX B-Double', brand: 'MAN',
+    tier: 3, propulsion: 'diesel', rating: 4.7, icon: 'truck-trailer', shape: 'doubletrailer',
+    desc: 'German double-trailer combination built for high-volume corridor runs.',
+    speed: 92, cargo: 52, tank: 780, eff: 2.9, range: 2262, maint: 17, price: 17500000, build: 4800,
+  },
+  {
+    id: 'scania-titan-100', name: 'Scania Titan 100X', brand: 'Scania',
+    tier: 3, propulsion: 'diesel', rating: 5.0, icon: 'truck-trailer',
+    desc: 'The ultimate heavy hauler — a 100-ton multi-axle mega-rig for the biggest loads on Earth.',
+    speed: 90, cargo: 100, tank: 900, eff: 2.2, range: 1980, maint: 22, price: 26000000, build: 5400,
+  },
+  {
+    id: 'volvo-fh-electric', name: 'Volvo FH Electric', brand: 'Volvo Trucks',
+    tier: 3, propulsion: 'electric', rating: 4.8, icon: 'lightning-bolt-circle',
+    desc: 'Zero-emission flagship tractor — silent power for premium long-haul freight.',
+    speed: 95, cargo: 38, battery: 540, range: 400, maint: 8, price: 15500000, build: 3900,
+  },
+  {
+    id: 'mercedes-eactros-600', name: 'Mercedes-Benz eActros 600', brand: 'Mercedes-Benz',
+    tier: 3, propulsion: 'electric', rating: 4.9, icon: 'lightning-bolt-circle',
+    desc: "Mercedes' long-range electric flagship — silent, swift and spotless.",
+    speed: 100, cargo: 40, battery: 621, range: 500, maint: 8, price: 17500000, build: 4200,
+  },
+  {
+    id: 'daf-xg-hybrid', name: 'DAF XG Hybrid', brand: 'DAF',
+    tier: 2, propulsion: 'hybrid', rating: 4.5, icon: 'leaf-circle-outline',
+    desc: 'Diesel-electric hybrid tractor cutting fuel bills on the regional grind.',
+    speed: 88, cargo: 14, tank: 260, eff: 5.5, range: 1430, maint: 8, price: 4600000, build: 1500,
+  },
 ];
 
 // Truck livery colours for customization (id + hex + display name).

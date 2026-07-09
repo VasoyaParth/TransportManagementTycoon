@@ -5,7 +5,7 @@ import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Swi
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS } from '../../store/gameStore';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
 import { CITIES } from '../../data/cities';
 import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
@@ -67,6 +67,14 @@ function fmtDur(sec) {
   return `${s}s`;
 }
 
+// Absolute clock time for a timestamp, e.g. "14:32" (adds the date if not today).
+function fmtWhen(ts) {
+  const dt = new Date(ts), now = new Date();
+  const time = dt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return dt.toDateString() === now.toDateString() ? time
+    : `${dt.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })} ${time}`;
+}
+
 // hh:mm:ss duration, e.g. 4200 -> "01:10:00".
 function fmtClock(sec) {
   sec = Math.max(0, Math.round(sec));
@@ -76,12 +84,22 @@ function fmtClock(sec) {
 }
 
 // Pseudo-random live driving speed around the model's top speed, changing
-// every ~1.5s so the gauge feels alive (e.g. 60 then 45 then 72 km/h).
-function liveSpeed(base) {
+// every ~1.5s so the gauge feels alive (e.g. 60 then 45 then 72 km/h) — but
+// smoothed as a damped random walk (keyed by truck id) so it never jumps more
+// than ~8% of base per tick, instead of picking a fresh independent value.
+const _speedCache = {};
+function liveSpeed(base, key) {
   const t = Math.floor(Date.now() / 1500);
+  const c = _speedCache[key];
+  if (c && c.t === t) return c.v;
+  const prev = c ? c.v : base;
   const n = Math.sin(t * 12.9898) * 43758.5453;
   const rnd = n - Math.floor(n);
-  return Math.max(20, Math.round(base * (0.62 + rnd * 0.5)));
+  const target = base * (0.62 + rnd * 0.5);
+  const step = base * 0.08;
+  const v = Math.max(20, Math.round(prev + Math.max(-step, Math.min(step, target - prev))));
+  _speedCache[key] = { v, t };
+  return v;
 }
 
 // Semicircular gauge (speed / fuel) — pure SVG.
@@ -165,7 +183,14 @@ function buildJourney(d, model, now = Date.now()) {
   wp.push({ type: 'dest', atKm: total, title: `Deliver to ${cityById(d.toCityId)?.name || 'Destination'}`, sub: prog >= 1 ? 'Arrived' : 'Pending arrival', icon: 'map-marker-check', color: C.green });
 
   const waypoints = wp.filter(w => w.atKm >= 0 && w.atKm <= total).sort((a, b) => a.atKm - b.atKm);
-  waypoints.forEach(w => { w.passed = w.atKm <= kmNow + 0.5; });
+  // Every waypoint gets a clock time — proportional along the trip's real-time
+  // span, same time-compression model the progress bar already uses. Passed
+  // stops show when they were actually/estimated reached; the upcoming one
+  // shows its estimated arrival.
+  waypoints.forEach(w => {
+    w.passed = w.atKm <= kmNow + 0.5;
+    w.ts = d.startedAt + (total > 0 ? (w.atKm / total) * dur : 0);
+  });
   const nextIdx = waypoints.findIndex(w => !w.passed);
   const lastReached = [...waypoints].reverse().find(w => w.passed);
   const nextBreak = waypoints.find(w => !w.passed && (w.type === 'sleep' || w.type === 'short' || w.type === 'fuel'));
@@ -188,7 +213,7 @@ function JourneyTracker({ delivery, model }) {
           </Text>
           <Text style={FONT.tiny}>
             {j.lastReached ? `Last reached ${j.lastReached.title.replace(/^Picked up · /, '')}` : 'Just departed'}
-            {j.nextBreak ? ` · next ${j.nextBreak.type === 'fuel' ? 'fuel stop' : j.nextBreak.type === 'sleep' ? 'sleep break' : 'short break'} in ${Math.max(0, j.nextBreak.atKm - j.kmNow)} km` : ` · ETA ${eta}`}
+            {j.nextBreak ? ` · next ${j.nextBreak.type === 'fuel' ? 'fuel stop' : j.nextBreak.type === 'sleep' ? 'sleep break' : 'short break'} in ${Math.max(0, j.nextBreak.atKm - j.kmNow)} km (${fmtWhen(j.nextBreak.ts)})` : ` · ETA ${eta}`}
           </Text>
         </View>
       </Row>
@@ -200,7 +225,7 @@ function JourneyTracker({ delivery, model }) {
           done={w.passed}
           active={i === j.nextIdx}
           title={w.title}
-          sub={`${w.sub || ''}${w.type !== 'origin' && w.type !== 'dest' ? ` · ${w.atKm} km` : ''}`.replace(/^ · /, '')}
+          sub={`${w.sub || ''}${w.type !== 'origin' && w.type !== 'dest' ? ` · ${w.atKm} km` : ''} · ${w.passed ? 'Reached' : i === j.nextIdx ? 'ETA' : '~'} ${fmtWhen(w.ts)}`.replace(/^ · /, '')}
           line={i < j.waypoints.length - 1}
         />
       ))}
@@ -504,6 +529,8 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
   const trucks = useGame(s => s.trucks);
   const deliveries = useGame(s => s.deliveries);
   const repairTruck = useGame(s => s.repairTruck);
+  const serviceTruck = useGame(s => s.serviceTruck);
+  const callMechanic = useGame(s => s.callMechanic);
   const customizeTruck = useGame(s => s.customizeTruck);
   const sellTruck = useGame(s => s.sellTruck);
   const truckResale = useGame(s => s.truckResale);
@@ -527,8 +554,15 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
   const buildLeft = truck.status === 'building' ? Math.max(0, (truck.buildEndsAt - now) / 1000) : 0;
   const buildPct = truck.status === 'building' ? 100 * (1 - buildLeft / truck.buildTotalSec) : 0;
   const fee = Math.round(m.price * 0.04);
+  const condition = Math.round(truck.condition == null ? 100 : truck.condition);
+  const conditionColor = condition >= 70 ? C.green : condition >= 40 ? C.amber : C.red;
+  const serviceCost = Math.round(m.price * 0.05);
+  const incident = d && d.incident;
+  const incidentLeft = incident ? Math.max(0, (incident.resolveAt - now) / 1000) : 0;
 
   const doRepair = (gold) => { const r = repairTruck(truck.id, gold); toast(r.ok ? 'Repaired!' : r.err, r.ok ? 'success' : 'error'); };
+  const doService = () => { const r = serviceTruck(truck.id); toast(r.ok ? 'Serviced — condition restored!' : r.err, r.ok ? 'success' : 'error'); };
+  const doCallMechanic = () => { const r = callMechanic(d.id); toast(r.ok ? 'Mechanic on the way — delay cut short.' : r.err, r.ok ? 'success' : 'error'); };
 
   return (
     <Sheet visible={visible} onClose={onClose} title={truck.customName || m.name} height="86%">
@@ -555,7 +589,7 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
             </Row>
             {/* Live gauges — speed varies realistically, fuel drains as it drives */}
             <Row style={{ marginTop: 10 }}>
-              <Gauge value={liveSpeed(m.speed)} max={Math.round(m.speed * 1.15)} label="Speed" unit="km/h" color={C.green} />
+              <Gauge value={liveSpeed(m.speed, truck.id)} max={Math.round(m.speed * 1.15)} label="Speed" unit="km/h" color={C.green} />
               <Gauge value={curFuel} max={100} label={m.propulsion === 'electric' ? 'Charge' : 'Fuel'} unit="%"
                 color={curFuel > 50 ? C.green : curFuel > 20 ? C.amber : C.red} />
             </Row>
@@ -582,6 +616,23 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
             <Progress pct={buildPct} color={C.amber} style={{ marginTop: 8 }} />
           </Card>
         )}
+        {incident && (
+          <Card style={{ marginBottom: 12, borderColor: incident.type === 'accident' ? C.red : '#7D3C98' }}>
+            <Row>
+              <Icon name={incident.type === 'accident' ? 'car-brake-alert' : 'shield-alert'} size={16}
+                color={incident.type === 'accident' ? C.red : '#7D3C98'} />
+              <Text style={[FONT.body, { color: incident.type === 'accident' ? C.red : '#7D3C98', marginLeft: 6, fontWeight: '700' }]}>
+                {incident.type === 'accident' ? 'Accident on the road!' : 'Cargo theft in transit!'}
+              </Text>
+            </Row>
+            <Text style={[FONT.tiny, { marginTop: 6 }]}>
+              Lost {inr(incident.penalty)} already. {incident.mechanicCalled ? 'Mechanic dispatched — ' : ''}Back on the road in ~{fmtDur(incidentLeft)}.
+            </Text>
+            {!incident.mechanicCalled && (
+              <Btn title="Call Mechanic" kind="blue" small icon="wrench" onPress={doCallMechanic} style={{ marginTop: 10 }} />
+            )}
+          </Card>
+        )}
         {truck.status === 'broken' && (
           <Card style={{ marginBottom: 12, borderColor: C.red }}>
             <Row><Icon name="alert" size={16} color={C.red} /><Text style={[FONT.body, { color: C.red, marginLeft: 6, fontWeight: '700' }]}>This truck needs repair.</Text></Row>
@@ -593,6 +644,18 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
         )}
 
         <Card>
+          <Row style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <Row><Icon name="heart-pulse" size={15} color={conditionColor} />
+              <Text style={[FONT.body, { fontWeight: '700', marginLeft: 6 }]}>Condition</Text></Row>
+            <Text style={[FONT.body, { color: conditionColor, fontWeight: '700' }]}>{condition}%</Text>
+          </Row>
+          <Progress pct={condition} color={conditionColor} style={{ marginBottom: condition < 55 ? 8 : 0 }} />
+          {condition < 55 && truck.status !== 'delivering' && (
+            <Btn title={`Service · ${inr(serviceCost)}`} kind="soft" small icon="wrench" onPress={doService} style={{ marginTop: 4 }} />
+          )}
+        </Card>
+
+        <Card style={{ marginTop: 10 }}>
           <Text style={[FONT.h3, { marginBottom: 4 }]}>Specifications</Text>
           <SpecRow icon="speedometer" label="Top speed" value={`${m.speed} km/h`} />
           <SpecRow icon="weight" label="Cargo capacity" value={`${m.cargo} t`} />
@@ -1172,6 +1235,61 @@ function DiceGame({ toast }) {
   );
 }
 
+function SlotGame({ toast }) {
+  const playSlot = useGame(s => s.playSlot);
+  const games = useGame(s => s.games); // re-render on play
+  const gamesToday = useGame(s => s.gamesToday);
+  const left = gamesToday().slotLeft;
+  const [spinning, setSpinning] = useState(false);
+  const [result, setResult] = useState(null);
+  const [display, setDisplay] = useState(['help', 'help', 'help']);
+
+  const doSpin = () => {
+    if (spinning) return;
+    const r = playSlot();
+    if (!r.ok) { toast(r.err, 'warn'); return; }
+    setSpinning(true); setResult(null);
+    let ticks = 0;
+    const iv = setInterval(() => {
+      ticks++;
+      setDisplay([0, 1, 2].map(() => SLOT_SYMBOLS[Math.floor(Math.random() * SLOT_SYMBOLS.length)].icon));
+      if (ticks > 8) {
+        clearInterval(iv);
+        setDisplay(r.reels.map(id => (SLOT_SYMBOLS.find(s => s.id === id) || {}).icon));
+        setSpinning(false); setResult(r);
+        toast(r.isJackpot ? 'JACKPOT!' : r.reward > 0 ? `Won +${r.reward} Gold` : 'No match — try again!', r.reward > 0 ? 'success' : 'info');
+      }
+    }, 90);
+  };
+
+  return (
+    <View style={{ alignItems: 'center' }}>
+      <Text style={[FONT.sub, { textAlign: 'center', marginBottom: 4 }]}>Spin 3 reels — three of a kind hits the jackpot, a pair pays a little.</Text>
+      <Text style={[FONT.tiny, { marginBottom: 14 }]}>{left} of {DAILY_PLAYS} free spins left today</Text>
+      <Row style={{ gap: 12, marginBottom: 16 }}>
+        {[0, 1, 2].map(i => (
+          <View key={i} style={{
+            width: 60, height: 60, borderRadius: 12, borderWidth: 2, borderColor: C.border,
+            alignItems: 'center', justifyContent: 'center', backgroundColor: C.bgSoft,
+          }}>
+            <Icon name={display[i] || 'help'} size={30} color={spinning ? C.faint : C.text} />
+          </View>
+        ))}
+      </Row>
+      <View style={{ minHeight: 30, alignItems: 'center' }}>
+        {result ? (
+          <Text style={[FONT.h3, { color: result.reward > 0 ? C.green : C.sub }]}>
+            {result.isJackpot ? 'JACKPOT! ' : ''}{result.reward > 0 ? `+${result.reward} Gold` : 'No match — try again!'}
+          </Text>
+        ) : null}
+      </View>
+      <Btn title={spinning ? 'Spinning…' : 'Spin the reels'} kind="green" icon="slot-machine" style={{ marginTop: 12, alignSelf: 'stretch' }}
+        disabled={spinning || left <= 0} onPress={doSpin} />
+      {left <= 0 ? <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 6 }]}>Come back tomorrow for 10 more.</Text> : null}
+    </View>
+  );
+}
+
 export function MiniGamesModal({ visible, onClose }) {
   const toast = useToast();
   const gold = useGame(s => s.gold);
@@ -1189,9 +1307,10 @@ export function MiniGamesModal({ visible, onClose }) {
         <Chip label="Scratch Card" icon="ticket-confirmation" active={tab === 'scratch'} onPress={() => setTab('scratch')} />
         <Chip label="Lucky Spin" icon="rotate-right" active={tab === 'spin'} onPress={() => setTab('spin')} />
         <Chip label="Dice Roll" icon="dice-multiple" active={tab === 'dice'} onPress={() => setTab('dice')} />
+        <Chip label="Slot Machine" icon="slot-machine" active={tab === 'slot'} onPress={() => setTab('slot')} />
       </Row>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
-        {tab === 'scratch' ? <ScratchGame toast={toast} /> : tab === 'spin' ? <SpinGame toast={toast} /> : <DiceGame toast={toast} />}
+        {tab === 'scratch' ? <ScratchGame toast={toast} /> : tab === 'spin' ? <SpinGame toast={toast} /> : tab === 'dice' ? <DiceGame toast={toast} /> : <SlotGame toast={toast} />}
       </ScrollView>
     </Sheet>
   );

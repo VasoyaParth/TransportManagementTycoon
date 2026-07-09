@@ -8,7 +8,7 @@ import { Linking, Platform } from 'react-native';
 export const REPO = 'VasoyaParth/TransportManagementTycoon';
 // The version baked into THIS build. Bump together with android versionName and
 // the release tag. Compared against the latest GitHub release to detect updates.
-export const APP_VERSION = 'v1.4.5';
+export const APP_VERSION = 'v1.5.0';
 
 const RELEASES_URL = `https://api.github.com/repos/${REPO}/releases`;
 

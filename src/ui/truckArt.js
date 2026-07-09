@@ -16,13 +16,23 @@ export function shade(hex, pct) {
   return '#' + ((1 << 24) + (to(r) << 16) + (to(g) << 8) + to(b)).toString(16).slice(1);
 }
 
-// Which silhouette a model gets, from its catalog entry.
+// Which silhouette a model gets, from its catalog entry. `model.shape` lets a
+// catalog entry force a specific silhouette (American long-nose, road-train…).
 export function bodyTypeFor(model) {
   if (!model) return 'box';
+  if (model.shape) return model.shape;
   if (model.icon === 'truck-trailer' || model.cargo >= 16) return 'semi';
   if (model.cargo >= 4) return 'rigid';
   if (model.cargo >= 2) return 'box';
   return 'mini';
+}
+
+// Proportional render scale so bigger/heavier models look visibly bigger —
+// derived from cargo tonnage (capacity), not just body silhouette.
+export function sizeScaleFor(model) {
+  if (!model) return 1;
+  const c = model.cargo || 0;
+  return Math.max(0.78, Math.min(1.4, 0.8 + c / 70));
 }
 
 // Default livery colour when the player hasn't painted the truck.
@@ -58,6 +68,8 @@ export function truckShapes(type, body, accent, opts = {}) {
   const chrome = '#C9CFD8';
   const lamp = '#FFE9A8';
   const s = [];
+  // o.skew adds a slight skewX (deg) to top-face rects (roof/hood) so the
+  // extruded body reads as 2.5D isometric instead of flat top-down.
   const R = (x, y, w, h, rx, fill, o = {}) => s.push({ k: 'rect', x, y, w, h, rx, fill, ...o });
   const C_ = (cx, cy, r, fill) => s.push({ k: 'circle', cx, cy, r, fill });
   // Twin-tyre wheel with a hub cap line.
@@ -96,7 +108,7 @@ export function truckShapes(type, body, accent, opts = {}) {
     R(13.2, 16, 13.6, 0.9, 0, darker);
     R(12.4, 2.6, 15.2, 2, 1, accent);                         // tail accent
     R(11.4, 23.5, 17.2, 12.4, 3, body, { stroke: '#fff', sw: 1.1 }); // cab
-    R(12.8, 24.6, 14.4, 4.6, 1.4, roof);                      // cab roof
+    R(12.8, 24.6, 14.4, 4.6, 1.4, roof, { skew: -6 });        // cab roof (angled top face)
     R(13.4, 29.8, 13.2, 3.6, 1.2, glass);                     // windshield
     mirrors(30.2); lamps(34.4);
     R(11.8, 36, 16.4, 1.8, 0.9, chrome);                      // bumper
@@ -119,7 +131,7 @@ export function truckShapes(type, body, accent, opts = {}) {
     R(11.8, 3, 16.4, 2.2, 1, accent);                         // rear accent strip
     R(12.2, 30.6, 15.6, 2.4, 1, dark);                        // wind deflector
     R(11.4, 32.6, 17.2, 12.6, 2.8, body, { stroke: '#fff', sw: 1.1 }); // cab
-    R(12.8, 33.8, 14.4, 4.6, 1.4, roof);
+    R(12.8, 33.8, 14.4, 4.6, 1.4, roof, { skew: -6 });        // cab roof (angled top face)
     R(13.4, 39, 13.2, 3.8, 1.2, glass);
     mirrors(39.4); lamps(43.4);
     R(11.8, 45.2, 16.4, 1.8, 0.9, chrome);
@@ -148,10 +160,83 @@ export function truckShapes(type, body, accent, opts = {}) {
     R(28.6, 44.8, 1.5, 6.5, 0.7, chrome);
     R(11.2, 43.6, 17.6, 2.6, 1.2, dark);                      // roof deflector
     R(11, 45.6, 18, 13.6, 3, body, { stroke: '#fff', sw: 1.1 }); // cab
-    R(12.4, 46.8, 15.2, 5, 1.6, roof);                        // sleeper roof
+    R(12.4, 46.8, 15.2, 5, 1.6, roof, { skew: -6 });          // sleeper roof (angled top face)
     R(13.2, 52.6, 13.6, 4, 1.4, glass);                       // windshield
     mirrors(53); lamps(57.6);
     R(11.4, 59.4, 17.2, 2, 1, chrome);                        // bumper
+    return finish(H);
+  }
+
+  if (type === 'conventional') {
+    // American long-nose tractor-trailer — extended hood/grille ahead of the
+    // cab, distinct from the European sleeper-cab 'semi' silhouette.
+    const H = 76;
+    wheel(8.6, 3.5, 5); wheel(28.7, 3.5, 5);                  // trailer tandem
+    wheel(8.6, 9.5, 5); wheel(28.7, 9.5, 5);
+    wheel(8.6, 40.5, 5); wheel(28.7, 40.5, 5);                // drive axle
+    wheel(8.6, 50.5, 5.4); wheel(28.7, 50.5, 5.4);            // steer axle
+    wheel(8.2, 62, 5.4); wheel(28.9, 62, 5.4);                // extra nose axle under the long hood
+    R(10, 2, 20, 36, 2, body, { stroke: '#fff', sw: 1.1 });   // trailer
+    R(19.6, 2.6, 0.8, 5, 0.3, darker);                        // rear door seam
+    R(11.8, 8, 16.4, 0.9, 0, dark);                           // roof ribs
+    R(11.8, 13, 16.4, 0.9, 0, dark);
+    R(11.8, 18, 16.4, 0.9, 0, dark);
+    R(11.8, 23, 16.4, 0.9, 0, dark);
+    R(11.8, 28, 16.4, 0.9, 0, dark);
+    R(11.6, 3, 16.8, 2.4, 1, accent);                         // rear accent strip
+    R(14.5, 38.4, 11, 4.2, 1, darker);                        // fifth-wheel plate
+    C_(20, 40.5, 1.7, chrome);                                // kingpin
+    R(13, 41, 14, 7.5, 1, darker);                            // tractor chassis
+    R(9.9, 44.8, 1.5, 9.4, 0.7, chrome);                      // tall exhaust stacks
+    R(28.6, 44.8, 1.5, 9.4, 0.7, chrome);
+    R(11.2, 43.6, 17.6, 2.6, 1.2, dark);                      // roof deflector
+    R(11, 45.6, 18, 12, 3, body, { stroke: '#fff', sw: 1.1 }); // short flat-back cab
+    R(12.4, 46.6, 15.2, 4.4, 1.6, roof, { skew: -6 });        // cab roof (angled top face)
+    R(13.2, 51.4, 13.6, 3.6, 1.4, glass);                     // windshield
+    mirrors(51.8);
+    R(12, 57.6, 16, 16, 2.4, body, { stroke: '#fff', sw: 1.1 }); // long hood/nose
+    R(13.2, 58.6, 13.6, 4.4, 1.2, roof, { skew: -4 });        // hood top face (lighter, angled)
+    R(14.6, 65.8, 10.8, 3.6, 1, darker);                      // grille
+    lamps(70.6);
+    R(11.4, 72.6, 17.2, 2, 1, chrome);                        // bumper
+    return finish(H);
+  }
+
+  if (type === 'doubletrailer') {
+    // B-double / road-train — two trailer boxes chained on a dolly, tractor at
+    // the bottom. Longest silhouette in the catalog for the heaviest haulers.
+    const H = 98;
+    wheel(8.6, 3.5, 5); wheel(28.7, 3.5, 5);                  // rear trailer tandem
+    wheel(8.6, 9.5, 5); wheel(28.7, 9.5, 5);
+    R(10, 2, 20, 27, 2, body, { stroke: '#fff', sw: 1.1 });   // trailer 2 (rear)
+    R(19.6, 2.6, 0.8, 4, 0.3, darker);
+    R(11.8, 7.5, 16.4, 0.9, 0, dark);
+    R(11.8, 13, 16.4, 0.9, 0, dark);
+    R(11.8, 18.5, 16.4, 0.9, 0, dark);
+    R(11.6, 3, 16.8, 2, 1, accent);
+    R(15, 30, 10, 4, 1, darker);                              // dolly coupling
+    C_(20, 32, 1.4, chrome);
+    wheel(8.6, 35, 5); wheel(28.7, 35, 5);                    // dolly tandem
+    R(10, 37.5, 20, 27, 2, body, { stroke: '#fff', sw: 1.1 }); // trailer 1 (front)
+    R(19.6, 38.1, 0.8, 4, 0.3, darker);
+    R(11.8, 43, 16.4, 0.9, 0, dark);
+    R(11.8, 48.5, 16.4, 0.9, 0, dark);
+    R(11.8, 54, 16.4, 0.9, 0, dark);
+    R(11.6, 38.5, 16.8, 2, 1, accent);
+    wheel(8.6, 63.5, 5); wheel(28.7, 63.5, 5);                // trailer-1 kingpin tandem
+    R(14.5, 71.9, 11, 4.2, 1, darker);                        // fifth-wheel plate
+    C_(20, 74, 1.7, chrome);                                  // kingpin
+    wheel(8.6, 74, 5); wheel(28.7, 74, 5);                    // tractor drive axle
+    wheel(8.6, 84, 5.4); wheel(28.7, 84, 5.4);                // tractor steer axle
+    R(13, 74.5, 14, 7.5, 1, darker);                          // tractor chassis
+    R(9.9, 78.3, 1.5, 6.5, 0.7, chrome);                      // exhaust stacks
+    R(28.6, 78.3, 1.5, 6.5, 0.7, chrome);
+    R(11.2, 77.1, 17.6, 2.6, 1.2, dark);                      // roof deflector
+    R(11, 79.1, 18, 13.6, 3, body, { stroke: '#fff', sw: 1.1 }); // cab
+    R(12.4, 80.3, 15.2, 5, 1.6, roof, { skew: -6 });          // sleeper roof (angled top face)
+    R(13.2, 86.1, 13.6, 4, 1.4, glass);                       // windshield
+    mirrors(86.5); lamps(91.1);
+    R(11.4, 92.9, 17.2, 2, 1, chrome);                        // bumper
     return finish(H);
   }
 
@@ -171,7 +256,7 @@ export function truckShapes(type, body, accent, opts = {}) {
   R(11.6, 3, 16.8, 2.4, 1, accent);
   R(12.2, 35.8, 15.6, 2.4, 1, dark);                          // deflector
   R(11.2, 37.8, 17.6, 13, 3, body, { stroke: '#fff', sw: 1.1 }); // cab
-  R(12.6, 39, 14.8, 4.8, 1.4, roof);
+  R(12.6, 39, 14.8, 4.8, 1.4, roof, { skew: -6 });          // cab roof (angled top face)
   R(13.4, 44.4, 13.2, 3.8, 1.2, glass);
   mirrors(44.8); lamps(49);
   R(11.6, 50.8, 16.8, 1.9, 0.9, chrome);
@@ -181,11 +266,14 @@ export function truckShapes(type, body, accent, opts = {}) {
 // React renderer (react-native-svg) — place inside an <Svg>/<G>. Origin is the
 // art's top-left; centre it yourself with translate(-20, -h/2).
 export function TruckTopShapes({ type, body, accent, lights }) {
-  const { shapes } = truckShapes(type, body, accent, { lights });
+  const { w, bodyH, shapes } = truckShapes(type, body, accent, { lights });
   return (
     <G>
+      {/* Ground shadow so the extruded body reads as raised off the road. */}
+      <Ellipse cx={w / 2 + 2} cy={bodyH - 5} rx={w / 2 - 7} ry={4.5} fill="rgba(0,0,0,0.22)" />
       {shapes.map((p, i) => p.k === 'rect'
-        ? <Rect key={i} x={p.x} y={p.y} width={p.w} height={p.h} rx={p.rx} fill={p.fill} stroke={p.stroke} strokeWidth={p.sw} />
+        ? <Rect key={i} x={p.x} y={p.y} width={p.w} height={p.h} rx={p.rx} fill={p.fill} stroke={p.stroke} strokeWidth={p.sw}
+            transform={p.skew ? `skewX(${p.skew})` : undefined} />
         : p.k === 'circle'
           ? <Circle key={i} cx={p.cx} cy={p.cy} r={p.r} fill={p.fill} />
           : p.k === 'path'
@@ -195,11 +283,38 @@ export function TruckTopShapes({ type, body, accent, lights }) {
   );
 }
 
+// Simple top-down ferry boat — swapped in for the truck marker while a
+// delivery crosses a FERRY_EDGES sea hop (v1.5.0). Kept visually consistent
+// with the 2.5D truck art (white-stroked hull, pale glass windows).
+export function FerryTopShape() {
+  return (
+    <G>
+      <Ellipse cx={20} cy={26} rx={17} ry={9} fill="#2E4F6E" />
+      <Ellipse cx={20} cy={24} rx={15} ry={7.5} fill="#4A7AA8" stroke="#fff" strokeWidth={1} />
+      <Rect x={10} y={12} width={20} height={10} rx={2} fill="#E8ECF2" stroke="#9DB2D6" strokeWidth={1} />
+      <Rect x={13} y={14} width={5} height={4} rx={0.6} fill="#AECBF5" />
+      <Rect x={22} y={14} width={5} height={4} rx={0.6} fill="#AECBF5" />
+      <Rect x={19} y={4} width={2} height={9} fill="#333" />
+    </G>
+  );
+}
+
+export function ferrySvgString() {
+  return '<svg width="40" height="36" viewBox="0 0 40 36">'
+    + '<ellipse cx="20" cy="26" rx="17" ry="9" fill="#2E4F6E"/>'
+    + '<ellipse cx="20" cy="24" rx="15" ry="7.5" fill="#4A7AA8" stroke="#fff" stroke-width="1"/>'
+    + '<rect x="10" y="12" width="20" height="10" rx="2" fill="#E8ECF2" stroke="#9DB2D6" stroke-width="1"/>'
+    + '<rect x="13" y="14" width="5" height="4" rx="0.6" fill="#AECBF5"/>'
+    + '<rect x="22" y="14" width="5" height="4" rx="0.6" fill="#AECBF5"/>'
+    + '<rect x="19" y="4" width="2" height="9" fill="#333"/>'
+    + '</svg>';
+}
+
 // HTML SVG string for the Leaflet WebView marker (includes a ground shadow).
 export function truckSvgString(type, body, accent, opts = {}) {
   const { w, h, bodyH, shapes } = truckShapes(type, body, accent, opts);
   const els = shapes.map(p => p.k === 'rect'
-    ? `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="${p.rx}" fill="${p.fill}"${p.stroke ? ` stroke="${p.stroke}" stroke-width="${p.sw}"` : ''}/>`
+    ? `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="${p.rx}" fill="${p.fill}"${p.stroke ? ` stroke="${p.stroke}" stroke-width="${p.sw}"` : ''}${p.skew ? ` transform="skewX(${p.skew})"` : ''}/>`
     : p.k === 'circle'
       ? `<circle cx="${p.cx}" cy="${p.cy}" r="${p.r}" fill="${p.fill}"/>`
       : p.k === 'path'
