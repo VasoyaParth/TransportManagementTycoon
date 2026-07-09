@@ -199,9 +199,32 @@ function buildJourney(d, model, now = Date.now()) {
 
 // Renders the buildJourney() waypoints as the vertical shipment timeline, with
 // the truck's live position highlighted between reached and upcoming stops.
+// Long routes can carry dozens of waypoints (every city + every fuel/sleep/
+// short stop) — rendering them all inline made the modal heavy and laggy.
+// Collapsed by default to just the reached-so-far + next stop; "Show full
+// timeline" expands the rest inside its own bounded, internally-scrolling
+// box instead of growing the whole sheet.
+const TIMELINE_COLLAPSED_COUNT = 3;
 function JourneyTracker({ delivery, model }) {
   const j = buildJourney(delivery, model);
   const eta = fmtDur((delivery.endsAt - Date.now()) / 1000);
+  const [expanded, setExpanded] = useState(false);
+  const collapsedStart = Math.max(0, j.nextIdx - 1);
+  const collapsedEnd = Math.min(j.waypoints.length, collapsedStart + TIMELINE_COLLAPSED_COUNT);
+  const shown = expanded ? j.waypoints : j.waypoints.slice(collapsedStart, collapsedEnd);
+  const hiddenCount = j.waypoints.length - shown.length;
+  const renderStep = (w, i, arr) => (
+    <TrackerStep
+      key={`${w.type}-${w.atKm}-${i}`}
+      icon={w.icon}
+      color={w.color}
+      done={w.passed}
+      active={j.waypoints.indexOf(w) === j.nextIdx}
+      title={w.title}
+      sub={`${w.sub || ''}${w.type !== 'origin' && w.type !== 'dest' ? ` · ${w.atKm} km` : ''} · ${w.passed ? 'Reached' : j.waypoints.indexOf(w) === j.nextIdx ? 'ETA' : '~'} ${fmtWhen(w.ts)}`.replace(/^ · /, '')}
+      line={i < arr.length - 1}
+    />
+  );
   return (
     <View>
       {/* Live "where is it now" banner */}
@@ -217,18 +240,19 @@ function JourneyTracker({ delivery, model }) {
           </Text>
         </View>
       </Row>
-      {j.waypoints.map((w, i) => (
-        <TrackerStep
-          key={`${w.type}-${i}`}
-          icon={w.icon}
-          color={w.color}
-          done={w.passed}
-          active={i === j.nextIdx}
-          title={w.title}
-          sub={`${w.sub || ''}${w.type !== 'origin' && w.type !== 'dest' ? ` · ${w.atKm} km` : ''} · ${w.passed ? 'Reached' : i === j.nextIdx ? 'ETA' : '~'} ${fmtWhen(w.ts)}`.replace(/^ · /, '')}
-          line={i < j.waypoints.length - 1}
-        />
-      ))}
+      {expanded ? (
+        <ScrollView style={{ maxHeight: 320 }} nestedScrollEnabled showsVerticalScrollIndicator={false}>
+          {shown.map(renderStep)}
+        </ScrollView>
+      ) : shown.map(renderStep)}
+      {j.waypoints.length > TIMELINE_COLLAPSED_COUNT && (
+        <Pressable onPress={() => setExpanded(e => !e)} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10 }}>
+          <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={16} color={C.blue} />
+          <Text style={{ color: C.blue, fontWeight: '700', marginLeft: 4 }}>
+            {expanded ? 'Collapse timeline' : `Show full timeline (${hiddenCount} more stop${hiddenCount === 1 ? '' : 's'})`}
+          </Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -272,7 +296,7 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
     setTruckId(tid);
     setDest(presetDest);
     setQuery('');
-    setCargo('general');
+    setCargo(contract?.cargoType || 'general');
     const m = tid ? modelById(trucks.find(t => t.id === tid)?.modelId) : null;
     setTons(contract?.cargoTons || (m ? Math.round(m.cargo / 2) : 5));
   }, [visible, presetTruckId, presetDest]);
@@ -416,6 +440,14 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
               </Row>
               )}
             </Row>
+            {locked && contract.cargoTons > maxTons && (
+              <Row style={{ marginTop: 6, backgroundColor: C.amberSoft, borderRadius: RADIUS.md, padding: 8 }}>
+                <Icon name="weight" size={14} color={C.amber} />
+                <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.text }]}>
+                  This truck can only carry {maxTons}t of the contract's {contract.cargoTons}t — pick a bigger truck to haul it all in one trip, or accept the reduced load.
+                </Text>
+              </Row>
+            )}
 
             {/* Preview */}
             {preview?.err ? (
@@ -1303,12 +1335,14 @@ export function MiniGamesModal({ visible, onClose }) {
           <Text style={[FONT.h2, { color: C.gold }]}>{gold}</Text>
         </Row>
       </Card>
-      <Row style={{ gap: 6, marginBottom: 14 }}>
-        <Chip label="Scratch Card" icon="ticket-confirmation" active={tab === 'scratch'} onPress={() => setTab('scratch')} />
-        <Chip label="Lucky Spin" icon="rotate-right" active={tab === 'spin'} onPress={() => setTab('spin')} />
-        <Chip label="Dice Roll" icon="dice-multiple" active={tab === 'dice'} onPress={() => setTab('dice')} />
-        <Chip label="Slot Machine" icon="slot-machine" active={tab === 'slot'} onPress={() => setTab('slot')} />
-      </Row>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 14 }}>
+        <Row style={{ gap: 6 }}>
+          <Chip label="Scratch Card" icon="ticket-confirmation" active={tab === 'scratch'} onPress={() => setTab('scratch')} />
+          <Chip label="Lucky Spin" icon="rotate-right" active={tab === 'spin'} onPress={() => setTab('spin')} />
+          <Chip label="Dice Roll" icon="dice-multiple" active={tab === 'dice'} onPress={() => setTab('dice')} />
+          <Chip label="Slot Machine" icon="slot-machine" active={tab === 'slot'} onPress={() => setTab('slot')} />
+        </Row>
+      </ScrollView>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
         {tab === 'scratch' ? <ScratchGame toast={toast} /> : tab === 'spin' ? <SpinGame toast={toast} /> : tab === 'dice' ? <DiceGame toast={toast} /> : <SlotGame toast={toast} />}
       </ScrollView>
@@ -1475,23 +1509,30 @@ export function SettingsModal({ visible, onClose, initialTab }) {
     if (visible && company) { setCeo(company.ceo); setAvatar(company.avatar); setCname(company.name); setLogo(company.logo); setConfirmReset(false); }
   }, [visible]);
 
-  const TABS = [['profile', 'Profile'], ['company', 'Company'], ['gameplay', 'Gameplay'], ['notif', 'Alerts'], ['about', 'About']];
+  const TABS = [
+    ['profile', 'Profile', 'account-circle'], ['company', 'Company', 'domain'],
+    ['gameplay', 'Gameplay', 'controller-classic'], ['notif', 'Alerts', 'bell-ring-outline'],
+    ['about', 'About', 'information-outline'],
+  ];
   const day = gameDay().day;
 
   return (
     <Sheet visible={visible} onClose={onClose} title="Settings" height="88%">
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 10 }}>
-        <Row style={{ gap: 6 }}>{TABS.map(([id, l]) => <Chip key={id} label={l} active={tab === id} onPress={() => setTab(id)} />)}</Row>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 12 }}>
+        <Row style={{ gap: 6 }}>{TABS.map(([id, l, icon]) => <Chip key={id} label={l} icon={icon} active={tab === id} onPress={() => setTab(id)} />)}</Row>
       </ScrollView>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
         {tab === 'profile' && (
           <>
-            <Text style={cs.section}>CEO name</Text>
-            <TextInput value={ceo} onChangeText={setCeo} maxLength={30} style={cs.input} />
-            <Text style={cs.section}>Avatar</Text>
-            <IconGrid options={AVATARS} value={avatar} onChange={setAvatar} />
-            <Card style={{ marginTop: 12 }}>
-              <Text style={[FONT.h3, { marginBottom: 6 }]}>Lifetime stats</Text>
+            <SectionTitle icon="account-circle" text="Your Profile" />
+            <Card>
+              <Text style={[FONT.tiny, { marginBottom: 4 }]}>CEO NAME</Text>
+              <TextInput value={ceo} onChangeText={setCeo} maxLength={30} style={cs.input} />
+              <Text style={[FONT.tiny, { marginTop: 14, marginBottom: 4 }]}>AVATAR</Text>
+              <IconGrid options={AVATARS} value={avatar} onChange={setAvatar} />
+            </Card>
+            <SectionTitle icon="chart-box-outline" text="Lifetime Stats" />
+            <Card>
               <SpecRow icon="package-variant-closed-check" label="Deliveries" value={stats.deliveries} />
               <SpecRow icon="cash-multiple" label="Revenue" value={inrShort(stats.revenue)} />
               <SpecRow icon="map-marker-distance" label="Distance" value={`${Math.round(stats.km).toLocaleString()} km`} />
@@ -1499,59 +1540,94 @@ export function SettingsModal({ visible, onClose, initialTab }) {
               <SpecRow icon="account-group" label="Staff" value={staff.length} />
               <SpecRow icon="calendar" label="Current day" value={day} />
             </Card>
-            <Btn title="Save Profile" kind="green" style={{ marginTop: 12 }} onPress={() => { saveCompany({ ceo, avatar }); toast('Profile saved', 'success'); }} />
+            <Btn title="Save Profile" kind="green" icon="content-save-outline" style={{ marginTop: 14 }} onPress={() => { saveCompany({ ceo, avatar }); toast('Profile saved', 'success'); }} />
           </>
         )}
         {tab === 'company' && (
           <>
-            <Text style={cs.section}>Company name</Text>
-            <TextInput value={cname} onChangeText={setCname} maxLength={40} style={cs.input} />
-            <Text style={cs.section}>Logo</Text>
-            <IconGrid options={LOGOS} value={logo} onChange={setLogo} />
-            <Card style={{ marginTop: 12 }}>
+            <SectionTitle icon="domain" text="Company Identity" />
+            <Card>
+              <Text style={[FONT.tiny, { marginBottom: 4 }]}>COMPANY NAME</Text>
+              <TextInput value={cname} onChangeText={setCname} maxLength={40} style={cs.input} />
+              <Text style={[FONT.tiny, { marginTop: 14, marginBottom: 4 }]}>LOGO</Text>
+              <IconGrid options={LOGOS} value={logo} onChange={setLogo} />
+            </Card>
+            <SectionTitle icon="account-multiple-plus-outline" text="Collaboration" />
+            <Card>
               <Text style={FONT.tiny}>COMPANY CODE</Text>
               <Text style={[FONT.h2, { letterSpacing: 2, marginTop: 2 }]}>{company?.code}</Text>
               <Text style={FONT.tiny}>Share this with partners to collaborate.</Text>
             </Card>
-            <Btn title="Save Company" kind="green" style={{ marginTop: 12 }} onPress={() => { saveCompany({ name: cname, logo }); toast('Company saved', 'success'); }} />
+            <Btn title="Save Company" kind="green" icon="content-save-outline" style={{ marginTop: 14 }} onPress={() => { saveCompany({ name: cname, logo }); toast('Company saved', 'success'); }} />
           </>
         )}
         {tab === 'gameplay' && (
           <>
-            <Text style={cs.section}>Game speed</Text>
-            <Row style={{ gap: 6, flexWrap: 'wrap' }}>
-              {[[0.5, 'Slow'], [1, 'Normal'], [2, 'Fast'], [4, 'Very Fast']].map(([v, l]) => (
-                <Chip key={v} label={l} active={settings.speed === v} onPress={() => saveSettings({ speed: v })} />
-              ))}
-            </Row>
-            <Text style={cs.section}>Difficulty</Text>
-            <Row style={{ gap: 6 }}>
-              {['easy', 'normal', 'hard'].map(d => <Chip key={d} label={d[0].toUpperCase() + d.slice(1)} active={settings.difficulty === d} onPress={() => saveSettings({ difficulty: d })} />)}
-            </Row>
-            <Text style={cs.section}>Random Events (theft, accidents...)</Text>
-            <Row style={{ gap: 6 }}>
-              {[['off', 'Off'], ['rare', 'Rare'], ['sometimes', 'Sometimes']].map(([v, l]) =>
-                <Chip key={v} label={l} active={(settings.events || 'rare') === v} onPress={() => saveSettings({ events: v })} />)}
-            </Row>
-            <View style={{ marginTop: 12 }}>
+            <SectionTitle icon="controller-classic" text="Simulation" />
+            <Card>
+              <Text style={[FONT.tiny, { marginBottom: 6 }]}>GAME SPEED</Text>
+              <Row style={{ gap: 6, flexWrap: 'wrap' }}>
+                {[[0.5, 'Slow'], [1, 'Normal'], [2, 'Fast'], [4, 'Very Fast']].map(([v, l]) => (
+                  <Chip key={v} label={l} active={settings.speed === v} onPress={() => saveSettings({ speed: v })} />
+                ))}
+              </Row>
+              <Text style={[FONT.tiny, { marginTop: 14, marginBottom: 6 }]}>DIFFICULTY</Text>
+              <Row style={{ gap: 6 }}>
+                {['easy', 'normal', 'hard'].map(d => <Chip key={d} label={d[0].toUpperCase() + d.slice(1)} active={settings.difficulty === d} onPress={() => saveSettings({ difficulty: d })} />)}
+              </Row>
+              <Text style={[FONT.tiny, { marginTop: 14, marginBottom: 6 }]}>RANDOM EVENTS (theft, accidents...)</Text>
+              <Row style={{ gap: 6 }}>
+                {[['off', 'Off'], ['rare', 'Rare'], ['sometimes', 'Sometimes']].map(([v, l]) =>
+                  <Chip key={v} label={l} active={(settings.events || 'rare') === v} onPress={() => saveSettings({ events: v })} />)}
+              </Row>
+            </Card>
+            <SectionTitle icon="tune-variant" text="Preferences" />
+            <Card>
               <ToggleRow label="Auto-save" value={settings.autosave} onChange={v => saveSettings({ autosave: v })} />
-              <ToggleRow label="Sound effects & music" value={settings.sound} onChange={v => saveSettings({ sound: v })} />
-              <ToggleRow label="Vibration / haptics" value={settings.haptics !== false} onChange={v => saveSettings({ haptics: v })} />
               <ToggleRow label="Show fuel stations by default" value={settings.showStations} onChange={v => saveSettings({ showStations: v })} />
-            </View>
-            <Card style={{ marginTop: 16, borderColor: C.red }}>
-              <Text style={[FONT.h3, { color: C.red }]}>Danger Zone</Text>
-              <Text style={[FONT.sub, { marginVertical: 6 }]}>This permanently deletes your empire and all progress.</Text>
-              <Btn title={confirmReset ? 'Tap again to confirm reset' : 'Reset Game Data'} kind="danger"
+            </Card>
+            <SectionTitle icon="volume-high" text="Audio" />
+            <Card>
+              <ToggleRow label="Sound effects & music" value={settings.sound} onChange={v => saveSettings({ sound: v })} />
+              <Text style={[FONT.tiny, { marginTop: 12, marginBottom: 6 }]}>MUSIC VOLUME</Text>
+              <Row style={{ gap: 6, flexWrap: 'wrap' }}>
+                {[[0, 'Off'], [0.25, '25%'], [0.4, '50%'], [0.7, '75%'], [1, '100%']].map(([v, l]) => (
+                  <Chip key={l} label={l} active={Math.abs((settings.musicVolume ?? 0.4) - v) < 0.01} onPress={() => saveSettings({ musicVolume: v })} />
+                ))}
+              </Row>
+              <Text style={[FONT.tiny, { marginTop: 14, marginBottom: 6 }]}>SOUND EFFECTS VOLUME</Text>
+              <Row style={{ gap: 6, flexWrap: 'wrap' }}>
+                {[[0, 'Off'], [0.25, '25%'], [0.5, '50%'], [0.75, '75%'], [1, '100%']].map(([v, l]) => (
+                  <Chip key={l} label={l} active={Math.abs((settings.sfxVolume ?? 1) - v) < 0.01} onPress={() => saveSettings({ sfxVolume: v })} />
+                ))}
+              </Row>
+            </Card>
+            <SectionTitle icon="vibrate" text="Vibration" />
+            <Card>
+              <ToggleRow label="Vibration / haptics" value={settings.haptics !== false} onChange={v => saveSettings({ haptics: v })} />
+              <Text style={[FONT.tiny, { marginTop: 12, marginBottom: 6 }]}>INTENSITY</Text>
+              <Row style={{ gap: 6 }}>
+                {[['short', 'Short'], ['medium', 'Medium'], ['long', 'Long']].map(([v, l]) => (
+                  <Chip key={v} label={l} active={(settings.hapticIntensity || 'medium') === v} onPress={() => saveSettings({ hapticIntensity: v })} />
+                ))}
+              </Row>
+            </Card>
+            <SectionTitle icon="alert-octagon-outline" text="Danger Zone" />
+            <Card style={{ borderColor: C.red }}>
+              <Text style={[FONT.sub, { marginBottom: 8 }]}>This permanently deletes your empire and all progress.</Text>
+              <Btn title={confirmReset ? 'Tap again to confirm reset' : 'Reset Game Data'} kind="danger" icon="delete-forever-outline"
                 onPress={() => { if (confirmReset) { resetGame(); onClose(); } else setConfirmReset(true); }} />
             </Card>
           </>
         )}
         {tab === 'notif' && (
           <>
-            {[['delivery', 'Delivery updates'], ['truck', 'Truck ready'], ['fuel', 'Low fuel warning'], ['collab', 'Collaboration requests'], ['daily', 'Daily summary']].map(([k, l]) => (
-              <ToggleRow key={k} label={l} value={settings.notif[k]} onChange={v => saveSettings({ notif: { ...settings.notif, [k]: v } })} />
-            ))}
+            <SectionTitle icon="bell-ring-outline" text="Notifications" />
+            <Card>
+              {[['delivery', 'Delivery updates'], ['truck', 'Truck ready'], ['fuel', 'Low fuel warning'], ['collab', 'Collaboration requests'], ['daily', 'Daily summary']].map(([k, l]) => (
+                <ToggleRow key={k} label={l} value={settings.notif[k]} onChange={v => saveSettings({ notif: { ...settings.notif, [k]: v } })} />
+              ))}
+            </Card>
           </>
         )}
         {tab === 'about' && (

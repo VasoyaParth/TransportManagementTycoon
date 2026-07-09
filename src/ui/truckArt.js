@@ -69,8 +69,19 @@ export function truckShapes(type, body, accent, opts = {}) {
   const lamp = '#FFE9A8';
   const s = [];
   // o.skew adds a slight skewX (deg) to top-face rects (roof/hood) so the
-  // extruded body reads as 2.5D isometric instead of flat top-down.
-  const R = (x, y, w, h, rx, fill, o = {}) => s.push({ k: 'rect', x, y, w, h, rx, fill, ...o });
+  // extruded body reads as 2.5D isometric instead of flat top-down. Any main
+  // hull panel (passed o.stroke, i.e. trailer/cargo-box/cab silhouettes) also
+  // gets an auto right-edge dark side face + top-edge highlight strip so the
+  // flat rect reads as a raised, angled 3D box instead of a plan-view outline.
+  const R = (x, y, w, h, rx, fill, o = {}) => {
+    s.push({ k: 'rect', x, y, w, h, rx, fill, ...o });
+    if (o.stroke) {
+      const sideW = Math.max(2.4, w * 0.24);
+      s.push({ k: 'rect', x: x + w - sideW, y, w: sideW, h, rx: rx * 0.6, fill: shade(fill, -0.24) });
+      const topH = Math.max(2.2, h * 0.15);
+      s.push({ k: 'rect', x, y, w: w - sideW * 0.55, h: topH, rx: rx * 0.6, fill: shade(fill, 0.15) });
+    }
+  };
   const C_ = (cx, cy, r, fill) => s.push({ k: 'circle', cx, cy, r, fill });
   // Twin-tyre wheel with a hub cap line.
   const wheel = (x, y, h = 5) => { R(x, y, 2.7, h, 1.2, tyre); R(x + 0.9, y + h / 2 - 0.5, 0.9, 1, 0.4, hub); };
@@ -214,8 +225,9 @@ export function truckShapes(type, body, accent, opts = {}) {
     R(11.8, 13, 16.4, 0.9, 0, dark);
     R(11.8, 18.5, 16.4, 0.9, 0, dark);
     R(11.6, 3, 16.8, 2, 1, accent);
-    R(15, 30, 10, 4, 1, darker);                              // dolly coupling
-    C_(20, 32, 1.4, chrome);
+    R(17, 29, 6, 9.5, 1, darker);                             // tow-bar/drawbar — closes the gap so trailer 2 visibly links to the dolly
+    C_(20, 30.5, 1.4, chrome);                                // drawbar pivot pin
+    C_(20, 37, 1.4, chrome);                                  // dolly hitch pin
     wheel(8.6, 35, 5); wheel(28.7, 35, 5);                    // dolly tandem
     R(10, 37.5, 20, 27, 2, body, { stroke: '#fff', sw: 1.1 }); // trailer 1 (front)
     R(19.6, 38.1, 0.8, 4, 0.3, darker);
@@ -269,8 +281,8 @@ export function TruckTopShapes({ type, body, accent, lights }) {
   const { w, bodyH, shapes } = truckShapes(type, body, accent, { lights });
   return (
     <G>
-      {/* Ground shadow so the extruded body reads as raised off the road. */}
-      <Ellipse cx={w / 2 + 2} cy={bodyH - 5} rx={w / 2 - 7} ry={4.5} fill="rgba(0,0,0,0.22)" />
+      {/* Subtle ground shadow — kept light so it doesn't read as a dark blob under the truck. */}
+      <Ellipse cx={w / 2 + 2} cy={bodyH - 5} rx={w / 2 - 10} ry={3} fill="rgba(0,0,0,0.12)" />
       {shapes.map((p, i) => p.k === 'rect'
         ? <Rect key={i} x={p.x} y={p.y} width={p.w} height={p.h} rx={p.rx} fill={p.fill} stroke={p.stroke} strokeWidth={p.sw}
             transform={p.skew ? `skewX(${p.skew})` : undefined} />
@@ -320,6 +332,6 @@ export function truckSvgString(type, body, accent, opts = {}) {
       : p.k === 'path'
         ? `<path d="${p.d}" fill="${p.fill}"/>`
         : `<ellipse cx="${p.cx}" cy="${p.cy}" rx="${p.rx}" ry="${p.ry}" fill="${p.fill}"/>`).join('');
-  const shadow = `<ellipse cx="${w / 2 + 2}" cy="${bodyH - 5}" rx="${w / 2 - 7}" ry="4.5" fill="rgba(0,0,0,0.22)"/>`;
+  const shadow = `<ellipse cx="${w / 2 + 2}" cy="${bodyH - 5}" rx="${w / 2 - 10}" ry="3" fill="rgba(0,0,0,0.12)"/>`;
   return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${shadow}${els}</svg>`;
 }
