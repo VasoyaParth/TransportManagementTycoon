@@ -14,11 +14,9 @@
       android:allowBackup="false"
       android:theme="@style/AppTheme"
       android:supportsRtl="true">
-      <!-- Google AdMob application id (must match appIdAndroid in src/ads/adConfig.js).
-           Required at native level — the SDK crashes on launch without it. -->
-      <meta-data
-        android:name="com.google.android.gms.ads.APPLICATION_ID"
-        android:value="ca-app-pub-7624141595548692~9868476067" />
+      <!-- The AdMob APPLICATION_ID meta-data is injected automatically by
+           react-native-google-mobile-ads from the android_app_id in app.json.
+           Do NOT add it here too — duplicate meta-data breaks the manifest merge. -->
       <activity
         android:name=".MainActivity"
         android:label="@string/app_name"

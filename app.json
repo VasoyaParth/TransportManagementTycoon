@@ -1,4 +1,7 @@
 {
   "name": "TruckEmpireTycoon",
-  "displayName": "TruckEmpireTycoon"
+  "displayName": "TruckEmpireTycoon",
+  "react-native-google-mobile-ads": {
+    "android_app_id": "ca-app-pub-7624141595548692~9868476067"
+  }
 }
