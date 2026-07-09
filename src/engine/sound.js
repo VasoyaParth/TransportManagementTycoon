@@ -7,6 +7,8 @@ Sound.setCategory('Playback', false);
 
 let enabled = true;
 let musicOn = true;
+let musicVolume = 0.4; // master music volume (0-1), tunable in Settings
+let sfxVolume = 1; // master SFX multiplier (0-1) applied on top of each play() call's own volume
 const sfx = {};
 let bgm = null;
 let loaded = false;
@@ -32,7 +34,7 @@ export function initSound() {
     bgm = new Sound('bgm', Sound.MAIN_BUNDLE, e => {
       if (e) { bgm = null; return; }
       bgm.setNumberOfLoops(-1);
-      bgm.setVolume(0.4);
+      bgm.setVolume(musicVolume);
       if (enabled && musicOn) bgm.play();
     });
   } catch (e) {
@@ -45,7 +47,7 @@ export function play(name, volume = 0.9) {
   const s = sfx[name];
   if (!s) return;
   try {
-    s.stop(() => { s.setVolume(volume); s.play(); });
+    s.stop(() => { s.setVolume(volume * sfxVolume); s.play(); });
   } catch (e) {}
 }
 
@@ -62,6 +64,16 @@ export function setMusicEnabled(on) {
   try {
     if (bgm) { if (on && enabled) bgm.play(); else bgm.pause(); }
   } catch (e) {}
+}
+
+// Independent volume sliders (0-1) for background music and one-shot SFX.
+export function setMusicVolume(v) {
+  musicVolume = Math.max(0, Math.min(1, v));
+  try { if (bgm) bgm.setVolume(musicVolume); } catch (e) {}
+}
+
+export function setSfxVolume(v) {
+  sfxVolume = Math.max(0, Math.min(1, v));
 }
 
 export function releaseSound() {

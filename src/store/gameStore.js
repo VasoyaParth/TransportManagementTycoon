@@ -12,8 +12,8 @@ import { STAFF_NAMES, STAFF_LEVELS } from '../data/staffNames';
 import { CITIES } from '../data/cities';
 import { computeRoute, planFuelStops, cityById } from '../engine/routing';
 import { deliveryEconomics, tripDurationSec, inr, REAL_SEC_PER_GAME_HOUR } from '../engine/economy';
-import { play, setSoundEnabled } from '../engine/sound';
-import { setHapticsEnabled } from '../engine/haptics';
+import { play, setSoundEnabled, setMusicVolume, setSfxVolume } from '../engine/sound';
+import { setHapticsEnabled, setHapticsIntensity } from '../engine/haptics';
 import { initNotifications, pushNow, scheduleAt, setNotificationsEnabled } from '../engine/notify';
 
 export const GAME_HOUR_MS = 3600000; // 1 in-game hour = 1 real minute -> 1 day = 24 min
@@ -199,6 +199,7 @@ const initialState = {
   settings: {
     speed: 1, autosave: true, sound: true, haptics: true, showStations: true,
     difficulty: 'normal', events: 'rare', tutorialSeen: false,
+    musicVolume: 0.4, sfxVolume: 1, hapticIntensity: 'medium',
     notif: { delivery: true, truck: true, fuel: true, collab: true, daily: true },
   },
   partners: [], // {code, name, since}
@@ -1136,6 +1137,9 @@ export const useGame = create(
         set({ settings: { ...get().settings, ...patch } });
         if ('sound' in patch) setSoundEnabled(patch.sound !== false);
         if ('haptics' in patch) setHapticsEnabled(patch.haptics !== false);
+        if ('musicVolume' in patch) setMusicVolume(patch.musicVolume);
+        if ('sfxVolume' in patch) setSfxVolume(patch.sfxVolume);
+        if ('hapticIntensity' in patch) setHapticsIntensity(patch.hapticIntensity);
         if ('notif' in patch) {
           const n = get().settings.notif || {};
           setNotificationsEnabled(n.delivery !== false || n.truck !== false);

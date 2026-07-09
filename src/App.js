@@ -8,8 +8,8 @@ import { C } from './ui/theme';
 import Splash from './ui/screens/Splash';
 import Onboarding from './ui/screens/Onboarding';
 import GameScreen from './ui/screens/GameScreen';
-import { initSound, setSoundEnabled } from './engine/sound';
-import { setHapticsEnabled } from './engine/haptics';
+import { initSound, setSoundEnabled, setMusicVolume, setSfxVolume } from './engine/sound';
+import { setHapticsEnabled, setHapticsIntensity } from './engine/haptics';
 
 export default function App() {
   const [hydrated, setHydrated] = useState(useGame.persist?.hasHydrated?.() ?? false);
@@ -27,8 +27,12 @@ export default function App() {
   useEffect(() => {
     if (!hydrated) return;
     initSound();
-    setSoundEnabled(useGame.getState().settings.sound !== false);
-    setHapticsEnabled(useGame.getState().settings.haptics !== false);
+    const st = useGame.getState().settings;
+    setSoundEnabled(st.sound !== false);
+    setHapticsEnabled(st.haptics !== false);
+    setMusicVolume(st.musicVolume != null ? st.musicVolume : 0.4);
+    setSfxVolume(st.sfxVolume != null ? st.sfxVolume : 1);
+    setHapticsIntensity(st.hapticIntensity || 'medium');
   }, [hydrated]);
 
   // Ask for notification permission on first launch (Android 13+).

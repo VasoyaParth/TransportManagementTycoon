@@ -1584,9 +1584,33 @@ export function SettingsModal({ visible, onClose, initialTab }) {
             <SectionTitle icon="tune-variant" text="Preferences" />
             <Card>
               <ToggleRow label="Auto-save" value={settings.autosave} onChange={v => saveSettings({ autosave: v })} />
-              <ToggleRow label="Sound effects & music" value={settings.sound} onChange={v => saveSettings({ sound: v })} />
-              <ToggleRow label="Vibration / haptics" value={settings.haptics !== false} onChange={v => saveSettings({ haptics: v })} />
               <ToggleRow label="Show fuel stations by default" value={settings.showStations} onChange={v => saveSettings({ showStations: v })} />
+            </Card>
+            <SectionTitle icon="volume-high" text="Audio" />
+            <Card>
+              <ToggleRow label="Sound effects & music" value={settings.sound} onChange={v => saveSettings({ sound: v })} />
+              <Text style={[FONT.tiny, { marginTop: 12, marginBottom: 6 }]}>MUSIC VOLUME</Text>
+              <Row style={{ gap: 6, flexWrap: 'wrap' }}>
+                {[[0, 'Off'], [0.25, '25%'], [0.4, '50%'], [0.7, '75%'], [1, '100%']].map(([v, l]) => (
+                  <Chip key={l} label={l} active={Math.abs((settings.musicVolume ?? 0.4) - v) < 0.01} onPress={() => saveSettings({ musicVolume: v })} />
+                ))}
+              </Row>
+              <Text style={[FONT.tiny, { marginTop: 14, marginBottom: 6 }]}>SOUND EFFECTS VOLUME</Text>
+              <Row style={{ gap: 6, flexWrap: 'wrap' }}>
+                {[[0, 'Off'], [0.25, '25%'], [0.5, '50%'], [0.75, '75%'], [1, '100%']].map(([v, l]) => (
+                  <Chip key={l} label={l} active={Math.abs((settings.sfxVolume ?? 1) - v) < 0.01} onPress={() => saveSettings({ sfxVolume: v })} />
+                ))}
+              </Row>
+            </Card>
+            <SectionTitle icon="vibrate" text="Vibration" />
+            <Card>
+              <ToggleRow label="Vibration / haptics" value={settings.haptics !== false} onChange={v => saveSettings({ haptics: v })} />
+              <Text style={[FONT.tiny, { marginTop: 12, marginBottom: 6 }]}>INTENSITY</Text>
+              <Row style={{ gap: 6 }}>
+                {[['short', 'Short'], ['medium', 'Medium'], ['long', 'Long']].map(([v, l]) => (
+                  <Chip key={v} label={l} active={(settings.hapticIntensity || 'medium') === v} onPress={() => saveSettings({ hapticIntensity: v })} />
+                ))}
+              </Row>
             </Card>
             <SectionTitle icon="alert-octagon-outline" text="Danger Zone" />
             <Card style={{ borderColor: C.red }}>
