@@ -9,13 +9,14 @@ import { CITIES } from '../data/cities';
 import { STATIONS } from '../engine/stations';
 import { pointAlong } from '../engine/geo';
 import { C } from './theme';
-import { useGame, modelById } from '../store/gameStore';
-import { cityById } from '../engine/routing';
+import { useGame, modelById, deliveryPhase } from '../store/gameStore';
+import { cityById, ferryPorts } from '../engine/routing';
 import { statusMeta } from './components';
 import { truckSvgString, truckShapes, bodyTypeFor, defaultBodyColor, headlightFor, isNightHour, ferrySvgString } from './truckArt';
 
 const CITY_DATA = CITIES.map(c => ({ id: c.id, name: c.name, state: c.state, lat: c.lat, lng: c.lng, tier: c.tier, country: c.country || 'IN' }));
 const STATION_DATA = STATIONS.map(s => ({ lat: s.lat, lng: s.lng, type: s.type, price: s.price, name: s.name }));
+const PORT_DATA = ferryPorts();
 
 export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focus, onTruckTap, onReady, onOffline }) {
   const ref = useRef(null);
@@ -39,6 +40,7 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
     cities: CITY_DATA,
     stations: STATION_DATA,
     hubs: hubData(),
+    ports: PORT_DATA,
   }), []);
 
   const html = useMemo(() => buildLeafletHtml(initial), [initial]);
@@ -47,7 +49,7 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
     const now = Date.now();
     const tk = trucks.map(t => {
       const d = deliveries.find(x => x.truckId === t.id);
-      let lat = t.lat, lng = t.lng, heading = 0, ferryOn = false, ferryLoading = false;
+      let lat = t.lat, lng = t.lng, heading = 0, ferryOn = false, ferryLoading = false, phase = null;
       if (d) {
         // Freeze the truck in place while an accident/theft incident is
         // unresolved instead of letting it keep crawling — resumes with no
@@ -56,15 +58,13 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
         if (d.incident) {
           effNow = now < d.incident.resolveAt ? d.incident.startedAt : now - (d.incident.resolveAt - d.incident.startedAt);
         }
-        const prog = Math.min(1, Math.max(0, (effNow - d.startedAt) / (d.endsAt - d.startedAt)));
-        const p = pointAlong(d.route.points, d.route.cum, prog);
+        // Lifecycle phases: loading, driving, ferry board/sail/dock, unloading.
+        const pp = deliveryPhase(d, effNow);
+        const p = pointAlong(d.route.points, d.route.cum, Math.min(1, Math.max(0, pp.frac)));
         lat = p.lat; lng = p.lng; heading = p.heading;
-        const fs = d.route.ferrySegment;
-        if (fs && prog >= fs.startFrac && prog <= fs.endFrac) {
-          ferryOn = true;
-          const loadWin = Math.min((fs.endFrac - fs.startFrac) * 0.25, 0.015);
-          ferryLoading = prog <= fs.startFrac + loadWin;
-        }
+        ferryOn = pp.phase === 'ferry';
+        ferryLoading = pp.phase === 'ferry-board' || pp.phase === 'ferry-unboard';
+        phase = pp.phase;
       }
       const meta = statusMeta[t.status] || statusMeta.parked;
       const model = modelById(t.modelId);
@@ -78,7 +78,7 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
       const dims = truckShapes(bt, color, accent, { lights });
       return { id: t.id, lat, lng, heading, status: t.status, statusLabel: meta.label, color,
         art: truckSvgString(bt, color, accent, { lights }), artW: dims.w, artH: dims.h, bodyH: dims.bodyH,
-        ferryArt: ferrySvgString(), ferryOn, ferryLoading, incidentType: (d && d.incident && d.incident.type) || null,
+        ferryArt: ferrySvgString(), ferryOn, ferryLoading, phase, incidentType: (d && d.incident && d.incident.type) || null,
         fuelPct: Math.round(t.fuelPct), name: t.customName || model.name };
     });
     const routes = deliveries.map(d => ({ id: d.id, points: d.route.points, stops: d.stops || [] }));
@@ -161,6 +161,7 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
         <Ctl icon="crosshairs-gps" onPress={() => inject('window.centerHQ()')} />
         <Ctl icon="gas-station" onPress={() => inject('window.toggleStations()')} />
         <Ctl icon="city-variant-outline" onPress={() => inject('window.toggleCities()')} />
+        <Ctl icon="anchor" onPress={() => inject('window.togglePorts()')} />
       </View>
     </View>
   );

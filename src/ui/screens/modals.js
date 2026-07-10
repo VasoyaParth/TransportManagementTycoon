@@ -1,11 +1,11 @@
 // Modal flows — all rendered inside the shared <Sheet>. New delivery, truck
 // detail, buy truck, contracts, power-ups, notifications, settings.
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Switch, Animated, Easing } from 'react-native';
+import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Switch, Animated, Easing, Linking } from 'react-native';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, EASTER_EGGS } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS } from '../../store/gameStore';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
 import { CITIES } from '../../data/cities';
 import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
@@ -208,6 +208,7 @@ const TIMELINE_COLLAPSED_COUNT = 3;
 function JourneyTracker({ delivery, model }) {
   const j = buildJourney(delivery, model);
   const eta = fmtDur((delivery.endsAt - Date.now()) / 1000);
+  const phase = deliveryPhase(delivery);
   const [expanded, setExpanded] = useState(false);
   const collapsedStart = Math.max(0, j.nextIdx - 1);
   const collapsedEnd = Math.min(j.waypoints.length, collapsedStart + TIMELINE_COLLAPSED_COUNT);
@@ -234,6 +235,10 @@ function JourneyTracker({ delivery, model }) {
           <Text style={[FONT.sub, { fontWeight: '800', color: C.text }]}>
             {j.kmNow} / {j.total} km · {Math.round(j.prog * 100)}%
           </Text>
+          {/* Current lifecycle phase (loading / ferry paperwork / sailing / unloading…) */}
+          {phase.phase !== 'driving' && (
+            <Text style={[FONT.tiny, { color: C.blue, fontWeight: '700' }]}>{PHASE_LABELS[phase.phase] || ''}</Text>
+          )}
           <Text style={FONT.tiny}>
             {j.lastReached ? `Last reached ${j.lastReached.title.replace(/^Picked up · /, '')}` : 'Just departed'}
             {j.nextBreak ? ` · next ${j.nextBreak.type === 'fuel' ? 'fuel stop' : j.nextBreak.type === 'sleep' ? 'sleep break' : 'short break'} in ${Math.max(0, j.nextBreak.atKm - j.kmNow)} km (${fmtWhen(j.nextBreak.ts)})` : ` · ETA ${eta}`}
@@ -657,23 +662,31 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
             <Progress pct={buildPct} color={C.amber} style={{ marginTop: 8 }} />
           </Card>
         )}
-        {incident && (
-          <Card style={{ marginBottom: 12, borderColor: incident.type === 'accident' ? C.red : '#7D3C98' }}>
-            <Row>
-              <Icon name={incident.type === 'accident' ? 'car-brake-alert' : 'shield-alert'} size={16}
-                color={incident.type === 'accident' ? C.red : '#7D3C98'} />
-              <Text style={[FONT.body, { color: incident.type === 'accident' ? C.red : '#7D3C98', marginLeft: 6, fontWeight: '700' }]}>
-                {incident.type === 'accident' ? 'Accident on the road!' : 'Cargo theft in transit!'}
+        {incident && (() => {
+          const im = incidentMeta(incident.type);
+          return (
+            <Card style={{ marginBottom: 12, borderColor: im.color }}>
+              <Row>
+                <Icon name={im.icon} size={16} color={im.color} />
+                <Text style={[FONT.body, { color: im.color, marginLeft: 6, fontWeight: '700' }]}>{im.title}</Text>
+              </Row>
+              <Text style={[FONT.tiny, { marginTop: 6 }]}>
+                {incident.penalty > 0 ? `Lost ${inr(incident.penalty)} already. ` : ''}
+                {incident.mechanicCalled ? 'Mechanic dispatched — ' : ''}Back on the road in ~{fmtDur(incidentLeft)}.
               </Text>
-            </Row>
-            <Text style={[FONT.tiny, { marginTop: 6 }]}>
-              Lost {inr(incident.penalty)} already. {incident.mechanicCalled ? 'Mechanic dispatched — ' : ''}Back on the road in ~{fmtDur(incidentLeft)}.
-            </Text>
-            {!incident.mechanicCalled && (
-              <Btn title="Call Mechanic" kind="blue" small icon="wrench" onPress={doCallMechanic} style={{ marginTop: 10 }} />
-            )}
-          </Card>
-        )}
+              {/* Mechanic only for physical breakdowns — theft/checkpost/weather
+                  can't be "repaired", the driver just rides it out. */}
+              {im.mechanic && !incident.mechanicCalled ? (
+                <Btn title="Call Mechanic" kind="blue" small icon="wrench" onPress={doCallMechanic} style={{ marginTop: 10 }} />
+              ) : !im.mechanic ? (
+                <Row style={{ marginTop: 8 }}>
+                  <Icon name="information-outline" size={12} color={C.sub} />
+                  <Text style={[FONT.tiny, { marginLeft: 4, flex: 1 }]}>Nothing to repair — the delivery continues automatically after the delay.</Text>
+                </Row>
+              ) : null}
+            </Card>
+          );
+        })()}
         {truck.status === 'broken' && (
           <Card style={{ marginBottom: 12, borderColor: C.red }}>
             <Row><Icon name="alert" size={16} color={C.red} /><Text style={[FONT.body, { color: C.red, marginLeft: 6, fontWeight: '700' }]}>This truck needs repair.</Text></Row>
@@ -1786,9 +1799,22 @@ function AboutTab({ onReplayTutorial }) {
         </Row>
 
         {/* Download / install flow — backed by the background download manager,
-            so progress continues if you leave this screen and resumes here. */}
+            so progress continues if you leave this screen and resumes here.
+            "Via browser" is the always-available fallback: opens the release
+            APK link in the default browser, which downloads and prompts the
+            system installer itself. */}
+        {dl && dl.status === 'error' && (
+          <Row style={{ marginTop: 10, backgroundColor: C.redSoft, borderRadius: RADIUS.md, padding: 8 }}>
+            <Icon name="alert-circle" size={14} color={C.red} />
+            <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.red }]}>In-app download failed{dl.error ? `: ${dl.error}` : ''}. Try again or use the browser button below.</Text>
+          </Row>
+        )}
         {hasUpdate && (!dl || dl.status === 'error') && (
-          <Btn title={`Download & Install ${latest.version}`} kind="green" icon="download" style={{ marginTop: 12 }} onPress={beginDownload} />
+          <>
+            <Btn title={`Download & Install ${latest.version}`} kind="green" icon="download" style={{ marginTop: 12 }} onPress={beginDownload} />
+            <Btn title="Download via browser" kind="soft" icon="open-in-new" style={{ marginTop: 8 }}
+              onPress={() => { if (latest?.apkUrl) Linking.openURL(latest.apkUrl).catch(() => toast('Could not open the browser', 'error')); }} />
+          </>
         )}
         {dl && dl.status !== 'error' && (
           <View style={{ marginTop: 12 }}>
