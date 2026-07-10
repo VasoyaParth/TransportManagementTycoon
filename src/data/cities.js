@@ -550,7 +550,9 @@ export const LOCALITY_NODES = {};
   for (const c of base) {
     const zones = c.tier === 1 ? ZONES_T1 : c.tier === 2 ? ZONES_T2 : ZONES_T3;
     const h = zoneHash(c.id);
-    const spread = c.tier === 1 ? 0.16 : c.tier === 2 ? 0.09 : 0.05; // ~5-18 km ring
+    // Tight ring (~3-11 km): keeps every zone inside the real urban footprint
+    // so coastal cities never get a zone dot out in the sea.
+    const spread = c.tier === 1 ? 0.10 : c.tier === 2 ? 0.055 : 0.03;
     zones.forEach((z, i) => {
       const ang = (((h >> (i * 3)) % 360) * Math.PI) / 180 + i * ((2 * Math.PI) / zones.length);
       const r = spread * (0.6 + ((h >> (i * 2)) % 40) / 100);

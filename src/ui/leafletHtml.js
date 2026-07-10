@@ -264,6 +264,13 @@ function boot(){
     var shadow=L.polyline(coords,{color:'rgba(0,0,0,.25)',weight:6,opacity:.4}).addTo(map);
     var line=L.polyline(coords,{color:'#2563EB',weight:3,opacity:.9,dashArray:'10 6',className:'animated-route'}).addTo(map);
     var arr=[shadow,line];
+    // Sea legs re-drawn on top as ship lanes (teal, wave-dashed) between the
+    // two dock anchors — makes every ferry crossing read as sea, not road.
+    (r.seaLegs||[]).forEach(function(leg){
+      var sc=leg.map(function(p){return [p.lat,p.lng];});
+      arr.push(L.polyline(sc,{color:'#0E4C7A',weight:4,opacity:.9,dashArray:'2 8',lineCap:'round'}).addTo(map)
+        .bindTooltip('Sea route — truck crosses aboard the ferry',{sticky:true}));
+    });
     // Highlight fuel/charge stops along the active road.
     (r.stops||[]).forEach(function(st){
       arr.push(L.circleMarker([st.lat,st.lng],{radius:5,color:'#fff',weight:2,
@@ -293,6 +300,33 @@ function boot(){
     (s.corridors||[]).forEach(function(c){ liveC[c.id]=1; setCorridor(c); });
     Object.keys(corridorLines).forEach(function(id){ if(!liveC[id]){ map.removeLayer(corridorLines[id]); delete corridorLines[id]; }});
   };
+  // Regional weather overlays (v2.4.0) — drawn ONLY where a zone is active
+  // today: translucent circle in the kind's colour + a small SVG badge.
+  // Compact hand-drawn glyphs (no fonts/emoji): rain drops, snowflake,
+  // wind lines, lightning bolt, fog bars.
+  var weatherLayer=L.layerGroup().addTo(map);
+  function wxGlyph(kind){
+    if(kind==='snow') return '<path d="M7 1 L7 13 M1 7 L13 7 M2.8 2.8 L11.2 11.2 M11.2 2.8 L2.8 11.2" stroke="#fff" stroke-width="1.6" fill="none"/>';
+    if(kind==='dust') return '<path d="M1 4 H10 M1 7 H13 M1 10 H8" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round"/>';
+    if(kind==='storm') return '<path d="M8 1 L3 8 H6.5 L5 13 L11 5.5 H7.5 L9.5 1 Z" fill="#fff"/>';
+    if(kind==='fog') return '<path d="M2 4 H12 M1 7 H13 M2 10 H12" stroke="#fff" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-dasharray="3 2"/>';
+    // rain / heavyrain — slanted drops
+    return '<path d="M4 2 L2.5 6 M8 2 L6.5 6 M12 2 L10.5 6 M5.5 8 L4 12 M9.5 8 L8 12" stroke="#fff" stroke-width="1.8" fill="none" stroke-linecap="round"/>';
+  }
+  window.setWeather=function(zones){
+    weatherLayer.clearLayers();
+    (zones||[]).forEach(function(z){
+      weatherLayer.addLayer(L.circle([z.lat,z.lng],{radius:z.radiusKm*1000,color:z.color,weight:1.5,
+        opacity:0.55,fillColor:z.color,fillOpacity:0.13,dashArray:'6 5'}));
+      weatherLayer.addLayer(L.marker([z.lat,z.lng],{icon:L.divIcon({className:'',
+        html:'<div style="width:26px;height:26px;border-radius:50%;background:'+z.color+';border:2px solid #fff;'
+          +'display:flex;align-items:center;justify-content:center;box-shadow:0 2px 5px rgba(0,0,0,.3)">'
+          +'<svg viewBox="0 0 14 14" width="14" height="14">'+wxGlyph(z.kind)+'</svg></div>',
+        iconSize:[26,26],iconAnchor:[13,13]}),zIndexOffset:700})
+        .bindTooltip('<b>'+z.label+'</b><br><small>Trucks '+z.slowPct+'% slower in this zone</small>',{direction:'top'}));
+    });
+  };
+
   window.setPickMode=function(on){ pickMode=on; map.getContainer().style.cursor=on?'crosshair':''; plotCities(); };
   window.focusOn=function(lat,lng,z){ map.flyTo([lat,lng],z||9,{duration:1.0}); };
   window.centerHQ=function(){ map.flyTo([DATA.hq.lat,DATA.hq.lng],7,{duration:1.0}); };

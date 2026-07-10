@@ -9,7 +9,7 @@ import { CITIES } from '../data/cities';
 import { STATIONS } from '../engine/stations';
 import { pointAlong } from '../engine/geo';
 import { C } from './theme';
-import { useGame, modelById, deliveryPhase } from '../store/gameStore';
+import { useGame, modelById, deliveryPhase, WEATHER_KINDS } from '../store/gameStore';
 import { cityById, ferryPorts } from '../engine/routing';
 import { statusMeta, useEasterEggTap } from './components';
 import { haptic } from '../engine/haptics';
@@ -86,7 +86,21 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
         ferryArt: ferrySvgString(), ferryOn, ferryLoading, phase, incidentType: (d && d.incident && d.incident.type) || null,
         fuelPct: Math.round(t.fuelPct), name: t.customName || model.name };
     });
-    const routes = deliveries.map(d => ({ id: d.id, points: d.route.points, stops: d.stops || [] }));
+    // Split each route's sea (ferry) legs out as separate polylines so water
+    // crossings render as ship lanes between two docks — never a "road on
+    // water". ferrySegments carry start/end fractions of total route length.
+    const routes = deliveries.map(d => {
+      const pts = d.route.points, cum = d.route.cum || [];
+      const total = cum.length ? cum[cum.length - 1] : 0;
+      const segs = d.route.ferrySegments || (d.route.ferrySegment ? [d.route.ferrySegment] : []);
+      const seaLegs = total > 0 ? segs.map(fs => {
+        let i0 = 0, i1 = pts.length - 1;
+        for (let i = 0; i < cum.length; i++) { if (cum[i] / total >= fs.startFrac) { i0 = i; break; } }
+        for (let i = i0; i < cum.length; i++) { if (cum[i] / total >= fs.endFrac) { i1 = i; break; } }
+        return pts.slice(i0, i1 + 1);
+      }).filter(l => l.length > 1) : [];
+      return { id: d.id, points: pts, stops: d.stops || [], seaLegs };
+    });
     const corr = (useGame.getState().corridors || []).map(c => ({ id: c.id, points: c.points }));
     return { trucks: tk, routes, corridors: corr };
   }, [trucks, deliveries]);
@@ -107,6 +121,22 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
 
   // Keep garage markers in sync when hubs are bought/sold.
   useEffect(() => { if (ready) inject(`window.setHubs(${JSON.stringify(hubData())})`); }, [ready, hubs.length]);
+
+  // Live regional weather (v2.4.0) — overlays drawn ONLY where a zone is
+  // actually active today: radius circle + kind badge, slowing trucks inside.
+  const weather = useGame(s => s.weather || []);
+  useEffect(() => {
+    if (!ready) return;
+    const zones = weather.map(z => {
+      const k = WEATHER_KINDS[z.kind] || {};
+      return {
+        lat: z.lat, lng: z.lng, radiusKm: z.radiusKm, kind: z.kind,
+        label: `${k.label || z.kind} — ${z.name}`, color: k.color || '#2563EB',
+        slowPct: Math.round((1 - (k.slow || 1)) * 100),
+      };
+    });
+    inject(`window.setWeather(${JSON.stringify(zones)})`);
+  }, [ready, weather]);
 
   // Discovered cities (HQ, garages, truck locations, every route driven) —
   // highlighted on the map; the rest render as faint unexplored dots.

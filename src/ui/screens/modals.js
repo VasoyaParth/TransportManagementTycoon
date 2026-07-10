@@ -2177,6 +2177,93 @@ function AchievementsTab() {
   );
 }
 
+// ============ Roadmap (upcoming plans — tentative, tucked in Settings) ============
+// A quiet corner listing what MIGHT come next. Everything here is tentative,
+// not a promise — plans get promoted out of this list into real releases.
+const ROADMAP_ITEMS = [
+  { icon: 'truck-trailer', title: 'Trailer & Truck Upgrades', status: 'exploring',
+    desc: 'Engine, tyres, GPS and security upgrades per truck — security cuts theft risk, tyres cut bursts, engine adds pace.' },
+  { icon: 'robot-industrial', title: 'Rival AI Companies', status: 'exploring',
+    desc: '2–3 bot transport companies that snap up contracts you ignore, buy garages before you and fight you on a live leaderboard.' },
+  { icon: 'shield-car', title: 'Cargo Insurance Policies', status: 'planned',
+    desc: 'Monthly premium per truck; insured trucks recover most of the money lost to theft, accidents and weather damage.' },
+  { icon: 'gavel', title: 'Truck Auctions', status: 'planned',
+    desc: 'A weekly second-hand auction house — bid on used rigs below market price, sell your old ones to the highest bidder.' },
+  { icon: 'firework', title: 'Festival Seasons', status: 'planned',
+    desc: 'Diwali, Holi and New Year events: limited-time cargo rushes, double tips, festive map skins and special rewards.' },
+  { icon: 'account-group', title: 'Driver Union Events', status: 'exploring',
+    desc: 'Strikes, bonus demands and morale meetings — keep the crew happy or watch the fleet park itself.' },
+  { icon: 'ev-station', title: 'EV Economy Overhaul', status: 'exploring',
+    desc: 'Charging networks, battery degradation, green-cargo contracts that only electric trucks can take.' },
+  { icon: 'train', title: 'Rail & Air Cargo', status: 'someday',
+    desc: 'Book train wagons and air freight for long hauls — cheaper/faster trade-offs against your own trucks.' },
+  { icon: 'star-circle', title: 'City Reputation', status: 'someday',
+    desc: 'Deliver often to a city and it starts trusting you: better rates, faster loading, exclusive contracts.' },
+  { icon: 'newspaper-variant', title: 'Daily News Ticker', status: 'someday',
+    desc: 'An in-game newspaper reacting to your empire — fuel strikes, weather forecasts, market gossip that hints tomorrow\'s prices.' },
+  { icon: 'camera', title: 'Photo / Share Card', status: 'someday',
+    desc: 'One-tap company stats card (fleet, net worth, km) to share on WhatsApp.' },
+  { icon: 'music', title: 'Sound & Music Pass', status: 'someday',
+    desc: 'Ambient highway audio, per-country map music, and a horn on tap-and-hold — Horn OK Please.' },
+  { icon: 'content-save-all', title: 'Multiple Save Slots', status: 'someday',
+    desc: 'Run more than one company, restore any of them anywhere with a company code.' },
+  { icon: 'translate', title: 'Hindi & Gujarati', status: 'someday',
+    desc: 'Full localisation for the languages the game\'s heartland actually speaks.' },
+  { icon: 'account-multiple', title: 'Convoy Multiplayer', status: 'dream',
+    desc: 'True partner play — shared convoys and cargo exchange. Needs a server, so it lives at the very end of this list.' },
+];
+const ROADMAP_STATUS = {
+  planned: { label: 'Planned', color: C.green, bg: C.greenSoft },
+  exploring: { label: 'Exploring', color: C.blue, bg: C.blueSoft },
+  someday: { label: 'Someday', color: C.amber, bg: C.amberSoft },
+  dream: { label: 'Dream', color: '#7D3C98', bg: '#7D3C9822' },
+};
+const ROADMAP_INITIAL = 5;
+function RoadmapTab() {
+  const [showAll, setShowAll] = useState(false);
+  const items = showAll ? ROADMAP_ITEMS : ROADMAP_ITEMS.slice(0, ROADMAP_INITIAL);
+  return (
+    <>
+      <SectionTitle icon="map-clock-outline" text="Upcoming Plans" />
+      <Card style={{ marginBottom: 12, backgroundColor: C.blueSoft }}>
+        <Row>
+          <Icon name="information-outline" size={14} color={C.blue} />
+          <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.text }]}>
+            A peek at the workshop. Everything below is TENTATIVE — ideas being weighed, not promises. Order and content change with every release.
+          </Text>
+        </Row>
+      </Card>
+      {items.map(it => {
+        const stMeta = ROADMAP_STATUS[it.status] || ROADMAP_STATUS.someday;
+        return (
+          <Card key={it.title} style={{ marginBottom: 8, padding: 12 }}>
+            <Row style={{ justifyContent: 'space-between' }}>
+              <Row style={{ flex: 1, marginRight: 8 }}>
+                <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: C.bgSoft, alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name={it.icon} size={20} color={C.sub} />
+                </View>
+                <View style={{ marginLeft: 10, flex: 1 }}>
+                  <Text style={[FONT.body, { fontWeight: '800' }]}>{it.title}</Text>
+                  <Text style={FONT.tiny}>{it.desc}</Text>
+                </View>
+              </Row>
+              <Pill text={stMeta.label} color={stMeta.color} bg={stMeta.bg} />
+            </Row>
+          </Card>
+        );
+      })}
+      <Btn
+        title={showAll ? 'Show less' : `Show more plans (${ROADMAP_ITEMS.length - ROADMAP_INITIAL} hidden)`}
+        kind="soft" icon={showAll ? 'chevron-up' : 'chevron-down'} style={{ marginTop: 4 }}
+        onPress={() => setShowAll(v => !v)}
+      />
+      <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 10 }]}>
+        Got an idea? It probably belongs on this list — tell the developer.
+      </Text>
+    </>
+  );
+}
+
 // ============ Settings ============
 export function SettingsModal({ visible, onClose, initialTab }) {
   const toast = useToast();
@@ -2215,7 +2302,8 @@ export function SettingsModal({ visible, onClose, initialTab }) {
     ['gameplay', 'Gameplay', 'controller-classic'], ['notif', 'Alerts', 'bell-ring-outline'],
     ['achievements', 'Achievements', 'trophy'],
     ['backup', 'Backup', 'backup-restore'],
-    ['eggs', 'Easter Eggs', 'egg-easter'], ['about', 'About', 'information-outline'],
+    ['eggs', 'Easter Eggs', 'egg-easter'], ['roadmap', 'Roadmap', 'map-clock-outline'],
+    ['about', 'About', 'information-outline'],
   ];
   const day = gameDay().day;
   const foundEggs = useGame(s => s.easterEggs?.found || []);
@@ -2331,6 +2419,7 @@ export function SettingsModal({ visible, onClose, initialTab }) {
           </>
         )}
         {tab === 'achievements' && <AchievementsTab />}
+        {tab === 'roadmap' && <RoadmapTab />}
         {tab === 'backup' && <BackupTab onClose={onClose} />}
         {tab === 'eggs' && (
           <>

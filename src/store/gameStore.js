@@ -11,7 +11,7 @@ import { COUNTRY_BY_CODE } from '../data/expansion';
 import { STAFF_NAMES, STAFF_LEVELS } from '../data/staffNames';
 import { CITIES } from '../data/cities';
 import { computeRoute, planFuelStops, cityById } from '../engine/routing';
-import { deliveryEconomics, tripDurationSec, inr, REAL_SEC_PER_GAME_HOUR } from '../engine/economy';
+import { deliveryEconomics, tripDurationSec, inr, REAL_SEC_PER_GAME_HOUR, ECON } from '../engine/economy';
 import { play, setSoundEnabled, setMusicVolume, setSfxVolume } from '../engine/sound';
 import { setHapticsEnabled, setHapticsIntensity } from '../engine/haptics';
 import { initNotifications, pushNow, scheduleAt, setNotificationsEnabled, flavor } from '../engine/notify';
@@ -237,6 +237,171 @@ const FLAVOR_CARGO = {
   urgent: 'retail', pharma: 'pharma', green: 'electronics', island: 'general',
 };
 
+// ============================ v2.4.0 systems ============================
+// ---------- Bank & Loans ----------
+// Flat-interest EMI loans: total due = principal × (1 + apr), split over
+// `months` monthly EMIs charged with the other monthly costs. Credit score
+// moves with on-time vs missed EMIs and gates the bigger products.
+export const LOAN_PRODUCTS = [
+  { id: 'kickstart', name: 'Kickstart Loan', icon: 'rocket-launch-outline', amount: 2500000, apr: 0.12, months: 10, minScore: 0,
+    blurb: 'A starter line of credit — fuel, hires, first garage.' },
+  { id: 'fleet', name: 'Fleet Builder Loan', icon: 'truck-plus', amount: 10000000, apr: 0.15, months: 20, minScore: 600,
+    blurb: 'Serious capital for serious rigs. Banks like a clean record.' },
+  { id: 'empire', name: 'Empire Loan', icon: 'bank', amount: 50000000, apr: 0.18, months: 30, minScore: 720,
+    blurb: 'Country unlocks, garage networks, the big leagues.' },
+];
+export function creditScoreOf(credit) {
+  const c = credit || { paid: 0, missed: 0 };
+  return Math.max(300, Math.min(900, 650 + (c.paid || 0) * 8 - (c.missed || 0) * 45));
+}
+
+// ---------- Fuel price market ----------
+// Diesel drifts every game day on a deterministic walk (hash of the day), so
+// the whole fleet sees the same market and the 7-day history can be redrawn
+// anywhere without storing it. 0.85× (crash) … 1.25× (spike) of base price.
+export function fuelFactorForDay(day) {
+  let h = (day * 2654435761) >>> 0; h ^= h >> 13; h = (h * 2246822519) >>> 0; h ^= h >> 16;
+  return 0.85 + (h % 41) / 100;
+}
+
+// ---------- Driver XP, levels & perks ----------
+// Drivers earn XP per delivery (distance-weighted). Levels unlock permanent
+// perks that plug straight into the delivery economics and incident rolls.
+export const DRIVER_PERKS = [
+  { level: 2, id: 'fuel_saver', name: 'Fuel Saver', icon: 'gas-station-outline', desc: '−5% fuel cost on every trip' },
+  { level: 4, id: 'night_rider', name: 'Night Rider', icon: 'weather-night', desc: '+8% driving pace' },
+  { level: 6, id: 'border_expert', name: 'Border Expert', icon: 'passport', desc: '−30% customs waiting time' },
+  { level: 8, id: 'road_captain', name: 'Road Captain', icon: 'shield-check', desc: '−20% chance of road incidents' },
+  { level: 10, id: 'living_legend', name: 'Living Legend', icon: 'crown', desc: '+10% freight revenue' },
+];
+export const driverLevel = xp => Math.min(10, Math.floor(Math.sqrt((xp || 0) / 250)));
+export const driverXpForLevel = l => l * l * 250;
+export const driverPerkIds = m => { const l = driverLevel(m?.xp); return DRIVER_PERKS.filter(p => p.level <= l).map(p => p.id); };
+
+// ---------- Regional weather ----------
+// Real weather only where it actually happens: each game day a deterministic
+// hash picks 3–5 zones from a plausibility catalog (snow in the Himalayas &
+// Siberia, dust storms over the Thar/Gulf deserts, monsoon rain on the
+// coasts). Routes passing through an active zone drive slower.
+export const WEATHER_KINDS = {
+  rain: { label: 'Rain', color: '#2563EB', slow: 0.92, icon: 'weather-rainy' },
+  heavyrain: { label: 'Heavy Rain', color: '#1D4ED8', slow: 0.8, icon: 'weather-pouring' },
+  storm: { label: 'Thunderstorm', color: '#7C3AED', slow: 0.75, icon: 'weather-lightning-rainy' },
+  dust: { label: 'Dust Storm', color: '#B45309', slow: 0.8, icon: 'weather-windy' },
+  snow: { label: 'Snowfall', color: '#0891B2', slow: 0.7, icon: 'weather-snowy-heavy' },
+  fog: { label: 'Dense Fog', color: '#64748B', slow: 0.85, icon: 'weather-fog' },
+};
+const WEATHER_REGIONS = [
+  { name: 'Kashmir Valley', lat: 34.1, lng: 74.8, kinds: ['snow', 'fog'] },
+  { name: 'Himachal Hills', lat: 31.9, lng: 77.1, kinds: ['snow', 'rain', 'fog'] },
+  { name: 'Ladakh Plateau', lat: 34.2, lng: 77.6, kinds: ['snow'] },
+  { name: 'Konkan Coast', lat: 17.0, lng: 73.5, kinds: ['rain', 'heavyrain', 'storm'] },
+  { name: 'Kerala Coast', lat: 9.9, lng: 76.4, kinds: ['heavyrain', 'storm', 'rain'] },
+  { name: 'Thar Desert', lat: 26.9, lng: 71.5, kinds: ['dust'] },
+  { name: 'Gangetic Plain', lat: 26.5, lng: 82.0, kinds: ['fog', 'rain'] },
+  { name: 'Bengal Delta', lat: 22.8, lng: 89.5, kinds: ['heavyrain', 'storm'] },
+  { name: 'Northeast Hills', lat: 25.6, lng: 93.0, kinds: ['rain', 'fog', 'heavyrain'] },
+  { name: 'Nepal Himalaya', lat: 28.2, lng: 84.5, kinds: ['snow', 'rain'] },
+  { name: 'Bhutan Highlands', lat: 27.5, lng: 90.4, kinds: ['snow', 'rain', 'fog'] },
+  { name: 'Sri Lanka Wet Zone', lat: 6.9, lng: 80.4, kinds: ['rain', 'storm'] },
+  { name: 'Myanmar Coast', lat: 16.5, lng: 96.5, kinds: ['heavyrain', 'storm'] },
+  { name: 'Malay Peninsula', lat: 3.5, lng: 102.0, kinds: ['heavyrain', 'storm', 'rain'] },
+  { name: 'Balochistan Desert', lat: 27.5, lng: 65.5, kinds: ['dust'] },
+  { name: 'Persian Desert', lat: 32.5, lng: 55.5, kinds: ['dust'] },
+  { name: 'Arabian Desert', lat: 24.2, lng: 54.7, kinds: ['dust'] },
+  { name: 'Tibetan Plateau', lat: 30.5, lng: 90.0, kinds: ['snow', 'fog'] },
+  { name: 'Yunnan Highlands', lat: 25.5, lng: 101.5, kinds: ['rain', 'fog'] },
+  { name: 'Siberian Taiga', lat: 55.5, lng: 90.0, kinds: ['snow', 'fog'] },
+  { name: 'Russian Plain', lat: 55.5, lng: 40.0, kinds: ['snow', 'fog', 'rain'] },
+  { name: 'Urals', lat: 56.5, lng: 60.5, kinds: ['snow'] },
+];
+export function generateWeather(day) {
+  let h = ((day + 7) * 2654435761) >>> 0; h ^= h >> 15;
+  const count = 3 + (h % 3); // 3–5 active zones
+  const zones = [];
+  const used = new Set();
+  for (let i = 0; i < count * 3 && zones.length < count; i++) {
+    const idx = ((h >> (i * 3)) + i * 131) % WEATHER_REGIONS.length;
+    if (used.has(idx)) continue;
+    used.add(idx);
+    const r = WEATHER_REGIONS[idx];
+    const kind = r.kinds[((h >> (i * 2)) + i) % r.kinds.length];
+    zones.push({
+      id: `w-${day}-${idx}`, kind, name: r.name, lat: r.lat, lng: r.lng,
+      radiusKm: 130 + ((h >> (i + 4)) % 130), day,
+    });
+  }
+  return zones;
+}
+const degKm = (a, b) => { // fast approximate distance in km
+  const dLat = (a.lat - b.lat) * 111;
+  const dLng = (a.lng - b.lng) * 111 * Math.cos(((a.lat + b.lat) / 2) * Math.PI / 180);
+  return Math.sqrt(dLat * dLat + dLng * dLng);
+};
+// Worst (slowest) weather zone a route passes through; 1 = clear skies.
+export function weatherOnRoute(points, zones) {
+  if (!zones?.length || !points?.length) return { factor: 1, hits: [] };
+  let factor = 1; const hits = [];
+  const step = Math.max(1, Math.floor(points.length / 40));
+  for (const z of zones) {
+    const k = WEATHER_KINDS[z.kind]; if (!k) continue;
+    for (let i = 0; i < points.length; i += step) {
+      if (degKm(points[i], z) <= z.radiusKm) { if (k.slow < factor) factor = k.slow; hits.push(z); break; }
+    }
+  }
+  return { factor, hits };
+}
+
+// ---------- Company level ----------
+export const COMPANY_TITLES = [
+  'Street Hauler', 'Local Carrier', 'City Mover', 'District Star', 'State Champion',
+  'Regional Power', 'National Carrier', 'Highway King', 'Border Baron',
+  'Continental Titan', 'Logistics Legend', 'Transport Emperor',
+];
+export function companyXP(s) {
+  return Math.floor((s.stats.revenue || 0) / 50000 + (s.stats.deliveries || 0) * 40
+    + (s.stats.km || 0) / 20 + (s.hubs || []).length * 500 + (s.trucks || []).length * 300);
+}
+export const companyLevelOf = xp => Math.floor(Math.sqrt(xp / 1000));
+export const companyXpForLevel = l => l * l * 1000;
+export const companyTitleOf = l => COMPANY_TITLES[Math.min(l, COMPANY_TITLES.length - 1)];
+
+// ---------- Weekly challenges ----------
+// 3 challenges per real ISO week, deterministic from the week id. Progress is
+// measured against a stats snapshot taken when the week starts, each claim
+// pays gold + cash, and clearing all three pays a big jackpot on top.
+const WEEKLY_POOL = [
+  { key: 'deliveries', icon: 'package-variant-closed-check', label: n => `Complete ${n} deliveries`, targets: [8, 15, 25], gold: 20, cash: 500000 },
+  { key: 'km', icon: 'highway', label: n => `Drive ${n.toLocaleString('en-IN')} km`, targets: [3000, 6000, 12000], gold: 20, cash: 500000 },
+  { key: 'contracts', icon: 'file-sign', label: n => `Finish ${n} contracts`, targets: [3, 6, 10], gold: 25, cash: 600000 },
+  { key: 'borders', icon: 'passport', label: n => `Cross ${n} border${n > 1 ? 's' : ''}`, targets: [1, 3, 6], gold: 30, cash: 800000 },
+  { key: 'gamesPlayed', icon: 'dice-multiple', label: n => `Play ${n} mini-games`, targets: [10, 20, 30], gold: 15, cash: 300000 },
+  { key: 'revenue', icon: 'cash-multiple', label: n => `Earn ${inr(n)} revenue`, targets: [2000000, 5000000, 12000000], gold: 25, cash: 700000 },
+];
+export const WEEKLY_JACKPOT = { gold: 100, cash: 2500000 };
+function isoWeekId(d = new Date()) {
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = (t.getUTCDay() + 6) % 7;
+  t.setUTCDate(t.getUTCDate() - dayNum + 3);
+  const firstThu = new Date(Date.UTC(t.getUTCFullYear(), 0, 4));
+  const week = 1 + Math.round(((t - firstThu) / 86400000 - 3 + ((firstThu.getUTCDay() + 6) % 7)) / 7);
+  return `${t.getUTCFullYear()}-W${week}`;
+}
+export function buildWeekly(weekId, stats) {
+  let h = 0; for (let i = 0; i < weekId.length; i++) h = (h * 31 + weekId.charCodeAt(i)) >>> 0;
+  const picks = []; const used = new Set();
+  for (let i = 0; picks.length < 3 && i < 18; i++) {
+    const idx = ((h >> (i * 2)) + i * 7) % WEEKLY_POOL.length;
+    if (used.has(idx)) continue; used.add(idx);
+    const p = WEEKLY_POOL[idx];
+    const target = p.targets[((h >> (i + 5)) % 3)];
+    picks.push({ key: p.key, icon: p.icon, label: p.label(target), target, gold: p.gold, cash: p.cash });
+  }
+  const snap = {};
+  ['deliveries', 'km', 'contracts', 'borders', 'gamesPlayed', 'revenue'].forEach(k => { snap[k] = Math.floor(stats[k] || 0); });
+  return { id: weekId, challenges: picks, snapshot: snap, claimed: [], jackpotPaid: false };
+}
+
 // Hidden gems — tap a specific existing UI element a set number of times in a
 // row (within a short window) to find one, once ever, for a big one-time
 // reward. `hint` stays vague and is all the player sees until it's found;
@@ -433,6 +598,12 @@ const initialState = {
     contracts: 0, campaigns: 0, promotions: 0, fastTravels: 0, gamesPlayed: 0, mechanicCalls: 0, goldSpent: 0,
   },
   ledger: [], // day-wise money book: {id, ts, day, kind, icon, label, amount} — newest first, capped
+  loans: [], // active bank loans: {id, productId, name, principal, remaining, emi, months, paidMonths, lastEmiDay}
+  credit: { paid: 0, missed: 0 }, // EMI track record → credit score
+  weather: [], // today's active weather zones (regenerated each game day)
+  weatherDay: 0,
+  lastCompanyLevel: 0, // last company level a reward was paid for
+  weekly: null, // this week's challenges {id, challenges, snapshot, claimed, jackpotPaid}
   clockStart: 0, // real ms when day 1 hour 0 began
   lastSalaryDay: 0,
   lastContractDay: 0,
@@ -631,6 +802,55 @@ export const useGame = create(
             set({ lastSalaryDay: day });
           }
         }
+        // ---- v2.4.0 daily/periodic systems ----
+        // Weather: fresh zones each game day, only in plausible regions.
+        if ((s.weatherDay || 0) !== day) {
+          set({ weather: generateWeather(day), weatherDay: day });
+        }
+        // Loan EMIs: charged every 30 game days per loan. A missed EMI dings
+        // the credit score and adds 5% penalty interest to what's left.
+        for (const ln of get().loans || []) {
+          if (day - (ln.lastEmiDay || 0) < 30) continue;
+          const cur = get();
+          const due = Math.min(ln.emi, ln.remaining);
+          if (cur.balance >= due) {
+            const remaining = ln.remaining - due;
+            set({
+              balance: cur.balance - due,
+              credit: { ...cur.credit, paid: (cur.credit?.paid || 0) + 1 },
+              loans: remaining <= 0
+                ? cur.loans.filter(x => x.id !== ln.id)
+                : cur.loans.map(x => x.id === ln.id ? { ...x, remaining, paidMonths: x.paidMonths + 1, lastEmiDay: day } : x),
+            });
+            get().logLedger('loan', 'bank', `EMI · ${ln.name}`, -due);
+            if (remaining <= 0) get().notify('system', 'bank-check', `${ln.name} fully repaid — credit score up!`);
+          } else {
+            set({
+              credit: { ...cur.credit, missed: (cur.credit?.missed || 0) + 1 },
+              loans: cur.loans.map(x => x.id === ln.id ? { ...x, remaining: Math.round(x.remaining * 1.05), lastEmiDay: day } : x),
+            });
+            get().notify('system', 'bank-remove', `EMI missed on ${ln.name}! 5% penalty added and your credit score took a hit.`);
+          }
+        }
+        // Company level-ups: pay a one-time gold reward per level reached.
+        {
+          const cur = get();
+          const lvl = companyLevelOf(companyXP(cur));
+          if (lvl > (cur.lastCompanyLevel || 0)) {
+            const reward = lvl * 10;
+            set({ lastCompanyLevel: lvl, gold: cur.gold + reward });
+            get().notify('system', 'medal', `Company level up! Now Level ${lvl} — "${companyTitleOf(lvl)}". +${reward} Gold.`);
+            play('coin', 0.9);
+          }
+        }
+        // Weekly challenges: roll a fresh set when the real ISO week changes.
+        {
+          const wid = isoWeekId();
+          if (!s.weekly || s.weekly.id !== wid) {
+            set({ weekly: buildWeekly(wid, get().stats) });
+            if (s.weekly) get().notify('system', 'calendar-week', 'New weekly challenges are live — big bonus for a clean sweep!');
+          }
+        }
         // fresh contracts each day + flavor event
         if (day > s.lastContractDay) {
           const kept = s.contracts.filter(c => c.status !== 'available' || c.expiresAt > Date.now());
@@ -777,6 +997,10 @@ export const useGame = create(
         const d = active[Math.floor(Math.random() * active.length)];
         const t = s.trucks.find(x => x.id === d.truckId);
         if (!t) return;
+        // Road Captain perk (driver level 8): 20% of would-be incidents just
+        // don't happen — an experienced pair of hands on the wheel.
+        const capDrv = s.staff.find(x => x.id === t.driverId && x.role === 'driver');
+        if (capDrv && driverPerkIds(capDrv).includes('road_captain') && Math.random() < 0.2) return;
         // Weighted pick across the incident catalog (INCIDENT_TYPES).
         const roll = Math.random();
         let acc = 0, meta = INCIDENT_TYPES[0];
@@ -1041,7 +1265,21 @@ export const useGame = create(
         // duty) and adds inspection time at the checkpoint.
         const borders = route.bordersCrossed || 0;
         const customs = borders > 0 ? Math.round(borders * (CUSTOMS_FEE_BASE + CUSTOMS_FEE_PER_TON * tons)) : 0;
-        const econ = { ...econ0, customs, net: econ0.net - customs };
+        // v2.4.0 — daily fuel market: today's diesel index scales the fuel bill.
+        const day = get().gameDay().day;
+        const fuelFactor = fuelFactorForDay(day);
+        // v2.4.0 — driver perks plug straight into the economics.
+        const drvForPerks = s.staff.find(x => x.id === t.driverId && x.role === 'driver');
+        const perks = drvForPerks ? driverPerkIds(drvForPerks) : [];
+        const fuelPerk = perks.includes('fuel_saver') ? 0.95 : 1;
+        const fuel = Math.round(econ0.fuel * fuelFactor * fuelPerk);
+        const fuelDelta = fuel - econ0.fuel;
+        const legendBonus = perks.includes('living_legend') ? Math.round(econ0.gross * 0.10) : 0;
+        const econ = {
+          ...econ0, customs, fuel, fuelFactor, legendBonus,
+          gross: econ0.gross + legendBonus,
+          net: econ0.net - customs - fuelDelta + legendBonus,
+        };
         // ----- Fuel model: consume based on current tank; auto-refuel en route -----
         const R = model.range;
         const startFuel = t.fuelPct == null ? 100 : t.fuelPct;
@@ -1066,7 +1304,11 @@ export const useGame = create(
         const drv = s.staff.find(x => x.id === t.driverId && x.role === 'driver');
         const skillFactor = drv ? 1 + ((drv.skill || 0) / 100) * 0.15 : 1;
         const promoFactor = drv && (drv.promoBoostUntil || 0) > Date.now() ? 2 : 1;
-        const speedBoost = (s.boosts.speedUntil > Date.now() ? 2 : 1) * conditionFactor * skillFactor * promoFactor;
+        // v2.4.0 — Night Rider perk (+8% pace) and live weather on the route:
+        // driving through an active rain/dust/snow zone slows the whole trip.
+        const perkPace = perks.includes('night_rider') ? 1.08 : 1;
+        const wx = weatherOnRoute(route.points, s.weather || []);
+        const speedBoost = (s.boosts.speedUntil > Date.now() ? 2 : 1) * conditionFactor * skillFactor * promoFactor * perkPace * wx.factor;
         // ----- Driver fatigue: legally/physically a driver can't drive forever.
         // A sleep break (~2h) after every ~8.5h driving, plus short ~5min breaks
         // every ~2.5h. These pauses extend the real delivery time.
@@ -1077,13 +1319,16 @@ export const useGame = create(
         const restSec = Math.round((restHours * REAL_SEC_PER_GAME_HOUR) / speedBoost);
         // Each auto-refuel stop costs ~1 in-game hour of real time; each border
         // crossing adds customs/inspection time at the checkpoint.
-        const borderSec = Math.round((borders * CUSTOMS_HOURS * REAL_SEC_PER_GAME_HOUR) / speedBoost);
+        const borderSec = Math.round((borders * CUSTOMS_HOURS * REAL_SEC_PER_GAME_HOUR) / speedBoost)
+          * (perks.includes('border_expert') ? 0.7 : 1);
         const durationSec = tripDurationSec(model, route.roadKm, speedBoost) + refuelCount * 60 + restSec + borderSec;
         return {
           route, stops, econ, durationSec, tons, model, to, arriveFuelPct, refuelCount,
           startRangeKm: Math.round(startRangeKm), fullRangeKm: R, startFuelPct: Math.round(startFuel),
           drivingHours: Math.round(drivingHours * 10) / 10, sleepBreaks, shortBreaks, restHours: Math.round(restHours * 10) / 10,
           borders, customs, borderNames: route.borderNames || [], destCountry,
+          weatherZones: wx.hits.map(z => ({ name: z.name, kind: z.kind })), weatherFactor: wx.factor,
+          perks, fuelFactor,
         };
       },
 
@@ -1221,6 +1466,8 @@ export const useGame = create(
           // Accumulate the driver's career stats (hours driven, sleep, deliveries).
           staff: s.staff.map(m => m.id === (t && t.driverId) ? {
             ...m,
+            // Driver XP: distance-weighted, powers levels & perks (v2.4.0).
+            xp: (m.xp || 0) + Math.round(d.route.roadKm / 8 + 20),
             hoursDriven: Math.round(((m.hoursDriven || 0) + drivingHours) * 10) / 10,
             sleepHours: Math.round(((m.sleepHours || 0) + sleepH) * 10) / 10,
             deliveries: (m.deliveries || 0) + 1,
@@ -1245,6 +1492,18 @@ export const useGame = create(
             ? s.contracts.map(c => c.id === contract.id ? { ...c, status: 'done', rewardPaid: reward } : c)
             : s.contracts,
         });
+        // Announce driver level-ups (perk unlocks) after the XP grant above.
+        {
+          const drvMember = t && s.staff.find(m => m.id === t.driverId);
+          if (drvMember) {
+            const before = driverLevel(drvMember.xp);
+            const after = driverLevel((drvMember.xp || 0) + Math.round(d.route.roadKm / 8 + 20));
+            if (after > before) {
+              const perk = DRIVER_PERKS.find(p => p.level === after);
+              get().notify('system', 'star-shooting', `${drvMember.name} reached driver level ${after}!${perk ? ` Perk unlocked: ${perk.name} — ${perk.desc}.` : ''}`);
+            }
+          }
+        }
         play('coin', 0.9);
         get().logLedger('delivery', 'truck-check', `Delivery to ${to.name} (${d.route.roadKm} km)`, d.econ.net);
         if (reward) get().logLedger('contract', 'file-check', `Contract bonus · ${to.name}`, reward);
@@ -1608,6 +1867,92 @@ export const useGame = create(
         if (win) play('coin', 0.9);
         get().notify('system', 'card-text', win ? `Lucky Plate: dead right — +8 Gold!` : `Lucky Plate: it was ${p.answer}. Study the plates closely...`);
         return { ok: true, win, answer: p.answer, reward: win ? 8 : 0 };
+      },
+
+      // ---------- bank & loans ----------
+      creditScore() { return creditScoreOf(get().credit); },
+      takeLoan(productId) {
+        const s = get();
+        const p = LOAN_PRODUCTS.find(x => x.id === productId);
+        if (!p) return { ok: false, err: 'Unknown loan product' };
+        if ((s.loans || []).length >= 2) return { ok: false, err: 'Maximum 2 active loans — repay one first' };
+        if ((s.loans || []).some(l => l.productId === productId)) return { ok: false, err: 'You already have this loan running' };
+        const score = creditScoreOf(s.credit);
+        if (score < p.minScore) return { ok: false, err: `Credit score too low — need ${p.minScore}, you have ${score}` };
+        const { day } = get().gameDay();
+        const totalDue = Math.round(p.amount * (1 + p.apr));
+        const loan = {
+          id: uid('ln'), productId, name: p.name, principal: p.amount,
+          remaining: totalDue, emi: Math.round(totalDue / p.months),
+          months: p.months, paidMonths: 0, lastEmiDay: day, since: Date.now(),
+        };
+        set({ balance: s.balance + p.amount, loans: [...(s.loans || []), loan] });
+        get().logLedger('loan', 'bank-plus', `Loan disbursed · ${p.name}`, p.amount);
+        get().notify('system', 'bank-plus', `${p.name} approved! ${inr(p.amount)} credited. EMI ${inr(loan.emi)} every 30 days × ${p.months}.`);
+        play('coin', 0.9);
+        return { ok: true, loan };
+      },
+      // Early settlement: clear the outstanding balance at a 2% rebate.
+      prepayLoan(loanId) {
+        const s = get();
+        const ln = (s.loans || []).find(x => x.id === loanId);
+        if (!ln) return { ok: false, err: 'Loan not found' };
+        const cost = Math.round(ln.remaining * 0.98);
+        if (s.balance < cost) return { ok: false, err: `Need ${inr(cost)} to settle this loan` };
+        set({
+          balance: s.balance - cost,
+          loans: s.loans.filter(x => x.id !== loanId),
+          credit: { ...s.credit, paid: (s.credit?.paid || 0) + 2 },
+        });
+        get().logLedger('loan', 'bank-check', `Loan settled early · ${ln.name}`, -cost);
+        get().notify('system', 'bank-check', `${ln.name} settled early for ${inr(cost)} (2% rebate). Credit score up!`);
+        return { ok: true, cost };
+      },
+
+      // ---------- fuel market ----------
+      fuelToday() {
+        const { day } = get().gameDay();
+        const factor = fuelFactorForDay(day);
+        const history = Array.from({ length: 7 }, (_, i) => fuelFactorForDay(Math.max(1, day - 6 + i)));
+        return { day, factor, price: Math.round(ECON.dieselPrice * factor), base: ECON.dieselPrice, history };
+      },
+
+      // ---------- weekly challenges ----------
+      weeklyProgress() {
+        const s = get();
+        const w = s.weekly;
+        if (!w) return [];
+        return w.challenges.map(ch => ({
+          ...ch,
+          progress: Math.max(0, Math.floor((s.stats[ch.key] || 0) - (w.snapshot[ch.key] || 0))),
+          claimed: w.claimed.includes(ch.key),
+        }));
+      },
+      claimWeekly(key) {
+        const s = get();
+        const w = s.weekly;
+        if (!w) return { ok: false, err: 'No weekly challenges yet' };
+        const ch = w.challenges.find(x => x.key === key);
+        if (!ch) return { ok: false, err: 'Unknown challenge' };
+        if (w.claimed.includes(key)) return { ok: false, err: 'Already claimed' };
+        const progress = Math.floor((s.stats[key] || 0) - (w.snapshot[key] || 0));
+        if (progress < ch.target) return { ok: false, err: 'Not complete yet' };
+        const claimed = [...w.claimed, key];
+        const sweep = claimed.length === w.challenges.length && !w.jackpotPaid;
+        set({
+          gold: s.gold + ch.gold + (sweep ? WEEKLY_JACKPOT.gold : 0),
+          balance: s.balance + ch.cash + (sweep ? WEEKLY_JACKPOT.cash : 0),
+          weekly: { ...w, claimed, jackpotPaid: w.jackpotPaid || sweep },
+        });
+        get().logLedger('bonus', 'calendar-star', `Weekly challenge — ${ch.label}`, ch.cash);
+        if (sweep) {
+          get().logLedger('bonus', 'trophy-award', 'WEEKLY JACKPOT — clean sweep!', WEEKLY_JACKPOT.cash);
+          get().notify('system', 'trophy-award', `CLEAN SWEEP! All weekly challenges done: jackpot +${WEEKLY_JACKPOT.gold} Gold + ${inr(WEEKLY_JACKPOT.cash)}!`);
+        } else {
+          get().notify('system', 'calendar-star', `Weekly challenge complete: +${ch.gold} Gold + ${inr(ch.cash)}.`);
+        }
+        play('coin', 1);
+        return { ok: true, sweep };
       },
 
       // ---------- gold exchange ----------
