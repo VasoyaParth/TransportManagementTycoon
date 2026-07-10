@@ -5,6 +5,10 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Needed to install a downloaded APK update (in-app updater). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Legacy Downloads write for the backup export on Android 9 and below;
+         Android 10+ uses MediaStore and ignores this. -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
 
     <application
       android:name=".MainApplication"

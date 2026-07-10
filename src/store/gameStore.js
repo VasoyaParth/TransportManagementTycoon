@@ -1024,10 +1024,12 @@ export const useGame = create(
           sleepBreaks: p.sleepBreaks, shortBreaks: p.shortBreaks, restHours: p.restHours,
           loadSec, unloadSec, ferryBoardSec, ferryUnboardSec,
         };
-        // Record the corridor so it stays highlighted on the map (cap 8, dedup).
+        // Record the corridor so it stays highlighted on the map — permanently.
+        // Every route ever driven remains visible (deduped per city pair), so
+        // the map slowly fills with the empire's whole network over time.
         const corrId = [d.fromCityId, toCityId].sort().join('~');
         const corridors = [{ id: corrId, fromCityId: d.fromCityId, toCityId, points: p.route.points },
-        ...s.corridors.filter(c => c.id !== corrId)].slice(0, 8);
+        ...s.corridors.filter(c => c.id !== corrId)];
         set({
           deliveries: [...s.deliveries, d],
           corridors,
@@ -1117,7 +1119,7 @@ export const useGame = create(
             fuelPct: d.arriveFuelPct != null ? d.arriveFuelPct : Math.max(4, (x.fuelPct || 100) - 15),
             km: x.km + d.route.roadKm, deliveries: x.deliveries + 1,
             condition: Math.max(5, (x.condition == null ? 100 : x.condition) - d.route.roadKm * CONDITION_WEAR_PER_KM),
-            log: [{ ...logEntry, truckName: modelById(x.modelId).name }, ...(x.log || [])].slice(0, 20),
+            log: [{ ...logEntry, truckName: modelById(x.modelId).name }, ...(x.log || [])].slice(0, 100),
           } : x),
           // Accumulate the driver's career stats (hours driven, sleep, deliveries).
           staff: s.staff.map(m => m.id === (t && t.driverId) ? {

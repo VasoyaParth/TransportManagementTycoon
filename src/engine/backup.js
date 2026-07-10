@@ -11,16 +11,18 @@
 // version (missing new fields fall back to initialState defaults), never into
 // an older app — that's rejected with a clear message.
 //
-// Export writes a .json file to the phone's Downloads folder when the native
-// file module is available, and always offers the OS share sheet as well, so
-// the backup can be moved to another device over WhatsApp/Drive/anything.
+// Export writes a real .json FILE into the phone's Downloads folder (via
+// MediaStore on Android 10+, direct write on older Android). Import opens the
+// system file picker and reads the chosen .json — no copy-pasting JSON.
 // Auto-backup keeps a rolling copy in AsyncStorage once per real day.
-import { Platform, Share } from 'react-native';
+import { Platform, PermissionsAndroid } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { APP_VERSION, cmpVer } from '../net/updates';
 
 let RNBlobUtil = null;
 try { RNBlobUtil = require('react-native-blob-util').default; } catch (e) { RNBlobUtil = null; }
+let DocumentPicker = null;
+try { DocumentPicker = require('react-native-document-picker').default; } catch (e) { DocumentPicker = null; }
 
 export const BACKUP_APP = 'truck-empire-tycoon';
 export const BACKUP_KIND = 'save-backup';
@@ -67,27 +69,61 @@ export function parseBackup(text) {
   return { ok: true, data: payload.data, meta: { version: payload.version, savedAt: payload.savedAt } };
 }
 
-// Export: best-effort write to Downloads (visible in any file manager), then
-// the OS share sheet with the JSON as text — works with zero permissions.
-// Returns { ok, file } where file is the written path or null.
+// Export: write the backup as a real file into Downloads.
+// Android 10+ goes through MediaStore (no permission needed); Android 9 and
+// below writes directly to the Downloads folder after asking for the legacy
+// storage permission. Returns { ok, path } or { ok:false, err }.
 export async function exportBackup(snapshot) {
   const payload = makeBackup(snapshot);
   const json = JSON.stringify(payload);
-  let file = null;
-  if (RNBlobUtil && Platform.OS === 'android') {
+  const name = backupFileName(payload);
+  if (!RNBlobUtil) return { ok: false, err: 'File storage module unavailable in this build.' };
+  // Stage in the app cache first, then hand to the OS.
+  const tmp = `${RNBlobUtil.fs.dirs.CacheDir}/${name}`;
+  try { await RNBlobUtil.fs.writeFile(tmp, json, 'utf8'); }
+  catch (e) { return { ok: false, err: 'Could not write the backup file.' }; }
+  if (Platform.OS === 'android' && Platform.Version >= 29) {
     try {
-      const path = `${RNBlobUtil.fs.dirs.DownloadDir}/${backupFileName(payload)}`;
-      await RNBlobUtil.fs.writeFile(path, json, 'utf8');
-      file = path;
-    } catch (e) { file = null; /* scoped storage may refuse — share sheet still works */ }
+      await RNBlobUtil.MediaCollection.copyToMediaStore(
+        { name, parentFolder: 'TruckEmpire', mimeType: 'application/json' }, 'Download', tmp);
+      return { ok: true, path: `Downloads/TruckEmpire/${name}` };
+    } catch (e) { /* fall through to direct write */ }
   }
   try {
-    await Share.share(
-      { message: json, title: backupFileName(payload) },
-      { dialogTitle: 'Share your Truck Empire backup' },
-    );
-  } catch (e) { /* user closed the sheet — the Downloads copy (if any) remains */ }
-  return { ok: true, file };
+    if (Platform.OS === 'android' && Platform.Version < 29) {
+      const perm = PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE;
+      if (perm && !(await PermissionsAndroid.check(perm))) await PermissionsAndroid.request(perm);
+    }
+    const dest = `${RNBlobUtil.fs.dirs.DownloadDir}/${name}`;
+    await RNBlobUtil.fs.cp(tmp, dest);
+    return { ok: true, path: dest };
+  } catch (e) {
+    return { ok: false, err: 'Couldn’t save into Downloads — check storage permission and free space.' };
+  }
+}
+
+// Import: open the system file picker, read the chosen .json, and return its
+// text for parseBackup(). Returns { ok, text, name }, { cancelled: true }, or
+// { ok:false, err }.
+export async function pickBackupFile() {
+  if (!DocumentPicker) return { ok: false, err: 'File picker unavailable in this build.' };
+  if (!RNBlobUtil) return { ok: false, err: 'File storage module unavailable in this build.' };
+  let res;
+  try {
+    const picked = await DocumentPicker.pick({ type: [DocumentPicker.types.allFiles], copyTo: 'cachesDirectory' });
+    res = Array.isArray(picked) ? picked[0] : picked;
+  } catch (e) {
+    if (DocumentPicker.isCancel && DocumentPicker.isCancel(e)) return { cancelled: true };
+    return { ok: false, err: 'Could not open the file picker.' };
+  }
+  try {
+    // Prefer the local copy the picker made; fall back to the content:// URI.
+    const path = (res.fileCopyUri || res.uri || '').replace(/^file:\/\//, '');
+    const text = await RNBlobUtil.fs.readFile(path, 'utf8');
+    return { ok: true, text, name: res.name || 'backup.json' };
+  } catch (e) {
+    return { ok: false, err: 'Could not read that file.' };
+  }
 }
 
 // ---- Auto-backup (rolling, once per real day, local) ----
