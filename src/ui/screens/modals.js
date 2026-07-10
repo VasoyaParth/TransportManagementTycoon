@@ -14,6 +14,7 @@ import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
 import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, TRUCK_COLORS, TRUCK_LOGOS } from '../../data/trucks';
 import { inr, inrShort } from '../../engine/economy';
 import { APP_VERSION, checkForUpdate, fmtMB, cmpVer } from '../../net/updates';
+import { exportBackup, parseBackup, readAutoBackup } from '../../engine/backup';
 import { COUNTRIES, COUNTRY_BY_CODE } from '../../data/expansion';
 import { TruckTopShapes, truckShapes, bodyTypeFor, defaultBodyColor } from '../truckArt';
 import { BrandEmblem } from '../BrandLogo';
@@ -110,24 +111,30 @@ function liveSpeed(base, key) {
 // fuel windows are approximated from the journey waypoints' clock times plus
 // each stop's dwell duration (fuel stops cost 60 real seconds in startDelivery;
 // rest breaks are game-hours long).
+// `atKm` (when non-null) is where the odometer must FREEZE while stopped —
+// so the trip readout stops counting km during a halt instead of creeping up.
 const STOP_LABELS = { fuel: 'Refuelling at a fuel stop', sleep: 'Driver on a sleep break', short: 'Driver on a short break' };
 function deliveryStop(d, model, now = Date.now()) {
-  if (d.incident && d.incident.resolveAt > now) {
-    return { stopped: true, label: incidentMeta(d.incident.type).title };
-  }
+  const total = d.route.roadKm;
   const ph = deliveryPhase(d, now);
+  if (d.incident && d.incident.resolveAt > now) {
+    return { stopped: true, label: incidentMeta(d.incident.type).title, atKm: Math.round(total * ph.frac) };
+  }
   if (ph.phase !== 'driving' && ph.phase !== 'done') {
-    return { stopped: true, label: PHASE_LABELS[ph.phase] };
+    // Ferry sailing still covers distance (the boat moves); everything else
+    // is pinned to the phase's fixed route position.
+    const atKm = ph.phase === 'ferry' ? null : Math.round(total * ph.frac);
+    return { stopped: true, label: PHASE_LABELS[ph.phase], atKm };
   }
   const DWELL = { fuel: 60 * 1000, sleep: 2 * GAME_HOUR_MS, short: (5 / 60) * GAME_HOUR_MS };
   const j = buildJourney(d, model, now);
   for (const w of j.waypoints) {
     const dwell = DWELL[w.type];
     if (dwell && now >= w.ts && now < w.ts + dwell) {
-      return { stopped: true, label: STOP_LABELS[w.type] };
+      return { stopped: true, label: STOP_LABELS[w.type], atKm: w.atKm };
     }
   }
-  return { stopped: false, label: null };
+  return { stopped: false, label: null, atKm: null };
 }
 
 // Semicircular gauge (speed / fuel) — pure SVG.
@@ -183,14 +190,36 @@ function TrackerStep({ icon, color, title, sub, done, active, line }) {
 // corridor passes through, fuel/charge halts, sleep breaks (~2h) and short
 // breaks (~5m) — all placed at their real distance-along-route and marked
 // reached / current / upcoming against how far the truck has actually driven.
+// Funny warehouse-crew lines for the pre-departure loading step — picked
+// deterministically per delivery so the line doesn't change every second.
+const LOADING_GAGS = [
+  'Bubble-wrapping everything. Even the driver.',
+  'Duct tape: applied generously and with confidence.',
+  'Playing real-life Tetris with the crates…',
+  'Forklift driver showing off again.',
+  'Triple-checking the manifest over a cutting chai.',
+  'That one box that just won’t fit… making it fit.',
+  'Strapping it down like it owes us money.',
+];
+const gagFor = (id) => { let h = 0; for (let i = 0; i < (id || '').length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0; return LOADING_GAGS[h % LOADING_GAGS.length]; };
+
 function buildJourney(d, model, now = Date.now()) {
   const total = d.route.roadKm;
   const dur = d.endsAt - d.startedAt;
   const prog = dur > 0 ? Math.min(1, Math.max(0, (now - d.startedAt) / dur)) : 0;
-  const kmNow = total * prog;
+  // Route position is PHASE-aware (frozen at 0 while loading, at 1 while
+  // unloading, pinned at each dock) — not raw elapsed time — so the km
+  // readout never creeps while the truck is stood still.
+  const kmNow = total * deliveryPhase(d, now).frac;
   const speed = model.speed || 60;
+  const loadDoneTs = d.startedAt + (d.loadSec || 0) * 1000;
   const wp = [];
-  wp.push({ type: 'origin', atKm: 0, title: `Picked up · ${cityById(d.fromCityId)?.name || 'Origin'}`, sub: 'Departed origin', icon: 'package-variant-closed', color: C.green });
+  // Step 0: loading & packing at the warehouse — before pickup/departure.
+  wp.push({ type: 'loadprep', atKm: 0, title: `Loading goods · ${cityById(d.fromCityId)?.name || 'Origin'}`,
+    sub: gagFor(d.id), icon: 'package-variant', color: C.amber,
+    tsOverride: d.startedAt, passedOverride: now >= loadDoneTs });
+  wp.push({ type: 'origin', atKm: 0, title: `Picked up · ${cityById(d.fromCityId)?.name || 'Origin'}`, sub: 'Departed origin', icon: 'package-variant-closed', color: C.green,
+    tsOverride: loadDoneTs, passedOverride: now >= loadDoneTs });
   try {
     for (const rc of routeCities(d.route)) {
       wp.push({ type: 'city', atKm: rc.atKm, title: rc.city.name, sub: `${rc.city.state} · on route`, icon: 'map-marker', color: C.blue });
@@ -228,8 +257,8 @@ function buildJourney(d, model, now = Date.now()) {
   // stops show when they were actually/estimated reached; the upcoming one
   // shows its estimated arrival.
   waypoints.forEach(w => {
-    w.passed = w.atKm <= kmNow + 0.5;
-    w.ts = d.startedAt + (total > 0 ? (w.atKm / total) * dur : 0);
+    w.passed = w.passedOverride != null ? w.passedOverride : w.atKm <= kmNow + 0.5;
+    w.ts = w.tsOverride != null ? w.tsOverride : d.startedAt + (total > 0 ? (w.atKm / total) * dur : 0);
   });
   const nextIdx = waypoints.findIndex(w => !w.passed);
   const lastReached = [...waypoints].reverse().find(w => w.passed);
@@ -262,7 +291,7 @@ function JourneyTracker({ delivery, model }) {
       done={w.passed}
       active={j.waypoints.indexOf(w) === j.nextIdx}
       title={w.title}
-      sub={`${w.sub || ''}${w.type !== 'origin' && w.type !== 'dest' ? ` · ${w.atKm} km` : ''} · ${w.passed ? 'Reached' : j.waypoints.indexOf(w) === j.nextIdx ? 'ETA' : '~'} ${fmtWhen(w.ts)}`.replace(/^ · /, '')}
+      sub={`${w.sub || ''}${w.type !== 'origin' && w.type !== 'dest' && w.type !== 'loadprep' ? ` · ${w.atKm} km` : ''} · ${w.passed ? 'Reached' : j.waypoints.indexOf(w) === j.nextIdx ? 'ETA' : '~'} ${fmtWhen(w.ts)}`.replace(/^ · /, '')}
       line={i < arr.length - 1}
     />
   );
@@ -629,14 +658,20 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
   const meta = statusMeta[truck.status];
   const d = deliveries.find(x => x.truckId === truck.id);
   const now = Date.now();
-  const prog = d ? Math.min(100, ((now - d.startedAt) / (d.endsAt - d.startedAt)) * 100) : 0;
   const eta = d ? fmtDur((d.endsAt - now) / 1000) : null;
-  // Live fuel drains from the departure tank down to the arrival fuel as it drives.
+  // Distance & fuel are PHASE-aware: pinned at 0 while loading, frozen at each
+  // halt (breaks, refuels, incidents), at 100% while unloading — never creeping
+  // up on raw elapsed time while the truck is stood still.
+  const stopInfo = d ? deliveryStop(d, m, now) : null;
+  const totalKm = d ? d.route.roadKm : 0;
+  const kmCovered = d
+    ? (stopInfo?.stopped && stopInfo.atKm != null ? stopInfo.atKm : Math.round(totalKm * deliveryPhase(d, now).frac))
+    : 0;
+  const prog = d && totalKm > 0 ? Math.min(100, (kmCovered / totalKm) * 100) : 0;
+  // Live fuel drains with distance actually driven (not with waiting time).
   const startFuel = d && d.startFuelPct != null ? d.startFuelPct : truck.fuelPct;
   const arriveFuel = d && d.arriveFuelPct != null ? d.arriveFuelPct : startFuel;
   const curFuel = d ? Math.max(3, Math.round(startFuel + (arriveFuel - startFuel) * (prog / 100))) : Math.round(truck.fuelPct);
-  const totalKm = d ? d.route.roadKm : 0;
-  const kmCovered = d ? Math.round(totalKm * (prog / 100)) : 0;
   const buildLeft = truck.status === 'building' ? Math.max(0, (truck.buildEndsAt - now) / 1000) : 0;
   const buildPct = truck.status === 'building' ? 100 * (1 - buildLeft / truck.buildTotalSec) : 0;
   const fee = Math.round(m.price * 0.04);
@@ -677,7 +712,7 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
                 to 0 whenever the truck is actually halted (loading, unloading,
                 ferry, incident, refuelling, driver breaks). */}
             {(() => {
-              const stop = deliveryStop(d, m, now);
+              const stop = stopInfo;
               return (
                 <>
                   <Row style={{ marginTop: 10 }}>
@@ -1061,15 +1096,27 @@ function ContractStat({ icon, label, value, color = C.text }) {
 }
 
 // ============ Power-Ups ============
+// Ways to earn gold — shown on the Gold Wallet page so players always know
+// where the next gold is coming from.
+const GOLD_EARN_WAYS = [
+  { icon: 'dice-multiple', title: 'Daily mini-games', desc: 'Scratch cards, lucky spin, dice & slots — free plays every day.' },
+  { icon: 'calendar-star', title: 'Daily login streak', desc: 'Open the game daily: +2 gold per streak day, up to +14/day.' },
+  { icon: 'trophy', title: 'Achievements', desc: 'Every level of every track pays 5–80 gold, one time.' },
+  { icon: 'diamond-stone', title: 'Hidden easter eggs', desc: 'Each gem found pays +15 gold (and ₹10 lakhs).' },
+  { icon: 'hand-coin', title: 'Client tips', desc: 'Happy clients randomly tip 2–5 gold on finished deliveries.' },
+];
+
 export function PowerupsModal({ visible, onClose, onOpenGames }) {
   const toast = useToast();
   const gold = useGame(s => s.gold);
   const trucks = useGame(s => s.trucks);
   const buyPowerup = useGame(s => s.buyPowerup);
   const convertGoldToCash = useGame(s => s.convertGoldToCash);
+  const [page, setPage] = useState('store'); // store | wallet
   const [expand, setExpand] = useState(null);
   const [xGold, setXGold] = useState(5);
-  useEffect(() => { if (visible) setXGold(g => Math.min(Math.max(1, g), Math.max(1, gold))); }, [visible, gold]);
+  useEffect(() => { if (visible) { setPage('store'); setExpand(null); setXGold(g => Math.min(Math.max(1, g), Math.max(1, gold))); } }, [visible]);
+  useEffect(() => { setXGold(g => Math.min(Math.max(1, g), Math.max(1, gold))); }, [gold]);
   const xClamp = Math.min(Math.max(1, xGold), Math.max(1, gold));
   const exchange = () => {
     const r = convertGoldToCash(xClamp);
@@ -1096,41 +1143,68 @@ export function PowerupsModal({ visible, onClose, onOpenGames }) {
   };
 
   return (
-    <Sheet visible={visible} onClose={onClose} title="Power-Ups Store" height="86%">
-      <Card style={{ marginBottom: 12, backgroundColor: C.bgSoft }}>
-        <Row style={{ justifyContent: 'space-between' }}>
-          <Row><Icon name="gold" size={20} color={C.gold} /><Text style={[FONT.h3, { marginLeft: 6 }]}>Your Gold</Text></Row>
-          <Text style={[FONT.h2, { color: C.gold }]}>{gold}</Text>
-        </Row>
-        {/* Earn free Gold by playing the daily mini-games (scratch + roulette). */}
-        <Btn title="Play for free Gold" kind="green" icon="dice-multiple" small={false}
-          style={{ marginTop: 10 }} onPress={() => { onClose(); onOpenGames && onOpenGames(); }} />
-        <Row style={{ marginTop: 6 }}>
-          <Icon name="information-outline" size={12} color={C.sub} />
-          <Text style={[FONT.tiny, { marginLeft: 4, flex: 1 }]}>Scratch cards & lucky spin — 10 free plays of each, every day.</Text>
-        </Row>
-      </Card>
+    <Sheet visible={visible} onClose={onClose} title={page === 'store' ? 'Power-Ups Store' : 'Gold Wallet'} height="86%">
+      {/* Two pages: the power-up store scrolls freely on its own, and the
+          wallet (balance / earn / exchange) lives on its own page instead of
+          pinned cards eating the store's scroll space. */}
+      <Row style={{ gap: 6, marginBottom: 12 }}>
+        <Chip label="Power-Ups" icon="star-four-points" active={page === 'store'} onPress={() => setPage('store')} />
+        <Chip label={`Gold Wallet · ${gold}`} icon="gold" color={C.gold} active={page === 'wallet'} onPress={() => setPage('wallet')} />
+      </Row>
 
-      {/* Gold → Cash exchange */}
-      <Card style={{ marginBottom: 12 }}>
-        <Row style={{ justifyContent: 'space-between' }}>
-          <Row style={{ flex: 1 }}>
-            <View style={[cs.heroIcon, { width: 44, height: 44, backgroundColor: C.greenSoft }]}><Icon name="cash-sync" size={22} color={C.green} /></View>
-            <View style={{ marginLeft: 12, flex: 1 }}>
-              <Text style={FONT.h3}>Exchange Gold for Cash</Text>
-              <Text style={FONT.tiny}>Convert premium Gold into spendable ₹ at {inrShort(GOLD_TO_CASH)} per Gold.</Text>
-            </View>
+      {page === 'wallet' && (
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+        <Card style={{ marginBottom: 12, backgroundColor: C.bgSoft }}>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <Row><Icon name="gold" size={20} color={C.gold} /><Text style={[FONT.h3, { marginLeft: 6 }]}>Your Gold</Text></Row>
+            <Text style={[FONT.h2, { color: C.gold }]}>{gold}</Text>
           </Row>
-        </Row>
-        <Row style={{ justifyContent: 'space-between', marginTop: 10 }}>
-          <Row><Icon name="gold" size={16} color={C.gold} /><Text style={[FONT.h3, { color: C.gold, marginLeft: 4 }]}>{xClamp}</Text></Row>
-          <Text style={[FONT.body, { fontWeight: '700', color: C.green }]}>= {inr(xClamp * GOLD_TO_CASH)}</Text>
-        </Row>
-        <GameSlider min={1} max={Math.max(1, gold)} step={1} value={xClamp} color={C.gold}
-          onChange={setXGold} minLabel="1" maxLabel={`${Math.max(1, gold)} gold`} />
-        <Btn title="Exchange" kind="green" icon="cash-plus" disabled={gold < 1} onPress={exchange} style={{ marginTop: 8 }} />
-      </Card>
+          {/* Earn free Gold by playing the daily mini-games (scratch + roulette). */}
+          <Btn title="Play for free Gold" kind="green" icon="dice-multiple" small={false}
+            style={{ marginTop: 10 }} onPress={() => { onClose(); onOpenGames && onOpenGames(); }} />
+          <Row style={{ marginTop: 6 }}>
+            <Icon name="information-outline" size={12} color={C.sub} />
+            <Text style={[FONT.tiny, { marginLeft: 4, flex: 1 }]}>Scratch cards & lucky spin — 10 free plays of each, every day.</Text>
+          </Row>
+        </Card>
 
+        {/* Gold → Cash exchange */}
+        <Card style={{ marginBottom: 12 }}>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <Row style={{ flex: 1 }}>
+              <View style={[cs.heroIcon, { width: 44, height: 44, backgroundColor: C.greenSoft }]}><Icon name="cash-sync" size={22} color={C.green} /></View>
+              <View style={{ marginLeft: 12, flex: 1 }}>
+                <Text style={FONT.h3}>Exchange Gold for Cash</Text>
+                <Text style={FONT.tiny}>Convert premium Gold into spendable ₹ at {inrShort(GOLD_TO_CASH)} per Gold.</Text>
+              </View>
+            </Row>
+          </Row>
+          <Row style={{ justifyContent: 'space-between', marginTop: 10 }}>
+            <Row><Icon name="gold" size={16} color={C.gold} /><Text style={[FONT.h3, { color: C.gold, marginLeft: 4 }]}>{xClamp}</Text></Row>
+            <Text style={[FONT.body, { fontWeight: '700', color: C.green }]}>= {inr(xClamp * GOLD_TO_CASH)}</Text>
+          </Row>
+          <GameSlider min={1} max={Math.max(1, gold)} step={1} value={xClamp} color={C.gold}
+            onChange={setXGold} minLabel="1" maxLabel={`${Math.max(1, gold)} gold`} />
+          <Btn title="Exchange" kind="green" icon="cash-plus" disabled={gold < 1} onPress={exchange} style={{ marginTop: 8 }} />
+        </Card>
+
+        {/* All the ways gold flows in */}
+        <Card>
+          <Text style={[FONT.h3, { marginBottom: 6 }]}>Ways to earn Gold</Text>
+          {GOLD_EARN_WAYS.map((w, i) => (
+            <Row key={w.title} style={[{ paddingVertical: 8 }, i > 0 && { borderTopWidth: 1, borderTopColor: C.border }]}>
+              <View style={[cs.heroIcon, { width: 36, height: 36, backgroundColor: C.amberSoft }]}><Icon name={w.icon} size={19} color={C.gold} /></View>
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <Text style={[FONT.body, { fontWeight: '700' }]}>{w.title}</Text>
+                <Text style={FONT.tiny}>{w.desc}</Text>
+              </View>
+            </Row>
+          ))}
+        </Card>
+      </ScrollView>
+      )}
+
+      {page === 'store' && (
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
         {POWERUPS.map(p => {
           const isCash = !!p.cash;
@@ -1166,6 +1240,7 @@ export function PowerupsModal({ visible, onClose, onOpenGames }) {
           );
         })}
       </ScrollView>
+      )}
     </Sheet>
   );
 }
@@ -1703,6 +1778,107 @@ export function NotificationsModal({ visible, onClose }) {
 
 const EGGS_INITIAL = 6;
 
+// ============ Backup (export / import / auto-backup) ============
+// Exports the COMPLETE save — company, money, trucks, live deliveries, hubs,
+// countries, achievements, eggs, settings, everything — as versioned JSON
+// (see engine/backup.js). Importable on any device running the same or a
+// newer app version.
+function BackupTab({ onClose }) {
+  const toast = useToast();
+  const lastBackupAt = useGame(s => s.lastBackupAt);
+  const cloudSnapshot = useGame(s => s.cloudSnapshot);
+  const applyCloudState = useGame(s => s.applyCloudState);
+  const backupNow = useGame(s => s.backupNow);
+  const [importText, setImportText] = useState('');
+  const [confirmImport, setConfirmImport] = useState(false);
+  const [confirmRestore, setConfirmRestore] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const doExport = async () => {
+    setBusy(true);
+    try {
+      const r = await exportBackup(cloudSnapshot());
+      toast(r.file ? 'Backup saved to Downloads & ready to share' : 'Backup ready — share it anywhere', 'success');
+    } catch (e) { toast('Export failed — try again', 'error'); }
+    setBusy(false);
+  };
+
+  const doImport = () => {
+    const r = parseBackup(importText);
+    if (!r.ok) { setConfirmImport(false); toast(r.err, 'error'); return; }
+    if (!confirmImport) { setConfirmImport(true); return; }
+    applyCloudState(r.data);
+    setImportText(''); setConfirmImport(false);
+    toast(`Backup from ${r.meta.version} imported — welcome back, boss!`, 'success');
+    onClose && onClose();
+  };
+
+  const doRestoreAuto = async () => {
+    if (!confirmRestore) { setConfirmRestore(true); return; }
+    setConfirmRestore(false);
+    const p = await readAutoBackup();
+    if (!p) { toast('No auto-backup found on this device yet', 'error'); return; }
+    applyCloudState(p.data);
+    toast('Auto-backup restored', 'success');
+    onClose && onClose();
+  };
+
+  return (
+    <>
+      <SectionTitle icon="database-export" text="Export & Share" />
+      <Card>
+        <Text style={FONT.sub}>
+          Exports your entire game — A to Z, from money and trucks to unlocked countries and achievements — as a
+          <Text style={{ fontWeight: '800' }}> versioned JSON backup</Text>. It saves to Downloads (when possible) and opens the share sheet, so you can move it to another phone.
+        </Text>
+        <Btn title={busy ? 'Preparing…' : 'Export backup'} kind="green" icon="export-variant" disabled={busy} onPress={doExport} style={{ marginTop: 12 }} />
+        <Text style={[FONT.tiny, { marginTop: 8 }]}>
+          Format: TruckEmpire-backup-{APP_VERSION}-date.json · importable on {APP_VERSION} or any newer version.
+        </Text>
+      </Card>
+
+      <SectionTitle icon="history" text="Auto-Backup" />
+      <Card>
+        <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <View style={{ flex: 1 }}>
+            <Text style={[FONT.body, { fontWeight: '700' }]}>Daily local safety copy</Text>
+            <Text style={FONT.tiny}>
+              {lastBackupAt ? `Last auto-backup ${relTime(lastBackupAt)}` : 'No backup taken yet'} · runs once every real day, automatically.
+            </Text>
+          </View>
+          <Btn title="Back up now" small kind="soft" icon="content-save-outline"
+            onPress={() => { backupNow(); toast('Snapshot saved on this device', 'success'); }} />
+        </Row>
+        <Btn title={confirmRestore ? 'Tap again to overwrite current game' : 'Restore auto-backup'}
+          kind={confirmRestore ? 'danger' : 'soft'} icon="backup-restore" onPress={doRestoreAuto} style={{ marginTop: 12 }} />
+      </Card>
+
+      <SectionTitle icon="database-import" text="Import" />
+      <Card>
+        <Text style={FONT.sub}>Paste the backup JSON from another device (or from your Downloads file) below.</Text>
+        <TextInput
+          value={importText}
+          onChangeText={t => { setImportText(t); setConfirmImport(false); }}
+          placeholder='{"app":"truck-empire-tycoon", ...}'
+          placeholderTextColor={C.faint}
+          multiline numberOfLines={4}
+          style={[cs.input, { height: 96, textAlignVertical: 'top', marginTop: 10 }]}
+        />
+        <Btn
+          title={confirmImport ? 'Tap again — this replaces your current game' : 'Import backup'}
+          kind={confirmImport ? 'danger' : 'blue'} icon="database-import"
+          disabled={!importText.trim()} onPress={doImport} style={{ marginTop: 10 }} />
+        <Row style={{ marginTop: 10, backgroundColor: C.amberSoft, borderRadius: RADIUS.md, padding: 8 }}>
+          <Icon name="shield-alert-outline" size={14} color={C.amber} />
+          <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.text }]}>
+            Importing replaces everything on this device. Backups from a newer app version than {APP_VERSION} are rejected — update the app first.
+          </Text>
+        </Row>
+      </Card>
+    </>
+  );
+}
+
 // ============ Achievements (Steam-style: tiered tracks with progress) ============
 const TIER_COLORS = ['#8D99AE', '#B08D57', '#8FA6B2', '#E9B949', '#7D3C98'];
 function AchievementsTab() {
@@ -1805,6 +1981,7 @@ export function SettingsModal({ visible, onClose, initialTab }) {
     ['profile', 'Profile', 'account-circle'], ['company', 'Company', 'domain'],
     ['gameplay', 'Gameplay', 'controller-classic'], ['notif', 'Alerts', 'bell-ring-outline'],
     ['achievements', 'Achievements', 'trophy'],
+    ['backup', 'Backup', 'backup-restore'],
     ['eggs', 'Easter Eggs', 'egg-easter'], ['about', 'About', 'information-outline'],
   ];
   const day = gameDay().day;
@@ -1927,6 +2104,7 @@ export function SettingsModal({ visible, onClose, initialTab }) {
           </>
         )}
         {tab === 'achievements' && <AchievementsTab />}
+        {tab === 'backup' && <BackupTab onClose={onClose} />}
         {tab === 'eggs' && (
           <>
             <SectionTitle icon="egg-easter" text={`Hidden Gems — ${foundEggs.length}/${EASTER_EGGS.length} found`} />
@@ -2409,7 +2587,10 @@ export function CountriesModal({ visible, onClose }) {
 const cs = StyleSheet.create({
   section: { ...FONT.tiny, marginTop: 14, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: '700' },
   input: { borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.md, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, color: C.text, backgroundColor: '#fff' },
-  chip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1, borderColor: C.border, backgroundColor: '#fff', flexShrink: 1 },
+  // flexShrink: 0 — a chip must never be squeezed narrower than its label
+  // (squished chips wrap their text and look bent/overlapped); rows of chips
+  // either wrap (flexWrap) or scroll horizontally instead.
+  chip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1, borderColor: C.border, backgroundColor: '#fff', flexShrink: 0 },
   truckCard: { width: 120, padding: 10, borderRadius: RADIUS.md, borderWidth: 1, borderColor: C.border, marginRight: 8, backgroundColor: '#fff' },
   heroIcon: { width: 64, height: 64, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   resRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border },

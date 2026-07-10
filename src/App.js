@@ -13,6 +13,10 @@ import { setHapticsEnabled, setHapticsIntensity } from './engine/haptics';
 
 export default function App() {
   const [hydrated, setHydrated] = useState(useGame.persist?.hasHydrated?.() ?? false);
+  // Hydration is near-instant, which used to flash the boot splash for a few
+  // frames and dump the player straight onto the map. Hold the splash for a
+  // minimum beat so the brand screen is actually seen while the map warms up.
+  const [splashDone, setSplashDone] = useState(false);
   const phase = useGame(s => s.phase);
   const company = useGame(s => s.company);
   const setPhase = useGame(s => s.setPhase);
@@ -21,6 +25,11 @@ export default function App() {
     const unsub = useGame.persist.onFinishHydration(() => setHydrated(true));
     if (useGame.persist.hasHydrated()) setHydrated(true);
     return unsub;
+  }, []);
+
+  useEffect(() => {
+    const tm = setTimeout(() => setSplashDone(true), 2800);
+    return () => clearTimeout(tm);
   }, []);
 
   // Initialise audio once hydrated, honouring the saved sound setting.
@@ -58,7 +67,8 @@ export default function App() {
 
   // Full-brand boot splash while the saved game hydrates from disk — the very
   // first thing the player sees, so it matches the launcher icon and splash.
-  if (!hydrated) {
+  // Held for a ~2.8s minimum even when hydration is instant.
+  if (!hydrated || !splashDone) {
     return (
       <>
         <StatusBar barStyle="light-content" backgroundColor="#0F1D30" />

@@ -15,6 +15,7 @@ import { deliveryEconomics, tripDurationSec, inr, REAL_SEC_PER_GAME_HOUR } from 
 import { play, setSoundEnabled, setMusicVolume, setSfxVolume } from '../engine/sound';
 import { setHapticsEnabled, setHapticsIntensity } from '../engine/haptics';
 import { initNotifications, pushNow, scheduleAt, setNotificationsEnabled, flavor } from '../engine/notify';
+import { writeAutoBackup } from '../engine/backup';
 
 // Random-flavoured OS push: picks a fresh funny line each time.
 const pushFlavor = (kind, vars) => { const f = flavor(kind, vars); pushNow(f.title, f.body); };
@@ -384,6 +385,8 @@ const initialState = {
   partners: [], // {code, name, since}
   easterEggs: { found: [] }, // ids of discovered hidden gems (persisted, one-time rewards)
   achievements: { unlocked: {} }, // {"road_warrior:2": ts} — track:tierIndex reached (persisted)
+  lastBackupAt: 0, // real ms of the last rolling auto-backup
+  login: { lastDay: '', streak: 0 }, // daily login gold streak (real calendar days)
 };
 
 export const useGame = create(
@@ -510,12 +513,34 @@ export const useGame = create(
         }
       },
 
+      // Snapshot the whole game into the rolling local auto-backup slot and
+      // stamp when it happened. Also runs automatically once per real day.
+      backupNow() {
+        set({ lastBackupAt: Date.now() });
+        return writeAutoBackup(get().cloudSnapshot());
+      },
+
       // Runs every second from the game loop; also on load.
       dailyTick() {
         const s = get();
         if (s.phase !== 'game') return;
         get().syncAchievements();
         const now = Date.now();
+        // Rolling auto-backup, once per real day.
+        if (now - (s.lastBackupAt || 0) > 24 * 3600 * 1000) get().backupNow();
+        // Daily login gold: consecutive real days build a streak (2 gold per
+        // streak day, capped at 14/day from day 7 onward).
+        {
+          const today = new Date().toDateString();
+          const lg = s.login || { lastDay: '', streak: 0 };
+          if (lg.lastDay !== today) {
+            const yesterday = new Date(now - 24 * 3600 * 1000).toDateString();
+            const streak = lg.lastDay === yesterday ? lg.streak + 1 : 1;
+            const bonus = Math.min(streak, 7) * 2;
+            set({ login: { lastDay: today, streak }, gold: get().gold + bonus });
+            get().notify('system', 'calendar-star', `Daily login bonus: +${bonus} Gold — day ${streak} streak${streak >= 7 ? ' (max!)' : ''}. Come back tomorrow for more.`);
+          }
+        }
         const { day } = get().gameDay();
         // Monthly running costs: staff salaries + garage maintenance (non-HQ).
         if (day - s.lastSalaryDay >= SALARY_EVERY_DAYS) {
@@ -612,9 +637,11 @@ export const useGame = create(
           const h = (s.hubs || [])[Math.floor(Math.random() * Math.max(1, (s.hubs || []).length))];
           return h ? cityById(h.cityId) : cityById(s.company?.hqCityId);
         };
+        // Incident Shield power-up: no bad luck of any kind while active.
+        const shielded = (s.boosts.shieldUntil || 0) > Date.now();
         const pool = [];
         // Goods stolen — lose a small sum if you have cash.
-        if (s.balance > 100000) pool.push(() => {
+        if (s.balance > 100000 && !shielded) pool.push(() => {
           const loss = Math.min(s.balance, Math.round(50000 + Math.random() * 200000));
           const c = anyCity();
           set({ balance: s.balance - loss });
@@ -624,7 +651,7 @@ export const useGame = create(
         });
         // Accident — a random on-road truck breaks down.
         const onRoad = s.trucks.filter(t => t.status === 'delivering' || t.status === 'parked');
-        if (onRoad.length) pool.push(() => {
+        if (onRoad.length && !shielded) pool.push(() => {
           const t = onRoad[Math.floor(Math.random() * onRoad.length)];
           const d = s.deliveries.find(x => x.truckId === t.id);
           set({
@@ -657,6 +684,8 @@ export const useGame = create(
       // passes (see dailyTick), or faster if the player calls a mechanic.
       rollDeliveryIncident() {
         const s = get();
+        // Incident Shield power-up blocks every on-road mishap while active.
+        if ((s.boosts.shieldUntil || 0) > Date.now()) return;
         const freq = s.settings.events || 'rare';
         const chance = INCIDENT_CHANCE[freq] || 0;
         if (chance <= 0 || Math.random() > chance) return;
@@ -1077,9 +1106,12 @@ export const useGame = create(
           km: d.route.roadKm, net: d.econ.net, gross: d.econ.gross, ts: Date.now(),
           hours: Math.round(drivingHours * 10) / 10,
         };
+        // Occasional client gold tip on a finished delivery (~1 in 7).
+        const goldTip = Math.random() < 0.15 ? 2 + Math.floor(Math.random() * 4) : 0;
         set({
           deliveries: s.deliveries.filter(x => x.id !== deliveryId),
           balance: s.balance + d.econ.net + reward,
+          gold: s.gold + goldTip,
           trucks: s.trucks.map(x => x.id === d.truckId ? {
             ...x, status: 'parked', lat: to.lat, lng: to.lng, cityId: to.id,
             fuelPct: d.arriveFuelPct != null ? d.arriveFuelPct : Math.max(4, (x.fuelPct || 100) - 15),
@@ -1114,6 +1146,7 @@ export const useGame = create(
         });
         play('coin', 0.9);
         get().notify('delivery', 'cash-check', `Delivered to ${to.name}: ${inr(d.econ.net)} earned.`);
+        if (goldTip) get().notify('delivery', 'gold', `Happy client at ${to.name} tipped the driver +${goldTip} Gold!`);
         if (contract) get().notify('delivery', 'file-check', `Contract complete! Bonus reward ${inr(reward)}.`);
       },
 
@@ -1417,6 +1450,16 @@ export const useGame = create(
           if (!t) return { ok: false, err: 'No truck under construction selected' };
           set({ gold: s.gold - p.gold, trucks: s.trucks.map(x => x.id === truckId ? { ...x, status: 'parked', buildEndsAt: null } : x) });
           get().notify('truck', 'fast-forward', `${modelById(t.modelId).name} build skipped — ready now!`);
+        } else if (pid === 'contracts') {
+          // Reroll the board: fresh offers replace unclaimed ones; in-progress stay.
+          const { day } = get().gameDay();
+          set({ gold: s.gold - p.gold, contracts: [...s.contracts.filter(c => c.status !== 'available'), ...randomContracts(day)] });
+        } else if (pid === 'shield') {
+          set({ gold: s.gold - p.gold, boosts: { ...s.boosts, shieldUntil: Date.now() + 24 * 3600 * 1000 } });
+        } else if (pid === 'refuel_all') {
+          set({ gold: s.gold - p.gold, trucks: s.trucks.map(t => ({ ...t, fuelPct: 100 })) });
+        } else if (pid === 'service_all') {
+          set({ gold: s.gold - p.gold, trucks: s.trucks.map(t => ({ ...t, condition: 100 })) });
         }
         get().notify('system', 'star-four-points', `${p.name} activated.`);
         return { ok: true };
