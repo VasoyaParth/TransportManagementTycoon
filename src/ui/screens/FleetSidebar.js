@@ -2,7 +2,7 @@
 // Running / Parked / Pending (building+broken), with a one-tap "Depart All"
 // to dispatch every idle truck. Pill-shaped, frosted, Samsung-style.
 import React, { useRef, useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Animated, ScrollView, FlatList, Dimensions } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Animated, FlatList, Dimensions } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import Svg from 'react-native-svg';
 import { C, FONT, SHADOW } from '../theme';
@@ -53,11 +53,13 @@ function fmtEta(sec) {
 // the truck sheet.
 function TripDetails({ delivery, truck }) {
   const now = Date.now();
-  const prog = Math.min(1, Math.max(0, (now - delivery.startedAt) / (delivery.endsAt - delivery.startedAt)));
   const total = delivery.route.roadKm;
-  const kmNow = Math.round(total * prog);
   const from = cityById(delivery.fromCityId), to = cityById(delivery.toCityId);
   const ph = deliveryPhase(delivery, now);
+  // Phase-aware position: km stays at 0 while loading, freezes at the docks,
+  // holds at 100% while unloading — no creeping while the truck is halted.
+  const prog = Math.min(1, Math.max(0, ph.frac));
+  const kmNow = Math.round(total * prog);
   const halted = (delivery.incident && delivery.incident.resolveAt > now);
   const phaseTxt = halted ? 'Halted — incident' : (ph.phase !== 'driving' ? PHASE_LABELS[ph.phase] : null);
   return (
@@ -182,24 +184,25 @@ export default function FleetSidebar({ visible, onClose, onTruckPress, onToast }
           <Text style={st.departTxt}>Depart All ({parkedCount})</Text>
         </Pressable>
 
-        {/* 3 tabs — Running / Parked / Pending (horizontal scroll, no overlap) */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}
-          style={{ flexGrow: 0 }} contentContainerStyle={st.tabBar}>
+        {/* 3 tabs — Running / Parked / Pending. A fixed equal-width row (not a
+            horizontal scroller): each pill gets exactly a third of the drawer,
+            with single-line labels, so nothing squishes, wraps or overlaps. */}
+        <View style={st.tabBar}>
           {GROUPS.map(g => {
             const count = trucks.filter(g.match).length;
             const on = tab === g.key;
             return (
               <Pressable key={g.key} style={[st.tab, on && { backgroundColor: g.color }]}
                 onPress={() => { haptic('light'); if (g.key === 'parked' && tab === 'parked') tapPatientParkerEgg(); setTab(g.key); }}>
-                <Icon name={g.icon} size={15} color={on ? '#fff' : g.color} />
-                <Text style={[st.tabTxt, { color: on ? '#fff' : C.sub }]}>{g.title}</Text>
+                <Icon name={g.icon} size={14} color={on ? '#fff' : g.color} />
+                <Text style={[st.tabTxt, { color: on ? '#fff' : C.sub }]} numberOfLines={1}>{g.title}</Text>
                 <View style={[st.countPill, { backgroundColor: on ? 'rgba(255,255,255,0.25)' : g.color + '22' }]}>
                   <Text style={{ fontSize: 10, fontWeight: '800', color: on ? '#fff' : g.color }}>{count}</Text>
                 </View>
               </Pressable>
             );
           })}
-        </ScrollView>
+        </View>
 
         {(() => {
           const g = GROUPS.find(x => x.key === tab);
@@ -272,12 +275,12 @@ const st = StyleSheet.create({
     backgroundColor: C.green, paddingVertical: 13, borderRadius: 26,
   },
   departTxt: { color: '#fff', fontWeight: '800', fontSize: 14 },
-  tabBar: { flexDirection: 'row', gap: 6, marginTop: 4, paddingRight: 4 },
+  tabBar: { flexDirection: 'row', gap: 6, marginTop: 12 },
   tab: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
-    paddingVertical: 9, paddingHorizontal: 14, borderRadius: 16, backgroundColor: C.bgSoft,
+    flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
+    paddingVertical: 9, paddingHorizontal: 4, borderRadius: 16, backgroundColor: C.bgSoft,
   },
-  tabTxt: { fontSize: 11, fontWeight: '800' },
+  tabTxt: { fontSize: 11, fontWeight: '800', flexShrink: 1 },
   grpHead: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   countPill: { marginLeft: 8, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12, minWidth: 22, alignItems: 'center' },
   row: {

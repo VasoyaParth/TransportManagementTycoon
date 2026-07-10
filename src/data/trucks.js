@@ -426,6 +426,10 @@ export const POWERUPS = [
   { id: 'repair', name: 'Instant Repair', gold: 15, icon: 'wrench', desc: 'Instantly fix a broken truck.' },
   { id: 'double', name: 'Double Revenue', gold: 20, icon: 'cash-multiple', desc: 'Doubles the payout of your next completed delivery.' },
   { id: 'skipbuild', name: 'Skip Build Time', gold: 30, icon: 'fast-forward', desc: 'Instantly finish a truck under construction.' },
+  { id: 'contracts', name: 'Fresh Contracts', gold: 8, icon: 'file-refresh-outline', desc: 'Reroll today’s contract board with brand-new offers.' },
+  { id: 'shield', name: 'Incident Shield', gold: 18, icon: 'shield-check', desc: 'No accidents, thefts, checkposts or breakdowns for 24 real hours.' },
+  { id: 'refuel_all', name: 'Refuel Entire Fleet', gold: 20, icon: 'gas-station-outline', desc: 'Every truck to 100% fuel / charge in one tap.' },
+  { id: 'service_all', name: 'Full Fleet Service', gold: 25, icon: 'car-wrench', desc: 'Restores every truck’s condition to a showroom-fresh 100%.' },
 ];
 
 export const CONTRACT_FLAVORS = [
