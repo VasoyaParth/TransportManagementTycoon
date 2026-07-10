@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Pressable, useWindowDimensions, AppState, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native';
 import { C, FONT, SHADOW, RADIUS } from '../theme';
-import { IconBtn, Icon, Money, Sheet, useToast, Row } from '../components';
+import { IconBtn, Icon, Money, Sheet, useToast, Row, useEasterEggTap } from '../components';
 import MapContainer from '../MapContainer';
 import { useGame, modelById, GAME_HOUR_MS } from '../../store/gameStore';
 import { cityById } from '../../engine/routing';
@@ -51,6 +51,8 @@ export default function GameScreen() {
   const [sidebar, setSidebar] = useState(false);
   const [clock, setClock] = useState({ day: 1, hour: 8 });
   const lastToastN = useRef(null);
+  const tapMoneyEgg = useEasterEggTap('money_gazer', 6);
+  const tapEconomyEgg = useEasterEggTap('number_cruncher', 7);
 
   // ---- Update prompt: check once on load; the download itself happens in the
   // browser (one tap on the pill), which hands the APK to Android's installer.
@@ -154,7 +156,7 @@ export default function GameScreen() {
         <View style={st.hdrPill}>
           <View style={{ flex: 1 }}>
             <Row style={{ alignItems: 'center' }}>
-              <Money value={balance} short size={19} />
+              <Pressable onPress={tapMoneyEgg}><Money value={balance} short size={19} /></Pressable>
               <Pressable onPress={() => { haptic('light'); setModal({ kind: 'powerups' }); }} style={st.goldChip}>
                 <Icon name="gold" size={12} color={C.gold} />
                 <Text style={[FONT.tiny, { fontWeight: '800', color: C.gold, marginLeft: 3 }]}>{gold}</Text>
@@ -217,7 +219,7 @@ export default function GameScreen() {
       {/* ---- Bottom nav ---- */}
       <View style={st.nav}>
         {TABS.map(t => (
-          <Pressable key={t.id} style={st.navItem} onPress={() => { haptic('light'); setTab(t.id); }}>
+          <Pressable key={t.id} style={st.navItem} onPress={() => { haptic('light'); if (t.id === 'economy') tapEconomyEgg(); setTab(t.id); }}>
             <Icon name={t.icon} size={22} color={tab === t.id ? C.blue : C.sub} />
             <Text style={[st.navTxt, tab === t.id && { color: C.blue }]}>{t.label}</Text>
           </Pressable>

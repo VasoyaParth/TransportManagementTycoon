@@ -1,11 +1,11 @@
 // App root — phase routing (splash / onboarding / game) + persistence gate.
 // Fully offline / local — no cloud, no login.
 import React, { useEffect, useState } from 'react';
-import { View, StatusBar, PermissionsAndroid, Platform, AppState } from 'react-native';
+import { StatusBar, PermissionsAndroid, Platform, AppState } from 'react-native';
 import { useGame } from './store/gameStore';
-import { ToastProvider, Skeleton } from './ui/components';
+import { ToastProvider } from './ui/components';
 import { C } from './ui/theme';
-import Splash from './ui/screens/Splash';
+import Splash, { BootSplash } from './ui/screens/Splash';
 import Onboarding from './ui/screens/Onboarding';
 import GameScreen from './ui/screens/GameScreen';
 import { initSound, setSoundEnabled, setMusicVolume, setSfxVolume } from './engine/sound';
@@ -56,13 +56,14 @@ export default function App() {
     }).catch(() => {});
   }, []);
 
+  // Full-brand boot splash while the saved game hydrates from disk — the very
+  // first thing the player sees, so it matches the launcher icon and splash.
   if (!hydrated) {
     return (
-      <View style={{ flex: 1, backgroundColor: C.bg, padding: 24, justifyContent: 'center' }}>
-        <Skeleton h={44} w="60%" style={{ marginBottom: 14 }} />
-        <Skeleton h={16} w="90%" style={{ marginBottom: 8 }} />
-        <Skeleton h={16} w="75%" />
-      </View>
+      <>
+        <StatusBar barStyle="light-content" backgroundColor="#0F1D30" />
+        <BootSplash />
+      </>
     );
   }
 

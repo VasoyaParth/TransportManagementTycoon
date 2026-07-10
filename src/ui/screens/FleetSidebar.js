@@ -6,7 +6,7 @@ import { View, Text, Pressable, StyleSheet, Animated, ScrollView, FlatList, Dime
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import Svg from 'react-native-svg';
 import { C, FONT, SHADOW } from '../theme';
-import { useGame, modelById } from '../../store/gameStore';
+import { useGame, modelById, deliveryPhase, PHASE_LABELS } from '../../store/gameStore';
 import { cityById } from '../../engine/routing';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
@@ -38,6 +38,51 @@ const GROUPS = [
   { key: 'parked', title: 'Parked', icon: 'parking', color: C.blue, match: t => t.status === 'parked' },
   { key: 'pending', title: 'Pending', icon: 'progress-wrench', color: C.amber, match: t => t.status === 'building' || t.status === 'broken' },
 ];
+
+// "2h 21m" / "34m" style countdown for row ETAs.
+function fmtEta(sec) {
+  sec = Math.max(0, Math.round(sec));
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m`;
+  return `${sec}s`;
+}
+
+// Live trip strip for a running truck: origin → destination, current phase,
+// progress bar, km covered and ETA — the details that used to need opening
+// the truck sheet.
+function TripDetails({ delivery, truck }) {
+  const now = Date.now();
+  const prog = Math.min(1, Math.max(0, (now - delivery.startedAt) / (delivery.endsAt - delivery.startedAt)));
+  const total = delivery.route.roadKm;
+  const kmNow = Math.round(total * prog);
+  const from = cityById(delivery.fromCityId), to = cityById(delivery.toCityId);
+  const ph = deliveryPhase(delivery, now);
+  const halted = (delivery.incident && delivery.incident.resolveAt > now);
+  const phaseTxt = halted ? 'Halted — incident' : (ph.phase !== 'driving' ? PHASE_LABELS[ph.phase] : null);
+  return (
+    <View style={{ marginTop: 4 }}>
+      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <Text style={[FONT.tiny, { fontWeight: '700', color: C.text }]} numberOfLines={1}>
+          {from?.name || '?'} → {to?.name || '?'}
+        </Text>
+      </View>
+      {phaseTxt ? (
+        <Text style={[FONT.tiny, { color: halted ? C.red : C.blue, fontWeight: '700' }]} numberOfLines={1}>{phaseTxt}</Text>
+      ) : null}
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3 }}>
+        <View style={st.condTrack}>
+          <View style={[st.condFill, { width: `${Math.round(prog * 100)}%`, backgroundColor: C.green }]} />
+        </View>
+        <Text style={[FONT.tiny, { marginLeft: 6, width: 34, color: C.sub }]}>{Math.round(prog * 100)}%</Text>
+      </View>
+      <Text style={[FONT.tiny, { color: C.sub, marginTop: 2 }]} numberOfLines={1}>
+        {kmNow}/{total} km · ETA {fmtEta((delivery.endsAt - now) / 1000)}
+        {delivery.stops?.length ? ` · ${delivery.stops.length} fuel stop${delivery.stops.length > 1 ? 's' : ''}` : ''}
+      </Text>
+    </View>
+  );
+}
 
 function statusLabel(t) {
   if (t.status === 'delivering') return 'On the road';
@@ -77,6 +122,15 @@ export default function FleetSidebar({ visible, onClose, onTruckPress, onToast }
   const [mounted, setMounted] = useState(visible);
   const [tab, setTab] = useState('running');
   const tapPatientParkerEgg = useEasterEggTap('patient_parker', 3);
+  const tapFleetBossEgg = useEasterEggTap('fleet_boss', 5);
+
+  // 1s tick while the drawer is open so live progress/ETA rows stay current.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!visible) return;
+    const iv = setInterval(() => setTick(x => x + 1), 1000);
+    return () => clearInterval(iv);
+  }, [visible]);
 
   useEffect(() => {
     if (visible) setMounted(true);
@@ -111,10 +165,10 @@ export default function FleetSidebar({ visible, onClose, onTruckPress, onToast }
       </Animated.View>
       <Animated.View style={[st.drawer, SHADOW.pop, { transform: [{ translateX: slide }] }]}>
         <View style={st.head}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+          <Pressable onPress={tapFleetBossEgg} style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
             <Icon name="view-dashboard" size={20} color={C.blue} />
             <Text style={[FONT.h3, { marginLeft: 8 }]}>Fleet Manager</Text>
-          </View>
+          </Pressable>
           <Pressable style={st.closeBtn} onPress={() => { haptic('light'); onClose(); }}>
             <Icon name="close" size={18} color={C.sub} />
           </Pressable>
@@ -167,8 +221,10 @@ export default function FleetSidebar({ visible, onClose, onTruckPress, onToast }
               removeClippedSubviews
               renderItem={({ item: t }) => {
                 const model = modelById(t.modelId);
-                const d = deliveries.find(x => x.truckId === t.id);
-                const to = d ? cityById(d.toCityId) : cityById(t.cityId);
+                const d = t.status === 'delivering' ? deliveries.find(x => x.truckId === t.id) : null;
+                const here = cityById(t.cityId);
+                const fuel = Math.round(t.fuelPct == null ? 100 : t.fuelPct);
+                const buildLeft = t.status === 'building' ? Math.max(0, (t.buildEndsAt - Date.now()) / 1000) : 0;
                 return (
                   <Pressable style={st.row} onPress={() => { haptic('light'); onTruckPress(t); onClose(); }}>
                     <View style={[st.rowIcon, { backgroundColor: g.color + '18' }]}>
@@ -176,7 +232,16 @@ export default function FleetSidebar({ visible, onClose, onTruckPress, onToast }
                     </View>
                     <View style={{ flex: 1, marginLeft: 10 }}>
                       <Text style={[FONT.body, { fontWeight: '700' }]} numberOfLines={1}>{t.customName || model.name}</Text>
-                      <Text style={FONT.tiny} numberOfLines={1}>{statusLabel(t)}{to ? ` · ${to.name}` : ''}</Text>
+                      {d ? (
+                        // Running: full live trip strip (route, phase, progress, ETA).
+                        <TripDetails delivery={d} truck={t} />
+                      ) : (
+                        <Text style={FONT.tiny} numberOfLines={1}>
+                          {statusLabel(t)}
+                          {t.status === 'building' ? ` · ready in ${fmtEta(buildLeft)}` : here ? ` · ${here.name}` : ''}
+                          {t.status === 'parked' ? ` · ${fuel}% fuel · ~${Math.round((fuel / 100) * model.range)} km range` : ''}
+                        </Text>
+                      )}
                       <ConditionBar truck={t} onService={() => doService(t)} />
                     </View>
                     <Icon name="chevron-right" size={18} color={C.faint} />

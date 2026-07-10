@@ -14,7 +14,10 @@ import { computeRoute, planFuelStops, cityById } from '../engine/routing';
 import { deliveryEconomics, tripDurationSec, inr, REAL_SEC_PER_GAME_HOUR } from '../engine/economy';
 import { play, setSoundEnabled, setMusicVolume, setSfxVolume } from '../engine/sound';
 import { setHapticsEnabled, setHapticsIntensity } from '../engine/haptics';
-import { initNotifications, pushNow, scheduleAt, setNotificationsEnabled } from '../engine/notify';
+import { initNotifications, pushNow, scheduleAt, setNotificationsEnabled, flavor } from '../engine/notify';
+
+// Random-flavoured OS push: picks a fresh funny line each time.
+const pushFlavor = (kind, vars) => { const f = flavor(kind, vars); pushNow(f.title, f.body); };
 
 export const GAME_HOUR_MS = 3600000; // 1 in-game hour = 1 real minute -> 1 day = 24 min
 const SALARY_EVERY_DAYS = 30;
@@ -230,8 +233,72 @@ export const EASTER_EGGS = [
   { id: 'nice_try', title: 'Nice Try', hint: 'Reading the warning label a little too closely.', where: 'Tap the Danger Zone warning text in Settings → Gameplay 6 times fast (doesn’t actually reset anything).' },
   { id: 'port_master', title: 'Harbour Master', hint: 'The sea rewards those who keep checking the docks.', where: 'Tap the anchor (ports) button on the map 6 times fast.' },
   { id: 'fuel_sniffer', title: 'Fuel Sniffer', hint: 'Always hunting for the cheapest litre.', where: 'Tap the fuel-station toggle on the map 7 times fast.' },
+  { id: 'fleet_boss', title: 'Fleet Boss', hint: 'The manager who loves their own title.', where: 'Tap the "Fleet Manager" title in the fleet drawer 5 times fast.' },
+  { id: 'inbox_zero', title: 'Inbox Zero', hint: 'Obsessed with a clean inbox.', where: 'Tap "Mark all read" in Notifications 5 times fast.' },
+  { id: 'money_gazer', title: 'Money Gazer', hint: 'Staring at your balance won’t grow it... or will it?', where: 'Tap your cash balance in the top header 6 times fast.' },
+  { id: 'number_cruncher', title: 'Number Cruncher', hint: 'Some people really love spreadsheets.', where: 'Tap the "Economy" tab in the bottom bar 7 times fast.' },
+  { id: 'speed_demon', title: 'Speed Demon', hint: 'Life in the fast lane, always.', where: 'Tap "Very Fast" game speed in Settings → Gameplay 5 times fast.' },
+  { id: 'meet_the_maker', title: 'Meet the Maker', hint: 'Say hello to the person behind the wheel of the code.', where: 'Tap the Lead Developer card in Settings → About 7 times fast.' },
 ];
 const EASTER_EGG_REWARD = { cash: 1000000, gold: 15 }; // ₹10 lakhs + 15 Gold, per egg, one-time
+
+// ---------- Achievements (Steam-style, 5 tiers per track) ----------
+// Every track is measured from state that already exists — nothing new to
+// count. Each of the 5 tiers pays a one-time gold reward when first reached
+// (checked by syncAchievements, which the 1s game loop already drives).
+export const ACHIEVEMENT_TIERS = ['Beginner', 'Amateur', 'Professional', 'Expert', 'Legend'];
+export const ACHIEVEMENT_TIER_GOLD = [5, 10, 20, 40, 80];
+export const ACHIEVEMENTS = [
+  { id: 'road_warrior', title: 'Road Warrior', icon: 'highway', unit: 'km',
+    desc: 'Total kilometres your fleet has driven.', levels: [500, 2500, 10000, 50000, 250000] },
+  { id: 'delivery_master', title: 'Delivery Master', icon: 'package-variant-closed-check', unit: 'deliveries',
+    desc: 'Deliveries completed across the whole company.', levels: [5, 25, 100, 500, 2000] },
+  { id: 'freight_fortune', title: 'Freight Fortune', icon: 'cash-multiple', unit: '₹',
+    desc: 'Lifetime freight revenue earned.', levels: [1000000, 10000000, 50000000, 250000000, 1000000000] },
+  { id: 'fleet_collector', title: 'Fleet Collector', icon: 'truck', unit: 'trucks',
+    desc: 'Trucks owned at the same time.', levels: [2, 5, 10, 20, 40] },
+  { id: 'dream_team', title: 'Dream Team', icon: 'account-group', unit: 'staff',
+    desc: 'People on your payroll.', levels: [2, 5, 10, 20, 35] },
+  { id: 'garage_mogul', title: 'Garage Mogul', icon: 'garage', unit: 'hubs',
+    desc: 'Garages & hubs owned (HQ counts).', levels: [2, 4, 7, 12, 18] },
+  { id: 'globe_trotter', title: 'Globe Trotter', icon: 'earth', unit: 'countries',
+    desc: 'Countries unlocked for delivery.', levels: [2, 3, 4, 5, 6] },
+  { id: 'gem_hunter', title: 'Gem Hunter', icon: 'diamond-stone', unit: 'gems',
+    desc: 'Hidden easter eggs discovered.', levels: [1, 4, 8, 13, 18] },
+  { id: 'gold_reserve', title: 'Gold Reserve', icon: 'gold', unit: 'gold',
+    desc: 'Gold held in the vault at once.', levels: [150, 300, 600, 1200, 2500] },
+  // The funny ones — badges of honour nobody exactly *wants* to earn.
+  { id: 'crash_test_star', title: 'Crash Test Star', icon: 'car-brake-alert', unit: 'incidents',
+    desc: 'Road incidents survived. Your insurance agent knows you by first name.', levels: [1, 5, 15, 40, 100] },
+  { id: 'bandit_magnet', title: 'Bandit Magnet', icon: 'shield-alert', unit: 'thefts',
+    desc: 'Cargo thefts endured. The bandits send you Diwali cards now.', levels: [1, 3, 8, 20, 50] },
+  { id: 'fuel_baron', title: 'Fuel Baron', icon: 'gas-station', unit: '₹',
+    desc: 'Money burned at the pump. The petrol bunk named a chair after you.', levels: [100000, 1000000, 5000000, 25000000, 100000000] },
+  { id: 'sea_legs', title: 'Sea Legs', icon: 'ferry', unit: 'ferries',
+    desc: 'Ferries boarded. Your trucks secretly wanted to be boats.', levels: [1, 5, 15, 40, 100] },
+  { id: 'passport_stamps', title: 'Passport Stamps', icon: 'passport', unit: 'borders',
+    desc: 'Borders crossed. Customs officers wave like old friends.', levels: [1, 5, 15, 40, 100] },
+];
+// Current metric value for a track, computed from live state.
+export function achievementValue(s, id) {
+  switch (id) {
+    case 'road_warrior': return Math.floor(s.stats.km);
+    case 'delivery_master': return s.stats.deliveries;
+    case 'freight_fortune': return Math.floor(s.stats.revenue);
+    case 'fleet_collector': return s.trucks.length;
+    case 'dream_team': return s.staff.length;
+    case 'garage_mogul': return (s.hubs || []).length;
+    case 'globe_trotter': return (s.unlockedCountries || ['IN']).length;
+    case 'gem_hunter': return (s.easterEggs?.found || []).length;
+    case 'gold_reserve': return s.gold;
+    case 'crash_test_star': return s.stats.incidents || 0;
+    case 'bandit_magnet': return s.stats.thefts || 0;
+    case 'fuel_baron': return Math.floor(s.stats.fuelSpend || 0);
+    case 'sea_legs': return s.stats.ferries || 0;
+    case 'passport_stamps': return s.stats.borders || 0;
+    default: return 0;
+  }
+}
 
 function randomContracts(dayNumber, count = CONTRACTS_PER_DAY) {
   const out = [];
@@ -299,7 +366,7 @@ const initialState = {
   campaigns: [], // {id, campaignId, startedAt, endsAt}
   notifications: [],
   boosts: { speedUntil: 0, doubleNext: false },
-  stats: { revenue: 0, fuelSpend: 0, deliveries: 0, km: 0 },
+  stats: { revenue: 0, fuelSpend: 0, deliveries: 0, km: 0, incidents: 0, thefts: 0, ferries: 0, borders: 0 },
   clockStart: 0, // real ms when day 1 hour 0 began
   lastSalaryDay: 0,
   lastContractDay: 0,
@@ -316,6 +383,7 @@ const initialState = {
   },
   partners: [], // {code, name, since}
   easterEggs: { found: [] }, // ids of discovered hidden gems (persisted, one-time rewards)
+  achievements: { unlocked: {} }, // {"road_warrior:2": ts} — track:tierIndex reached (persisted)
 };
 
 export const useGame = create(
@@ -417,10 +485,36 @@ export const useGame = create(
         get().dailyTick();
       },
 
+      // Award any achievement tiers newly reached — one-time gold + a notify
+      // per tier. Cheap (a handful of comparisons), driven by the 1s loop.
+      syncAchievements() {
+        const s = get();
+        const unlocked = s.achievements?.unlocked || {};
+        let patch = null, goldWon = 0;
+        for (const a of ACHIEVEMENTS) {
+          const v = achievementValue(s, a.id);
+          for (let tier = 0; tier < a.levels.length; tier++) {
+            const key = `${a.id}:${tier}`;
+            if (v >= a.levels[tier] && !unlocked[key]) {
+              patch = patch || { ...unlocked };
+              patch[key] = Date.now();
+              goldWon += ACHIEVEMENT_TIER_GOLD[tier];
+              get().notify('system', 'trophy',
+                `Achievement unlocked — ${a.title} · ${ACHIEVEMENT_TIERS[tier]} (${a.levels[tier].toLocaleString()} ${a.unit}). +${ACHIEVEMENT_TIER_GOLD[tier]} Gold!`);
+            }
+          }
+        }
+        if (patch) {
+          set({ achievements: { unlocked: patch }, gold: get().gold + goldWon });
+          play('coin', 0.8);
+        }
+      },
+
       // Runs every second from the game loop; also on load.
       dailyTick() {
         const s = get();
         if (s.phase !== 'game') return;
+        get().syncAchievements();
         const now = Date.now();
         const { day } = get().gameDay();
         // Monthly running costs: staff salaries + garage maintenance (non-HQ).
@@ -526,7 +620,7 @@ export const useGame = create(
           set({ balance: s.balance - loss });
           if (c) pushMapEvent('theft', 'shield-alert', '#C0392B', c.lat, c.lng, 'Cargo theft');
           get().notify('system', 'shield-alert', `Cargo theft! Bandits stole goods worth ${inr(loss)} near ${c ? c.name : 'a depot'}.`);
-          pushNow('Uh oh — cargo theft!', `Bandits made off with ${inr(loss)} of goods near ${c ? c.name : 'a depot'}.`);
+          pushFlavor('theft', { amount: inr(loss), city: c ? c.name : 'a depot' });
         });
         // Accident — a random on-road truck breaks down.
         const onRoad = s.trucks.filter(t => t.status === 'delivering' || t.status === 'parked');
@@ -539,7 +633,7 @@ export const useGame = create(
           });
           pushMapEvent('accident', 'car-brake-alert', '#E67E22', t.lat, t.lng, 'Breakdown');
           get().notify('truck', 'car-brake-alert', `Accident! ${modelById(t.modelId).name} broke down and needs repair.`);
-          pushNow('Breakdown on the road!', `${modelById(t.modelId).name} conked out and needs a mechanic. Send help!`);
+          pushFlavor('breakdown', { truck: modelById(t.modelId).name });
         });
         // Fuel price spike — informational.
         pool.push(() => get().notify('system', 'gas-station', 'Fuel prices spiked nationwide — watch your margins today.'));
@@ -550,7 +644,7 @@ export const useGame = create(
           set({ balance: get().balance + bonus });
           if (c) pushMapEvent('windfall', 'gift', '#12A150', c.lat, c.lng, 'Client bonus');
           get().notify('system', 'gift', `Loyal client bonus! You received ${inr(bonus)}${c ? ` in ${c.name}` : ''}.`);
-          pushNow('Surprise bonus!', `A loyal client just tipped you ${inr(bonus)}${c ? ` in ${c.name}` : ''}. Cha-ching!`);
+          pushFlavor('windfall', { amount: inr(bonus), city: c ? c.name : null });
         });
         pool[Math.floor(Math.random() * pool.length)]();
       },
@@ -585,6 +679,13 @@ export const useGame = create(
         const penalty = Math.min(s.balance, Math.round((d.econ.gross || d.econ.net || 0) * penaltyPct));
         const incident = { type, startedAt: now, resolveAt: now + delaySec * 1000, penalty, mechanicCalled: false };
         set({
+          // Lifetime incident counters feed the achievement tracks (old saves
+          // may lack these fields, hence the || 0).
+          stats: {
+            ...s.stats,
+            incidents: (s.stats.incidents || 0) + 1,
+            thefts: (s.stats.thefts || 0) + (type === 'theft' ? 1 : 0),
+          },
           balance: s.balance - penalty,
           deliveries: s.deliveries.map(x => x.id === d.id ? { ...x, incident, endsAt: x.endsAt + delaySec * 1000 } : x),
           trucks: meta.conditionHit
@@ -634,8 +735,11 @@ export const useGame = create(
         };
         set({ balance: s.balance - model.price, trucks: [...s.trucks, truck] });
         get().notify('truck', 'factory', `${model.name} ordered — building at HQ (${model.build}s).`);
-        scheduleAt(truck.buildEndsAt, `${truck.id}-built`, 'Truck ready to roll!',
-          `${model.name} just rolled off the line, fuelled up and raring to go.`);
+        {
+          const hqCity = cityById(s.company?.hqCityId);
+          const f = flavor('truckReady', { truck: model.name, city: hqCity ? hqCity.name : 'HQ' });
+          scheduleAt(truck.buildEndsAt, `${truck.id}-built`, f.title, f.body);
+        }
         return { ok: true };
       },
 
@@ -914,11 +1018,13 @@ export const useGame = create(
         const span = d.endsAt - d.startedAt;
         (p.stops || []).forEach((stop, i) => {
           const ts = d.startedAt + span * (Math.min(1, (stop.atKm || 0) / Math.max(1, p.route.roadKm)));
-          scheduleAt(ts, `${d.id}-fuel-${i}`, 'Pit stop!',
-            `${truckName} is refuelling${stop.station ? ` at ${stop.station.name}` : ' en route'}. Chai time for the driver.`);
+          const f = flavor('fuelStop', { truck: truckName, station: stop.station?.name });
+          scheduleAt(ts, `${d.id}-fuel-${i}`, f.title, f.body);
         });
-        scheduleAt(d.endsAt, `${d.id}-done`, 'Delivery complete!',
-          `Cha-ching! ${truckName} reached ${to.name}. Payment is in your account.`);
+        {
+          const f = flavor('deliveryDone', { truck: truckName, city: to.name });
+          scheduleAt(d.endsAt, `${d.id}-done`, f.title, f.body);
+        }
         return { ok: true, delivery: d };
       },
 
@@ -993,10 +1099,14 @@ export const useGame = create(
             ...logEntry, truckName: t ? modelById(t.modelId).name : '',
           }, ...s.history].slice(0, 30),
           stats: {
+            ...s.stats,
             revenue: s.stats.revenue + d.econ.gross + reward,
             fuelSpend: s.stats.fuelSpend + d.econ.fuel,
             deliveries: s.stats.deliveries + 1,
             km: s.stats.km + d.route.roadKm,
+            // Achievement feed: sea hops sailed & borders crossed this trip.
+            ferries: (s.stats.ferries || 0) + ((d.route.ferrySegments || (d.route.ferrySegment ? [d.route.ferrySegment] : [])).length),
+            borders: (s.stats.borders || 0) + (d.route.bordersCrossed || 0),
           },
           contracts: contract
             ? s.contracts.map(c => c.id === contract.id ? { ...c, status: 'done', rewardPaid: reward } : c)
