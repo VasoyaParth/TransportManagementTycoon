@@ -61,6 +61,17 @@ export const SLOT_SYMBOLS = [
   { id: 'seven', icon: 'numeric-7-circle', weight: 4 },
 ];
 const SLOT_JACKPOT = { cherry: 2, lemon: 3, bell: 4, clover: 6, gem: 10, seven: 20 };
+
+// Golden Convoy symbols — `count` copies of each go into the 9-container bag,
+// `value` is the Gold tier (pair pays value, three-of-a-kind pays value × 3).
+export const CONVOY_SYMBOLS = [
+  { id: 'diesel', icon: 'barrel', name: 'Diesel', value: 1, count: 3, color: '#8C6D3F' },
+  { id: 'tyre', icon: 'tire', name: 'Tyre', value: 2, count: 3, color: '#3E4650' },
+  { id: 'horn', icon: 'bullhorn', name: 'Air Horn', value: 3, count: 2, color: '#B4562F' },
+  { id: 'gold', icon: 'gold', name: 'Gold Bar', value: 5, count: 2, color: '#B8860B' },
+  { id: 'gem', icon: 'diamond-stone', name: 'Diamond', value: 8, count: 1, color: '#2563EB' },
+  { id: 'key', icon: 'key-variant', name: 'Golden Key', value: 12, count: 1, color: '#7D3C98' },
+];
 const clampSlot = v => Math.max(0, Math.min(25, Math.round(v))); // jackpot can exceed scratch's 5 cap
 function rollSlotSymbol() {
   const total = SLOT_SYMBOLS.reduce((a, x) => a + x.weight, 0);
@@ -89,21 +100,31 @@ const MECHANIC_DELAY_CUT = 0.6; // mechanic call-out shaves this fraction off th
 // delay (physical breakdowns only — you can't "repair" a theft or a police
 // checkpost, those you just accept and ride out). Weights sum to 1.
 export const INCIDENT_TYPES = [
-  { id: 'accident', weight: 0.28, title: 'Accident on the road!', icon: 'car-brake-alert', color: '#DC3D43',
+  {
+    id: 'accident', weight: 0.28, title: 'Accident on the road!', icon: 'car-brake-alert', color: '#DC3D43',
     mechanic: true, conditionHit: [8, 18], delayMin: 600, delayMax: 2400, penaltyMin: 0.04, penaltyMax: 0.12,
-    notify: (name, p) => `${name} was clipped on the highway — ${inr(p)} in damage. A mechanic can get it moving faster.` },
-  { id: 'flat', weight: 0.24, title: 'Tyre burst!', icon: 'car-tire-alert', color: '#D97706',
+    notify: (name, p) => `${name} was clipped on the highway — ${inr(p)} in damage. A mechanic can get it moving faster.`
+  },
+  {
+    id: 'flat', weight: 0.24, title: 'Tyre burst!', icon: 'car-tire-alert', color: '#D97706',
     mechanic: true, conditionHit: [3, 8], delayMin: 300, delayMax: 1200, penaltyMin: 0.01, penaltyMax: 0.04,
-    notify: (name, p) => `${name} blew a tyre — ${inr(p)} for a roadside replacement. A mechanic can speed it up.` },
-  { id: 'theft', weight: 0.2, title: 'Cargo theft in transit!', icon: 'shield-alert', color: '#7D3C98',
+    notify: (name, p) => `${name} blew a tyre — ${inr(p)} for a roadside replacement. A mechanic can speed it up.`
+  },
+  {
+    id: 'theft', weight: 0.2, title: 'Cargo theft in transit!', icon: 'shield-alert', color: '#7D3C98',
     mechanic: false, conditionHit: null, delayMin: 600, delayMax: 1800, penaltyMin: 0.05, penaltyMax: 0.12,
-    notify: (name, p) => `Bandits grabbed part of ${name}'s cargo — lost ${inr(p)}. Nothing to fix; the driver carries on.` },
-  { id: 'checkpost', weight: 0.16, title: 'Police checkpost', icon: 'police-badge', color: '#2563EB',
+    notify: (name, p) => `Bandits grabbed part of ${name}'s cargo — lost ${inr(p)}. Nothing to fix; the driver carries on.`
+  },
+  {
+    id: 'checkpost', weight: 0.16, title: 'Police checkpost', icon: 'police-badge', color: '#2563EB',
     mechanic: false, conditionHit: null, delayMin: 240, delayMax: 900, penaltyMin: 0.01, penaltyMax: 0.03,
-    notify: (name, p) => `${name} pulled over for papers — ${inr(p)} in fines/chai-pani and a short wait.` },
-  { id: 'weather', weight: 0.12, title: 'Heavy weather ahead', icon: 'weather-pouring', color: '#0E7C86',
+    notify: (name, p) => `${name} pulled over for papers — ${inr(p)} in fines/chai-pani and a short wait.`
+  },
+  {
+    id: 'weather', weight: 0.12, title: 'Heavy weather ahead', icon: 'weather-pouring', color: '#0E7C86',
     mechanic: false, conditionHit: null, delayMin: 480, delayMax: 1500, penaltyMin: 0, penaltyMax: 0.01,
-    notify: (name) => `${name} slowed to a crawl in a downpour — waiting it out safely.` },
+    notify: (name) => `${name} slowed to a crawl in a downpour — waiting it out safely.`
+  },
 ];
 export const incidentMeta = id => INCIDENT_TYPES.find(x => x.id === id) || INCIDENT_TYPES[0];
 
@@ -1130,7 +1151,8 @@ export const useGame = create(
           spinLeft: Math.max(0, DAILY_PLAYS - g.spinUsed),
           diceLeft: Math.max(0, DAILY_PLAYS - (g.diceUsed || 0)),
           slotLeft: Math.max(0, DAILY_PLAYS - (g.slotUsed || 0)),
-          scratchUsed: g.scratchUsed, spinUsed: g.spinUsed, diceUsed: g.diceUsed || 0, slotUsed: g.slotUsed || 0,
+          convoyLeft: Math.max(0, DAILY_PLAYS - (g.convoyUsed || 0)),
+          scratchUsed: g.scratchUsed, spinUsed: g.spinUsed, diceUsed: g.diceUsed || 0, slotUsed: g.slotUsed || 0, convoyUsed: g.convoyUsed || 0,
         };
       },
       _bumpGame(kind) {
@@ -1171,8 +1193,44 @@ export const useGame = create(
         } else if (seg.type === 'double') {
           set({ boosts: { ...get().boosts, doubleNext: true } });
         }
-        get().notify('system', 'diamond-stone', `Lucky spin: ${seg.label}!`);
+        // No notify() here — the toast/notification would spoil the prize
+        // while the wheel is still spinning. The UI calls revealGameResult()
+        // once the animation lands.
         return { ok: true, index, prize: seg.type, label: seg.label, left: t.spinLeft - 1 };
+      },
+
+      // Called by a mini-game's UI AFTER its reveal animation finishes, so the
+      // notification never leaks the result early.
+      revealGameResult(icon, message) { get().notify('system', icon, message); },
+
+      // Golden Convoy: 9 sealed containers, pick 3. Matching symbols pay by
+      // tier — three-of-a-kind pays triple the symbol value, a pair pays it
+      // once, no match pays 1 consolation Gold. Board is generated up front;
+      // the reveal (and notification) happens in the UI, tap by tap.
+      playConvoy() {
+        const t = get().gamesToday();
+        if (t.convoyLeft <= 0) return { ok: false, err: 'No convoy picks left today — come back tomorrow!' };
+        const bag = [];
+        CONVOY_SYMBOLS.forEach(sym => { for (let i = 0; i < sym.count; i++) bag.push(sym.id); });
+        for (let i = bag.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[bag[i], bag[j]] = [bag[j], bag[i]]; }
+        const board = bag.slice(0, 9);
+        set({ _convoyBoard: board });
+        get()._bumpGame('convoyUsed');
+        return { ok: true, board, left: t.convoyLeft - 1 };
+      },
+      claimConvoy(indices) {
+        const s = get();
+        const board = s._convoyBoard;
+        if (!board || !Array.isArray(indices) || new Set(indices).size !== 3) return { ok: false, err: 'Pick 3 containers first' };
+        const picked = indices.map(i => board[i]).filter(Boolean);
+        const counts = {};
+        picked.forEach(id => { counts[id] = (counts[id] || 0) + 1; });
+        const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+        const sym = CONVOY_SYMBOLS.find(x => x.id === best[0]);
+        const reward = best[1] >= 3 ? sym.value * 3 : best[1] === 2 ? sym.value : 1;
+        set({ gold: s.gold + reward, _convoyBoard: null });
+        if (reward > 1) play('coin', 0.9);
+        return { ok: true, reward, matched: best[1], symbol: sym.id };
       },
 
       // Dice roll: roll two dice, doubles pay out big, otherwise sum → small Gold.
@@ -1198,12 +1256,13 @@ export const useGame = create(
         const pairId = !isJackpot ? reels.find((v, i) => reels.indexOf(v) !== i) : null;
         const reward = isJackpot ? clampSlot(SLOT_JACKPOT[reels[0]]) : pairId ? 1 : 0;
         get()._bumpGame('slotUsed');
-        if (reward > 0) { set({ gold: get().gold + reward }); play('coin', 0.8); }
-        get().notify('system', 'slot-machine',
-          isJackpot ? `Slot Machine JACKPOT! ${reels[0]} ×3 → +${reward} Gold!`
-            : reward > 0 ? `Slot Machine: pair of ${pairId} → +${reward} Gold.`
-              : 'Slot Machine: no match — try again!');
-        return { ok: true, reels, isJackpot, reward, left: t.slotLeft - 1 };
+        if (reward > 0) set({ gold: get().gold + reward });
+        // Notification + coin sound fire from the UI after the reels stop
+        // (revealGameResult) so the result isn't spoiled mid-animation.
+        const message = isJackpot ? `Slot Machine JACKPOT! ${reels[0]} ×3 → +${reward} Gold!`
+          : reward > 0 ? `Slot Machine: pair of ${pairId} → +${reward} Gold.`
+            : 'Slot Machine: no match — try again!';
+        return { ok: true, reels, isJackpot, reward, message, left: t.slotLeft - 1 };
       },
 
       // ---------- gold exchange ----------
@@ -1283,7 +1342,7 @@ export const useGame = create(
           balance: s.balance + EASTER_EGG_REWARD.cash,
           gold: s.gold + EASTER_EGG_REWARD.gold,
         });
-        get().notify('system', 'diamond-stone', `Hidden gem found — "${egg.title}"! +₹1,00,00,000 & +${EASTER_EGG_REWARD.gold} Gold.`);
+        get().notify('system', 'diamond-stone', `Hidden gem found — "${egg.title}"! +₹1,00,00,00 & +${EASTER_EGG_REWARD.gold} Gold.`);
         play('coin', 1);
         return { ok: true, egg, reward: EASTER_EGG_REWARD, foundCount: found.length + 1, total: EASTER_EGGS.length };
       },
