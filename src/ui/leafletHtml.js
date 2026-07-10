@@ -101,19 +101,31 @@ function boot(){
   var hqMarker=null, truckMarkers={}, routeLines={}, cityLayer=L.layerGroup().addTo(map),
       stationLayer=L.layerGroup(), citiesOn=true, stationsOn=false;
 
-  // HQ — big building tower icon, anchored at its base.
-  hqMarker = L.marker([DATA.hq.lat,DATA.hq.lng],{icon:L.divIcon({className:'',
-    html:'<div class="hq-marker">'+hqSvg()+'</div>',iconSize:[44,48],iconAnchor:[22,44]}),zIndexOffset:1000})
-    .addTo(map).bindPopup('<b>'+DATA.companyName+'</b><br>HQ — '+DATA.hq.name);
+  // (zf() below is hoisted — shared marker zoom factor for HQ/hubs/trucks.)
+
+  // HQ — big building tower icon, anchored at its base, scaled with zoom.
+  function plotHQ(){
+    var k=zf();
+    var icon=L.divIcon({className:'',
+      html:'<div class="hq-marker" style="transform:scale('+k+');transform-origin:22px 44px">'+hqSvg()+'</div>',
+      iconSize:[44,48],iconAnchor:[22,44]});
+    if(hqMarker){ hqMarker.setIcon(icon); }
+    else hqMarker=L.marker([DATA.hq.lat,DATA.hq.lng],{icon:icon,zIndexOffset:1000})
+      .addTo(map).bindPopup('<b>'+DATA.companyName+'</b><br>HQ — '+DATA.hq.name);
+  }
+  plotHQ();
 
   // Purchased garages/hubs — distinct small garage buildings, live-updatable.
-  var hubLayer=L.layerGroup().addTo(map);
+  var hubLayer=L.layerGroup().addTo(map), lastHubs=DATA.hubs||[];
   function plotHubs(hubs){
+    lastHubs=hubs||lastHubs;
     hubLayer.clearLayers();
-    (hubs||[]).forEach(function(h){
+    var k=zf();
+    (lastHubs||[]).forEach(function(h){
       if(h.hq) return;
       hubLayer.addLayer(L.marker([h.lat,h.lng],{icon:L.divIcon({className:'',
-        html:'<div class="hub-marker">'+hubSvg()+'</div>',iconSize:[30,26],iconAnchor:[15,24]}),zIndexOffset:900})
+        html:'<div class="hub-marker" style="transform:scale('+k+');transform-origin:15px 24px">'+hubSvg()+'</div>',
+        iconSize:[30,26],iconAnchor:[15,24]}),zIndexOffset:900})
         .bindPopup('<b>'+h.name+'</b><br>Garage — free refuel & fast-travel'));
     });
   }
@@ -160,7 +172,10 @@ function boot(){
     });
   }
   plotCities();
-  map.on('zoomend', plotCities);
+  map.on('zoomend', function(){
+    plotCities(); plotHQ(); plotHubs();
+    lastTrucks.forEach(setTruck); // re-render at the new zoom scale factor
+  });
   window.setVisibleCountries=function(arr){ allowedCountries = arr && arr.length ? arr : null; plotCities(); };
   window.setDiscovered=function(ids){ discovered={}; (ids||[]).forEach(function(id){ discovered[id]=1; }); plotCities(); };
 
@@ -178,6 +193,10 @@ function boot(){
   }
   map.on('zoomend moveend',function(){ if(stationsOn) renderStations(); });
 
+  // Marker zoom factor: markers shrink as you zoom out and grow (capped) as
+  // you zoom in, instead of a fixed 40px that dwarfs the whole country view.
+  function zf(){ var z=map.getZoom(); return Math.max(0.35, Math.min(1.25, (z-3)/4)); }
+  var lastTrucks=[];
   function setTruck(t){
     var accent = t.status==='delivering'?'#0E9F5B':t.status==='building'?'#D97706':t.status==='broken'?'#DC3D43':'#9DB2D6';
     var color = t.color || '#3A5A8C';
@@ -213,6 +232,7 @@ function boot(){
         +'background:'+badgeColor+';border:1.5px solid #fff;color:#fff;font-size:10px;font-weight:700;'
         +'line-height:15px;text-align:center">'+(t.incidentType==='accident'?'!':'$')+'</div></div>';
     }
+    html='<div style="transform:scale('+zf()+');transform-origin:'+(w/2)+'px '+anchorY+'px">'+html+'</div>';
     var icon=L.divIcon({className:'',html:html,iconSize:[w,h],iconAnchor:[w/2,anchorY]});
     if(truckMarkers[t.id]){ truckMarkers[t.id].setIcon(icon); truckMarkers[t.id].setLatLng([t.lat,t.lng]); }
     else{
@@ -246,6 +266,7 @@ function boot(){
   // Apply live state pushed from RN
   window.applyState=function(s){
     var live={};
+    lastTrucks=s.trucks||[];
     (s.trucks||[]).forEach(function(t){ live[t.id]=1; setTruck(t); });
     Object.keys(truckMarkers).forEach(function(id){ if(!live[id]){ map.removeLayer(truckMarkers[id]); delete truckMarkers[id]; }});
     var liveR={};

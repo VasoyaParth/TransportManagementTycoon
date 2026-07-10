@@ -11,7 +11,7 @@ import { pointAlong } from '../engine/geo';
 import { C } from './theme';
 import { useGame, modelById, deliveryPhase } from '../store/gameStore';
 import { cityById, ferryPorts } from '../engine/routing';
-import { statusMeta } from './components';
+import { statusMeta, useEasterEggTap } from './components';
 import { truckSvgString, truckShapes, bodyTypeFor, defaultBodyColor, headlightFor, isNightHour, ferrySvgString } from './truckArt';
 
 const CITY_DATA = CITIES.map(c => ({ id: c.id, name: c.name, state: c.state, lat: c.lat, lng: c.lng, tier: c.tier, country: c.country || 'IN' }));
@@ -19,6 +19,8 @@ const STATION_DATA = STATIONS.map(s => ({ lat: s.lat, lng: s.lng, type: s.type, 
 const PORT_DATA = ferryPorts();
 
 export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focus, onTruckTap, onReady, onOffline }) {
+  const tapPortEgg = useEasterEggTap('port_master', 6);
+  const tapFuelEgg = useEasterEggTap('fuel_sniffer', 7);
   const ref = useRef(null);
   const company = useGame(s => s.company);
   const trucks = useGame(s => s.trucks);
@@ -159,9 +161,9 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
       )}
       <View style={st.controls}>
         <Ctl icon="crosshairs-gps" onPress={() => inject('window.centerHQ()')} />
-        <Ctl icon="gas-station" onPress={() => inject('window.toggleStations()')} />
+        <Ctl icon="gas-station" onPress={() => { inject('window.toggleStations()'); tapFuelEgg(); }} />
         <Ctl icon="city-variant-outline" onPress={() => inject('window.toggleCities()')} />
-        <Ctl icon="anchor" onPress={() => inject('window.togglePorts()')} />
+        <Ctl icon="anchor" onPress={() => { inject('window.togglePorts()'); tapPortEgg(); }} />
       </View>
     </View>
   );

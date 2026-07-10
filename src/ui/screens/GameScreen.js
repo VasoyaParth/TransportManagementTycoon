@@ -1,7 +1,7 @@
 // Main game view: header (company, clock, money), full-screen India map,
 // bottom navigation into dashboard tabs, and all modal flows.
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, Pressable, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, Pressable, useWindowDimensions, AppState } from 'react-native';
 import { SafeAreaView } from 'react-native';
 import { C, FONT, SHADOW, RADIUS } from '../theme';
 import { IconBtn, Icon, Money, Sheet, useToast, Row } from '../components';
@@ -58,10 +58,13 @@ export default function GameScreen() {
   const beginUpdate = () => { if (update?.apkUrl) { startDownload(update.apkUrl, update.version); haptic('light'); } };
 
   // ---- Game loop: 1s tick — finish builds/deliveries, day events ----
+  // Fully frozen while the app is backgrounded (home button / screen off):
+  // no timers burn battery, and because every delivery/build stores absolute
+  // timestamps, settleOffline() catches everything up the moment you return —
+  // trucks "kept driving" while the app was asleep, without the app running.
   useEffect(() => {
-    const s = useGame.getState();
-    s.settleOffline();
-    const iv = setInterval(() => {
+    let iv = null;
+    const tick = () => {
       const g = useGame.getState();
       const now = Date.now();
       for (const t of g.trucks) {
@@ -72,8 +75,12 @@ export default function GameScreen() {
       }
       g.dailyTick();
       setClock(g.gameDay());
-    }, 1000);
-    return () => clearInterval(iv);
+    };
+    const start = () => { if (!iv) { useGame.getState().settleOffline(); tick(); iv = setInterval(tick, 1000); } };
+    const stop = () => { if (iv) { clearInterval(iv); iv = null; } };
+    start();
+    const sub = AppState.addEventListener('change', st => (st === 'active' ? start() : stop()));
+    return () => { stop(); sub.remove(); };
   }, []);
 
   // surface new notifications as toasts

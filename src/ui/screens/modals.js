@@ -5,7 +5,9 @@ import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Swi
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, CONVOY_SYMBOLS, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS } from '../../store/gameStore';
+import { haptic } from '../../engine/haptics';
+import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
 import { CITIES } from '../../data/cities';
 import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
@@ -179,6 +181,18 @@ function buildJourney(d, model, now = Date.now()) {
     const atKm = Math.round(j * 2.5 * speed);
     if (wp.some(w => w.type === 'sleep' && Math.abs(w.atKm - atKm) < speed * 0.6)) continue;
     wp.push({ type: 'short', atKm, title: `Short break ${j}`, sub: '~5 min stop', icon: 'coffee-outline', color: C.sub });
+  }
+  // Ferry crossings: a board + roll-off waypoint per sea hop, named after the
+  // actual port nodes the route passes through (in order).
+  const ferrySegs = d.route.ferrySegments || (d.route.ferrySegment ? [d.route.ferrySegment] : []);
+  if (ferrySegs.length) {
+    const portName = id => id ? id.replace(/-port$/, '').split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : null;
+    const portIds = (d.route.nodeIds || []).filter(id => /-port$/.test(id) || id === 'port-blair' || id === 'kavaratti' || id === 'rameswaram');
+    ferrySegs.forEach((fs, i) => {
+      const a = portName(portIds[2 * i]), b = portName(portIds[2 * i + 1]);
+      wp.push({ type: 'port', atKm: Math.round(fs.startFrac * total), title: `Board ferry${a ? ` · ${a} Port` : ''}`, sub: 'Roll-on at the dock', icon: 'ferry', color: '#0E4C7A' });
+      wp.push({ type: 'port', atKm: Math.round(fs.endFrac * total), title: `Leave ferry${b ? ` · ${b} Port` : ''}`, sub: 'Roll-off — back on the road', icon: 'anchor', color: '#0E4C7A' });
+    });
   }
   wp.push({ type: 'dest', atKm: total, title: `Deliver to ${cityById(d.toCityId)?.name || 'Destination'}`, sub: prog >= 1 ? 'Arrived' : 'Pending arrival', icon: 'map-marker-check', color: C.green });
 
@@ -1177,6 +1191,7 @@ function ScratchGame({ toast }) {
 
 function SpinGame({ toast }) {
   const playRoulette = useGame(s => s.playRoulette);
+  const revealGameResult = useGame(s => s.revealGameResult);
   const games = useGame(s => s.games);
   const gamesToday = useGame(s => s.gamesToday);
   const left = gamesToday().spinLeft;
@@ -1185,18 +1200,23 @@ function SpinGame({ toast }) {
   const [spinning, setSpinning] = useState(false);
   const [result, setResult] = useState(null);
 
-  const W = 250, cx = W / 2, cy = W / 2, r = W / 2 - 6, n = ROULETTE_SEGMENTS.length, seg = 360 / n;
+  const W = 264, cx = W / 2, cy = W / 2, r = W / 2 - 14, n = ROULETTE_SEGMENTS.length, seg = 360 / n;
 
   const doSpin = () => {
     if (spinning) return;
     const res = playRoulette();
     if (!res.ok) { toast(res.err, 'warn'); return; }
     setSpinning(true); setResult(null);
+    haptic('medium'); play('start', 0.4);
     const target = 360 * 5 + (360 - (res.index * seg + seg / 2)); // land segment center at top
     const start = angleRef.current;
     const end = start + (target - (start % 360) + 360) % 360 + 360 * 5;
-    Animated.timing(spin, { toValue: end, duration: 3600, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start(() => {
+    Animated.timing(spin, { toValue: end, duration: 4200, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start(() => {
       angleRef.current = end; setSpinning(false); setResult(res);
+      // Result revealed only NOW — the store stays silent during the spin.
+      revealGameResult('diamond-stone', `Lucky spin: ${res.label}!`);
+      haptic(res.prize === 'nothing' ? 'light' : 'success');
+      if (res.prize !== 'nothing') play('coin', 0.8);
       toast(res.prize === 'nothing' ? 'No luck this time!' : `Won: ${res.label}`, res.prize === 'nothing' ? 'info' : 'success');
     });
   };
@@ -1207,22 +1227,34 @@ function SpinGame({ toast }) {
       <Text style={[FONT.tiny, { marginBottom: 8 }]}>{left} of {DAILY_PLAYS} free spins left today</Text>
       <View style={{ width: W, height: W }}>
         {/* pointer */}
-        <View style={{ position: 'absolute', top: -2, left: cx - 8, zIndex: 2 }}>
-          <Icon name="menu-down" size={30} color={C.text} />
+        <View style={{ position: 'absolute', top: -6, left: cx - 14, zIndex: 2, alignItems: 'center' }}>
+          <Icon name="menu-down" size={38} color={C.gold} style={{ textShadowColor: 'rgba(0,0,0,0.35)', textShadowRadius: 3, textShadowOffset: { width: 0, height: 1 } }} />
         </View>
         <Animated.View style={{ transform: [{ rotate }] }}>
           <Svg width={W} height={W}>
             <G>
+              {/* outer casino rim + inner track ring */}
+              <Circle cx={cx} cy={cy} r={r + 12} fill="#1D2530" />
+              <Circle cx={cx} cy={cy} r={r + 12} fill="none" stroke="#0B0F14" strokeWidth={1.5} />
+              <Circle cx={cx} cy={cy} r={r + 5} fill="none" stroke="#C9A227" strokeWidth={2.4} />
               {ROULETTE_SEGMENTS.map((sgm, i) => {
                 const mid = polar(cx, cy, r * 0.62, i * seg + seg / 2);
                 return (
                   <G key={i}>
-                    <Path d={slicePath(cx, cy, r, i * seg, (i + 1) * seg)} fill={sgm.color} stroke="#fff" strokeWidth={2} />
+                    <Path d={slicePath(cx, cy, r, i * seg, (i + 1) * seg)} fill={sgm.color} stroke="#fff" strokeWidth={1.6} />
                     <SvgText x={mid.x} y={mid.y} fill="#fff" fontSize="11" fontWeight="bold" textAnchor="middle">{sgm.label}</SvgText>
                   </G>
                 );
               })}
-              <Circle cx={cx} cy={cy} r={16} fill="#fff" stroke={C.border} strokeWidth={2} />
+              {/* gold studs on every slice boundary, like a real prize wheel */}
+              {ROULETTE_SEGMENTS.map((_, i) => {
+                const p = polar(cx, cy, r + 5, i * seg);
+                return <Circle key={`stud-${i}`} cx={p.x} cy={p.y} r={3} fill="#F4D35E" stroke="#8C6D1F" strokeWidth={0.8} />;
+              })}
+              {/* premium hub */}
+              <Circle cx={cx} cy={cy} r={24} fill="#1D2530" />
+              <Circle cx={cx} cy={cy} r={20} fill="#fff" stroke="#C9A227" strokeWidth={2.5} />
+              <SvgText x={cx} y={cy + 4.5} fill={C.text} fontSize="13" fontWeight="800" textAnchor="middle">SPIN</SvgText>
             </G>
           </Svg>
         </Animated.View>
@@ -1288,6 +1320,7 @@ function DiceGame({ toast }) {
 
 function SlotGame({ toast }) {
   const playSlot = useGame(s => s.playSlot);
+  const revealGameResult = useGame(s => s.revealGameResult);
   const games = useGame(s => s.games); // re-render on play
   const gamesToday = useGame(s => s.gamesToday);
   const left = gamesToday().slotLeft;
@@ -1308,6 +1341,10 @@ function SlotGame({ toast }) {
         clearInterval(iv);
         setDisplay(r.reels.map(id => (SLOT_SYMBOLS.find(s => s.id === id) || {}).icon));
         setSpinning(false); setResult(r);
+        // Reveal only after the reels stop — store stays silent until now.
+        revealGameResult('slot-machine', r.message);
+        haptic(r.isJackpot ? 'success' : r.reward > 0 ? 'medium' : 'light');
+        if (r.reward > 0) play('coin', 0.8);
         toast(r.isJackpot ? 'JACKPOT!' : r.reward > 0 ? `Won +${r.reward} Gold` : 'No match — try again!', r.reward > 0 ? 'success' : 'info');
       }
     }, 90);
@@ -1341,6 +1378,104 @@ function SlotGame({ toast }) {
   );
 }
 
+// Golden Convoy — pick 3 of 9 sealed shipping containers. Matching symbols
+// pay by tier (pair = value, three-of-a-kind = value ×3). Each tap flips a
+// container with a spring pop; the payout, sound and notification only land
+// after the third reveal, so nothing spoils the result early.
+function ConvoyCard({ revealed, symbol, onPress, disabled }) {
+  const flip = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.spring(flip, { toValue: revealed ? 1 : 0, useNativeDriver: true, speed: 14, bounciness: 9 }).start();
+  }, [revealed]);
+  const sym = symbol ? CONVOY_SYMBOLS.find(x => x.id === symbol) : null;
+  const scaleX = flip.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 0.05, 1] });
+  return (
+    <Pressable onPress={onPress} disabled={disabled || revealed}>
+      <Animated.View style={[cs.convoyCard, { transform: [{ scaleX }] },
+        revealed && sym && { backgroundColor: sym.color, borderColor: sym.color }]}>
+        {revealed && sym
+          ? <><Icon name={sym.icon} size={30} color="#fff" /><Text style={cs.convoyVal}>{sym.value}G</Text></>
+          : <Icon name="package-variant-closed" size={30} color={C.faint} />}
+      </Animated.View>
+    </Pressable>
+  );
+}
+
+function ConvoyGame({ toast }) {
+  const playConvoy = useGame(s => s.playConvoy);
+  const claimConvoy = useGame(s => s.claimConvoy);
+  const revealGameResult = useGame(s => s.revealGameResult);
+  const games = useGame(s => s.games); // re-render on play
+  const gamesToday = useGame(s => s.gamesToday);
+  const left = gamesToday().convoyLeft;
+  const [board, setBoard] = useState(null);
+  const [picks, setPicks] = useState([]);
+  const [result, setResult] = useState(null);
+
+  const start = () => {
+    const r = playConvoy();
+    if (!r.ok) { toast(r.err, 'warn'); return; }
+    haptic('medium');
+    setBoard(r.board); setPicks([]); setResult(null);
+  };
+  const pick = (i) => {
+    if (!board || result || picks.includes(i) || picks.length >= 3) return;
+    haptic('light'); play('tap', 0.4);
+    const next = [...picks, i];
+    setPicks(next);
+    if (next.length === 3) {
+      // Let the third flip land before the payout reveal.
+      setTimeout(() => {
+        const r = claimConvoy(next);
+        if (!r.ok) { toast(r.err, 'error'); return; }
+        setResult(r);
+        revealGameResult('treasure-chest',
+          r.matched >= 3 ? `Golden Convoy: three of a kind → +${r.reward} Gold!`
+            : r.matched === 2 ? `Golden Convoy: a pair → +${r.reward} Gold.`
+              : `Golden Convoy: no match → +${r.reward} Gold consolation.`);
+        haptic(r.matched >= 3 ? 'success' : r.matched === 2 ? 'medium' : 'light');
+        toast(r.matched >= 3 ? `THREE OF A KIND! +${r.reward} Gold` : `+${r.reward} Gold`, r.matched >= 2 ? 'success' : 'info');
+      }, 450);
+    }
+  };
+
+  return (
+    <View style={{ alignItems: 'center' }}>
+      <Text style={[FONT.sub, { textAlign: 'center', marginBottom: 4 }]}>
+        Pick 3 of 9 sealed containers. A pair pays its tier, three of a kind pays triple — hunt the Golden Key (12G).
+      </Text>
+      <Text style={[FONT.tiny, { marginBottom: 12 }]}>{left} of {DAILY_PLAYS} free convoys left today</Text>
+      {board ? (
+        <View style={{ width: 258 }}>
+          <Row style={{ flexWrap: 'wrap', gap: 9, justifyContent: 'center' }}>
+            {board.map((symId, i) => (
+              <ConvoyCard key={i} revealed={picks.includes(i) || !!result} symbol={symId}
+                onPress={() => pick(i)} disabled={!!result || picks.length >= 3} />
+            ))}
+          </Row>
+          <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 10 }]}>
+            {result ? '' : `${3 - picks.length} pick${3 - picks.length === 1 ? '' : 's'} left`}
+          </Text>
+        </View>
+      ) : (
+        <View style={[cs.convoyIntro]}>
+          <Icon name="treasure-chest" size={44} color={C.gold} />
+        </View>
+      )}
+      <View style={{ minHeight: 28, alignItems: 'center' }}>
+        {result ? (
+          <Text style={[FONT.h3, { color: result.matched >= 2 ? C.green : C.sub }]}>
+            {result.matched >= 3 ? 'THREE OF A KIND! ' : result.matched === 2 ? 'Pair! ' : ''}+{result.reward} Gold
+          </Text>
+        ) : null}
+      </View>
+      <Btn title={board && !result ? 'Picking…' : 'New convoy'} kind="green" icon="treasure-chest"
+        style={{ marginTop: 8, alignSelf: 'stretch' }} disabled={(board && !result) || left <= 0} onPress={start} />
+      {left <= 0 ? <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 6 }]}>Come back tomorrow for 10 more.</Text> : null}
+    </View>
+  );
+}
+
 export function MiniGamesModal({ visible, onClose }) {
   const toast = useToast();
   const gold = useGame(s => s.gold);
@@ -1361,10 +1496,12 @@ export function MiniGamesModal({ visible, onClose }) {
           <Chip label="Lucky Spin" icon="rotate-right" active={tab === 'spin'} onPress={() => setTab('spin')} />
           <Chip label="Dice Roll" icon="dice-multiple" active={tab === 'dice'} onPress={() => setTab('dice')} />
           <Chip label="Slot Machine" icon="slot-machine" active={tab === 'slot'} onPress={() => setTab('slot')} />
+          <Chip label="Golden Convoy" icon="treasure-chest" active={tab === 'convoy'} onPress={() => setTab('convoy')} />
         </Row>
       </ScrollView>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
-        {tab === 'scratch' ? <ScratchGame toast={toast} /> : tab === 'spin' ? <SpinGame toast={toast} /> : tab === 'dice' ? <DiceGame toast={toast} /> : <SlotGame toast={toast} />}
+        {tab === 'scratch' ? <ScratchGame toast={toast} /> : tab === 'spin' ? <SpinGame toast={toast} /> : tab === 'dice' ? <DiceGame toast={toast} />
+          : tab === 'slot' ? <SlotGame toast={toast} /> : <ConvoyGame toast={toast} />}
       </ScrollView>
     </Sheet>
   );
@@ -2164,4 +2301,13 @@ const cs = StyleSheet.create({
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.blue },
   iconTile: { width: 52, height: 52, borderRadius: 14, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },
   scratchTile: { width: 78, height: 66, borderRadius: 14, borderWidth: 1.5, borderColor: C.border, backgroundColor: C.bgSoft, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 4 },
+  convoyCard: {
+    width: 78, height: 78, borderRadius: 14, borderWidth: 1.5, borderColor: C.border,
+    backgroundColor: C.bgSoft, alignItems: 'center', justifyContent: 'center',
+  },
+  convoyVal: { color: '#fff', fontSize: 11, fontWeight: '800', marginTop: 2 },
+  convoyIntro: {
+    width: 258, height: 160, borderRadius: 16, borderWidth: 1.5, borderColor: C.border,
+    backgroundColor: C.bgSoft, alignItems: 'center', justifyContent: 'center', marginBottom: 4,
+  },
 });

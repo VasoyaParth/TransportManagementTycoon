@@ -127,54 +127,60 @@ export function computeRoute(fromLat, fromLng, toLat, toLng) {
   if (!s.id || !e.id) return null;
 
   let points = [{ lat: fromLat, lng: fromLng }];
+  // ferryFlags[i] === true means the segment ARRIVING at points[i] is a sea
+  // hop. Kept per-point (not one global span) so a route with several ferry
+  // hops separated by land renders truck-on-land / ferry-on-water correctly
+  // for every stretch, instead of one giant span swallowing the land between.
+  let ferryFlags = [false];
   let usesFerry = false;
   let bordersCrossed = 0;
   const borderNames = [];
   const nodeIds = [s.id];
-  let ferryStartIdx = -1, ferryEndIdx = -1; // point-index span of the ferry hop, for the map layer
 
   if (s.id !== e.id) {
     const path = dijkstra(s.id, e.id);
     if (!path) return null;
     const sn = ROAD_NODES[s.id];
-    points.push({ lat: sn.lat, lng: sn.lng });
+    points.push({ lat: sn.lat, lng: sn.lng }); ferryFlags.push(false);
     for (const { hop } of path.hops) {
       const isFerry = hop.ferry || (hop.edge && hop.edge.ferry);
-      const startIdx = points.length - 1;
       const pts = edgePoints(hop.edge, hop.reversed);
-      points.push(...pts.slice(1)); // skip duplicated start point
-      if (isFerry) {
-        usesFerry = true;
-        if (ferryStartIdx === -1) ferryStartIdx = startIdx;
-        ferryEndIdx = points.length - 1;
-      }
+      const add = pts.slice(1); // skip duplicated start point
+      points.push(...add);
+      for (let i = 0; i < add.length; i++) ferryFlags.push(!!isFerry);
+      if (isFerry) usesFerry = true;
       if (hop.edge && hop.edge.border) { bordersCrossed++; if (hop.edge.nh) borderNames.push(hop.edge.nh); }
       nodeIds.push(hop.to);
     }
   } else {
     const sn = ROAD_NODES[s.id];
-    points.push({ lat: sn.lat, lng: sn.lng });
+    points.push({ lat: sn.lat, lng: sn.lng }); ferryFlags.push(false);
   }
-  points.push({ lat: toLat, lng: toLng });
+  points.push({ lat: toLat, lng: toLng }); ferryFlags.push(false);
 
-  // dedupe consecutive identical points
-  const before = points.length;
-  points = points.filter((p, i) => i === 0 ||
+  // dedupe consecutive identical points (flags filtered in lockstep)
+  const keep = points.map((p, i) => i === 0 ||
     Math.abs(p.lat - points[i - 1].lat) > 1e-6 || Math.abs(p.lng - points[i - 1].lng) > 1e-6);
-  // adjust ferry indices if dedupe dropped points ahead of them (rare)
-  const dropped = before - points.length;
-  if (ferryEndIdx !== -1) { ferryStartIdx = Math.max(0, ferryStartIdx - dropped); ferryEndIdx = Math.max(ferryStartIdx, ferryEndIdx - dropped); }
+  points = points.filter((_, i) => keep[i]);
+  ferryFlags = ferryFlags.filter((_, i) => keep[i]);
 
   const cum = polylineLengths(points);
   const roadKm = Math.round(cum[cum.length - 1] * ROAD_FACTOR);
-  // ferrySegment as a fraction range of the route's raw cum length (same 0..1
-  // scale as the `prog` used by pointAlong), so the map layer can cheaply
-  // check `prog >= startFrac && prog <= endFrac` to know it's over the sea hop.
+  // Every contiguous ferry stretch becomes its own {startFrac,endFrac} range
+  // on the same 0..1 scale as pointAlong's `prog`, so map layers can check
+  // "am I on a sea hop right now" exactly, hop by hop.
   const total = cum[cum.length - 1] || 1;
-  const ferrySegment = ferryEndIdx !== -1 && cum[ferryStartIdx] != null && cum[ferryEndIdx] != null
-    ? { startFrac: cum[ferryStartIdx] / total, endFrac: cum[ferryEndIdx] / total }
-    : null;
-  return { points, cum, roadKm, usesFerry, nodeIds, bordersCrossed, borderNames, ferrySegment };
+  const ferrySegments = [];
+  for (let i = 1; i < points.length; i++) {
+    if (!ferryFlags[i]) continue;
+    const startFrac = cum[i - 1] / total;
+    let j = i;
+    while (j + 1 < points.length && ferryFlags[j + 1]) j++;
+    ferrySegments.push({ startFrac, endFrac: cum[j] / total });
+    i = j;
+  }
+  const ferrySegment = ferrySegments[0] || null; // back-compat: old saves/readers
+  return { points, cum, roadKm, usesFerry, nodeIds, bordersCrossed, borderNames, ferrySegment, ferrySegments };
 }
 
 // Insert fuel/charging stops: stations are placed along the route whenever the
