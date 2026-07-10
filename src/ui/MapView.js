@@ -366,7 +366,7 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
             }))}
             {/* Trucks — shared per-model top-down artwork (same as the showroom).
                 Night is computed once per frame, not once per truck. */}
-            {(() => { const night = isNightHour(useGame.getState().gameDay().hour); return trucks.map(t => {
+            {(() => { const night = isNightHour(new Date().getHours()); return trucks.map(t => {
               const p = truckPos(t);
               const q = project(p.lat, p.lng);
               if (!inView(q.x, q.y)) return null;

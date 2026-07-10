@@ -5,7 +5,7 @@ import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Swi
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, CONVOY_SYMBOLS, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, CONVOY_SYMBOLS, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
@@ -675,10 +675,12 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
   const curFuel = d ? Math.max(3, Math.round(startFuel + (arriveFuel - startFuel) * (prog / 100))) : Math.round(truck.fuelPct);
   const buildLeft = truck.status === 'building' ? Math.max(0, (truck.buildEndsAt - now) / 1000) : 0;
   const buildPct = truck.status === 'building' ? 100 * (1 - buildLeft / truck.buildTotalSec) : 0;
-  const fee = Math.round(m.price * 0.04);
+  // Repair/service bills honour the mechanic-skill workshop discount.
+  const mechDisc = useGame.getState().mechDiscount();
+  const fee = Math.round(m.price * 0.04 * (1 - mechDisc));
   const condition = Math.round(truck.condition == null ? 100 : truck.condition);
   const conditionColor = condition >= 70 ? C.green : condition >= 40 ? C.amber : C.red;
-  const serviceCost = Math.round(m.price * 0.05);
+  const serviceCost = Math.round(m.price * 0.05 * (1 - mechDisc));
   const incident = d && d.incident;
   const incidentLeft = incident ? Math.max(0, (incident.resolveAt - now) / 1000) : 0;
 
@@ -1647,9 +1649,11 @@ export function MiniGamesModal({ visible, onClose }) {
 // Tap a driver → full A→Z picture: profile, current delivery, live route with
 // where they've reached, next break, ETA and career stats.
 export function DriverDetailModal({ visible, onClose, staffId, onShowOnMap }) {
+  const toast = useToast();
   const staff = useGame(s => s.staff);
   const trucks = useGame(s => s.trucks);
   const deliveries = useGame(s => s.deliveries);
+  const promoteStaff = useGame(s => s.promoteStaff);
   const member = staff.find(x => x.id === staffId);
   const truck = member && member.truckId ? trucks.find(t => t.id === member.truckId) : null;
   const d = truck ? deliveries.find(x => x.truckId === truck.id) : null;
@@ -1671,8 +1675,13 @@ export function DriverDetailModal({ visible, onClose, staffId, onShowOnMap }) {
           <View style={[cs.heroIcon, { backgroundColor: C.blueSoft }]}><Icon name={avatar} size={34} color={C.blue} /></View>
           <View style={{ marginLeft: 12, flex: 1 }}>
             <Text style={FONT.h2}>{member.name}</Text>
-            <Row style={{ marginTop: 4 }}>
+            <Row style={{ marginTop: 4, flexWrap: 'wrap' }}>
               <Pill text={`${level ? level.name : member.level} ${role ? role.name : member.role}`} icon={role ? role.icon : 'account'} />
+              {(() => { const mood = staffMood(member, { trucks, deliveries }); return (
+                <View style={{ marginLeft: 6 }}>
+                  <Pill text={mood.label} icon={mood.icon} color={mood.color} bg={mood.color + '22'} />
+                </View>
+              ); })()}
             </Row>
             <Row style={{ marginTop: 6 }}>
               <Icon name="star" size={13} color={C.amber} />
@@ -1680,6 +1689,33 @@ export function DriverDetailModal({ visible, onClose, staffId, onShowOnMap }) {
             </Row>
           </View>
         </Row>
+
+        {/* Promotion — manual, per employee. Skill jumps into the next level's
+            band and the fresh-promotion buzz doubles output for 3 days. */}
+        {(member.promoBoostUntil || 0) > Date.now() && (
+          <Row style={{ backgroundColor: C.amberSoft, borderRadius: RADIUS.md, padding: 10, marginBottom: 12 }}>
+            <Icon name="rocket-launch" size={16} color={C.gold} />
+            <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.text }]}>
+              Promotion buzz active — 2× {member.role === 'driver' ? 'driving pace' : 'workshop efficiency'} for {fmtDur((member.promoBoostUntil - Date.now()) / 1000)} more.
+            </Text>
+          </Row>
+        )}
+        {(() => {
+          const ladder = ['junior', 'senior', 'expert'];
+          const idx = ladder.indexOf(member.level);
+          if (idx === -1 || idx >= ladder.length - 1) return null;
+          const next = STAFF_LEVELS.find(l => l.id === ladder[idx + 1]);
+          return (
+            <Btn
+              title={`Promote to ${next.name} (${inrShort(Math.max(member.salary * 1.1, next.salary[0]))}–${inrShort(next.salary[1])}/mo)`}
+              kind="green" icon="account-arrow-up" style={{ marginBottom: 12 }}
+              onPress={() => {
+                const r = promoteStaff(member.id);
+                toast(r.ok ? `Promoted to ${r.level} — skill ${r.newSkill}, 2× boost for 3 days!` : r.err, r.ok ? 'success' : 'error');
+              }}
+            />
+          );
+        })()}
 
         {/* Current delivery */}
         {d && m ? (

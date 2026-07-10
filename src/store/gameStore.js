@@ -179,6 +179,28 @@ export const PHASE_LABELS = {
   done: 'Arrived',
 };
 
+// ---------- Staff mood (derived, not stored) ----------
+// Drivers tire right after a trip and recharge with rest; mechanics get busy
+// whenever the fleet needs fixing. Managers are disabled (see randomCandidates).
+export function staffMood(member, { trucks = [], deliveries = [] } = {}, now = Date.now()) {
+  if (member.role === 'driver') {
+    if (member.truckId && deliveries.some(d => d.truckId === member.truckId)) {
+      return { label: 'On the road', icon: 'truck-fast', color: '#2563EB' };
+    }
+    if ((member.lastTripEndAt || 0) > now - 3 * 3600 * 1000) {
+      return { label: 'Tired — resting', icon: 'sleep', color: '#D97706' };
+    }
+    return { label: 'Energetic', icon: 'lightning-bolt', color: '#12A150' };
+  }
+  if (member.role === 'mechanic') {
+    const busy = trucks.some(t => t.status === 'broken') || deliveries.some(d => d.incident && d.incident.mechanicCalled);
+    return busy
+      ? { label: 'Busy fixing', icon: 'wrench-clock', color: '#D97706' }
+      : { label: 'Relaxed — chai break', icon: 'coffee', color: '#12A150' };
+  }
+  return { label: 'On duty', icon: 'briefcase-account', color: '#64748B' };
+}
+
 let idSeq = 1;
 const uid = p => `${p}-${Date.now().toString(36)}-${(idSeq++).toString(36)}`;
 
@@ -229,12 +251,10 @@ export const EASTER_EGGS = [
   { id: 'window_shopper', title: 'Window Shopper', hint: 'Looking at everything, buying nothing.', where: 'Tap the "All" filter in the Truck Showroom 8 times fast.' },
   { id: 'curious_mind', title: 'Curious Mind', hint: 'Curiosity about yourself pays off.', where: 'Tap the "About" tab in Settings 5 times fast.' },
   { id: 'steady_hands', title: 'Steady Hands', hint: 'Balance in all things.', where: 'Tap "Normal" difficulty in Settings → Gameplay 4 times fast.' },
-  { id: 'patient_parker', title: 'Patient Parker', hint: 'Good things come to those who wait — parked.', where: 'Tap the "Parked" tab in the Fleet Manager drawer 3 times fast.' },
   { id: 'not_a_bug', title: 'Not a Bug, a Feature', hint: 'The mascot has a sense of humour.', where: 'Tap the truck logo on the splash screen 10 times fast.' },
   { id: 'nice_try', title: 'Nice Try', hint: 'Reading the warning label a little too closely.', where: 'Tap the Danger Zone warning text in Settings → Gameplay 6 times fast (doesn’t actually reset anything).' },
   { id: 'port_master', title: 'Harbour Master', hint: 'The sea rewards those who keep checking the docks.', where: 'Tap the anchor (ports) button on the map 6 times fast.' },
   { id: 'fuel_sniffer', title: 'Fuel Sniffer', hint: 'Always hunting for the cheapest litre.', where: 'Tap the fuel-station toggle on the map 7 times fast.' },
-  { id: 'fleet_boss', title: 'Fleet Boss', hint: 'The manager who loves their own title.', where: 'Tap the "Fleet Manager" title in the fleet drawer 5 times fast.' },
   { id: 'inbox_zero', title: 'Inbox Zero', hint: 'Obsessed with a clean inbox.', where: 'Tap "Mark all read" in Notifications 5 times fast.' },
   { id: 'money_gazer', title: 'Money Gazer', hint: 'Staring at your balance won’t grow it... or will it?', where: 'Tap your cash balance in the top header 6 times fast.' },
   { id: 'number_cruncher', title: 'Number Cruncher', hint: 'Some people really love spreadsheets.', where: 'Tap the "Economy" tab in the bottom bar 7 times fast.' },
@@ -326,7 +346,10 @@ function randomContracts(dayNumber, count = CONTRACTS_PER_DAY) {
 function randomCandidates() {
   const out = [];
   for (let i = 0; i < 8; i++) {
-    const role = ['driver', 'mechanic', 'manager'][Math.floor(Math.random() * 3)];
+    // Managers are disabled for now (no gameplay effect yet) — re-add 'manager'
+    // to this pool when a real use for them lands.
+    // const role = ['driver', 'mechanic', 'manager'][Math.floor(Math.random() * 3)];
+    const role = ['driver', 'mechanic'][Math.floor(Math.random() * 2)];
     const level = STAFF_LEVELS[Math.floor(Math.random() * 3)];
     const gender = Math.random() < 0.65 ? 'm' : 'f';
     const names = STAFF_NAMES[gender];
@@ -377,7 +400,7 @@ const initialState = {
   mapEvents: [], // recent world events with a location, highlighted on the map
   pricing: {}, // per-cargo ₹/km/t overrides; empty => each cargo uses its own default rate
   settings: {
-    speed: 1, autosave: true, sound: true, haptics: true, showStations: true,
+    speed: 1, autosave: true, sound: true, haptics: true, showStations: true, showPorts: true,
     difficulty: 'normal', events: 'rare', tutorialSeen: false,
     musicVolume: 0.4, sfxVolume: 1, hapticIntensity: 'medium',
     notif: { delivery: true, truck: true, fuel: true, collab: true, daily: true },
@@ -792,7 +815,8 @@ export const useGame = create(
           set({ gold: s.gold - 15 });
         } else {
           if (!hasMechanic) return { ok: false, err: 'Hire a mechanic to repair trucks (or use 15 Gold)' };
-          const fee = Math.round(modelById(t.modelId).price * 0.04);
+          // Mechanic skill trims the bill (see mechDiscount).
+          const fee = Math.round(modelById(t.modelId).price * 0.04 * (1 - get().mechDiscount()));
           if (s.balance < fee) return { ok: false, err: 'Insufficient funds for repair' };
           set({ balance: s.balance - fee });
         }
@@ -812,8 +836,9 @@ export const useGame = create(
         if (cond >= 99) return { ok: false, err: 'Already in top condition' };
         // Realistic bill: proportional to the wear being fixed, capped at ₹5L
         // so servicing a premium rig never costs a fortune. Floor ₹15k.
+        // Mechanic skill trims the bill (see mechDiscount).
         const cost = Math.max(15000, Math.min(500000,
-          Math.round(modelById(t.modelId).price * SERVICE_COST_PCT * ((100 - cond) / 100))));
+          Math.round(modelById(t.modelId).price * SERVICE_COST_PCT * ((100 - cond) / 100) * (1 - get().mechDiscount()))));
         if (s.balance < cost) return { ok: false, err: 'Insufficient funds for service' };
         set({
           balance: s.balance - cost,
@@ -969,7 +994,12 @@ export const useGame = create(
         // it never fully stalls.
         const condition = t.condition == null ? 100 : t.condition;
         const conditionFactor = CONDITION_MIN_SPEED_FACTOR + (1 - CONDITION_MIN_SPEED_FACTOR) * (condition / 100);
-        const speedBoost = (s.boosts.speedUntil > Date.now() ? 2 : 1) * conditionFactor;
+        // Driver skill matters: an assigned driver's skill adds up to +15%
+        // pace, and a freshly promoted driver (3-day buzz) drives at 2×.
+        const drv = s.staff.find(x => x.id === t.driverId && x.role === 'driver');
+        const skillFactor = drv ? 1 + ((drv.skill || 0) / 100) * 0.15 : 1;
+        const promoFactor = drv && (drv.promoBoostUntil || 0) > Date.now() ? 2 : 1;
+        const speedBoost = (s.boosts.speedUntil > Date.now() ? 2 : 1) * conditionFactor * skillFactor * promoFactor;
         // ----- Driver fatigue: legally/physically a driver can't drive forever.
         // A sleep break (~2h) after every ~8.5h driving, plus short ~5min breaks
         // every ~2.5h. These pauses extend the real delivery time.
@@ -1128,6 +1158,7 @@ export const useGame = create(
             sleepHours: Math.round(((m.sleepHours || 0) + sleepH) * 10) / 10,
             deliveries: (m.deliveries || 0) + 1,
             kmDriven: Math.round((m.kmDriven || 0) + d.route.roadKm),
+            lastTripEndAt: Date.now(), // drives the "Tired — resting" mood
           } : m),
           history: [{
             ...logEntry, truckName: t ? modelById(t.modelId).name : '',
@@ -1154,6 +1185,48 @@ export const useGame = create(
 
       // ---------- staff ----------
       refreshCandidates() { set({ candidates: randomCandidates() }); },
+
+      // Best workshop discount your mechanics earn on repair/service bills:
+      // up to 30% at skill 99, doubled (capped 60%) while a freshly promoted
+      // mechanic's 3-day boost is running. This is the "skill" stat at work.
+      mechDiscount() {
+        const s = get();
+        const mechs = s.staff.filter(x => x.role === 'mechanic');
+        if (!mechs.length) return 0;
+        const best = mechs.reduce((a, x) => Math.max(a, x.skill || 0), 0);
+        const promo = mechs.some(x => (x.promoBoostUntil || 0) > Date.now());
+        return Math.min(0.6, (best / 100) * 0.3 * (promo ? 2 : 1));
+      },
+
+      // Manual promotion: junior → senior → expert. Salary lands somewhere in
+      // the next level's min–max band, skill jumps into its band, and the
+      // fresh-promotion buzz gives 3 days of 2× output (driving pace for
+      // drivers, workshop discount for mechanics). Costs a one-time package.
+      promoteStaff(staffId) {
+        const s = get();
+        const m = s.staff.find(x => x.id === staffId);
+        if (!m) return { ok: false, err: 'Staff member not found' };
+        const order = ['junior', 'senior', 'expert'];
+        const idx = order.indexOf(m.level);
+        if (idx === -1 || idx >= order.length - 1) return { ok: false, err: `${m.name} is already at the top level` };
+        const next = STAFF_LEVELS.find(l => l.id === order[idx + 1]);
+        const newSalary = Math.round(Math.max(m.salary * 1.1,
+          next.salary[0] + Math.random() * (next.salary[1] - next.salary[0])) / 500) * 500;
+        const newSkill = Math.min(99, Math.max((m.skill || 0) + 5,
+          Math.round(next.skill[0] + Math.random() * (next.skill[1] - next.skill[0]))));
+        const fee = Math.max(25000, (newSalary - m.salary) * 3); // one-time promotion package
+        if (s.balance < fee) return { ok: false, err: `Need ${inr(fee)} for the promotion package` };
+        set({
+          balance: s.balance - fee,
+          staff: s.staff.map(x => x.id === staffId
+            ? { ...x, level: next.id, salary: newSalary, skill: newSkill, promoBoostUntil: Date.now() + 3 * 24 * 3600 * 1000 }
+            : x),
+        });
+        get().notify('system', 'account-arrow-up',
+          `${m.name} promoted to ${next.name}! ${inr(newSalary)}/mo · skill ${newSkill} · 2× ${m.role === 'driver' ? 'driving pace' : 'workshop efficiency'} for 3 days!`);
+        play('coin', 0.8);
+        return { ok: true, fee, newSalary, newSkill, level: next.name };
+      },
       hire(candId) {
         const s = get();
         const c = s.candidates.find(x => x.id === candId);

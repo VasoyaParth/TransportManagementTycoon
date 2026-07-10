@@ -132,22 +132,28 @@ function boot(){
   plotHubs(DATA.hubs);
   window.setHubs=function(hubs){ plotHubs(hubs); };
 
-  // Fixed sea ports (ferry endpoints) — always-visible anchor badges,
-  // toggleable from the RN control stack. Trucks board/leave ships here.
-  var portsOn=true, portLayer=L.layerGroup().addTo(map);
+  // Fixed sea ports (ferry endpoints) — anchor badges toggleable from the RN
+  // control stack. Initial visibility comes from the persisted setting
+  // (DATA.portsOn) so "off" survives app restarts; badges scale with zoom
+  // exactly like truck markers (zf()).
+  var portsOn=(DATA.portsOn!==false), portLayer=L.layerGroup().addTo(map);
   var anchorSvg='<svg viewBox="0 0 24 24" width="14" height="14"><path fill="#fff" d="M12,2A3,3 0 0,1 15,5C15,6.31 14.17,7.42 13,7.83V9H15V11H13V19.92C14.26,19.75 15.62,19.29 16.66,18.63C16.09,18.05 15.72,17.28 15.66,16.43L17.66,16.29C17.72,17.13 18.44,17.8 19.3,17.8C20.21,17.8 20.95,17.06 20.95,16.15H22.95C22.95,18.16 21.31,19.8 19.3,19.8L19.13,19.8C17.55,21.07 14.89,22 12,22C9.11,22 6.45,21.07 4.87,19.8L4.7,19.8C2.69,19.8 1.05,18.16 1.05,16.15H3.05C3.05,17.06 3.79,17.8 4.7,17.8C5.56,17.8 6.28,17.13 6.34,16.29L8.34,16.43C8.28,17.28 7.91,18.05 7.34,18.63C8.38,19.29 9.74,19.75 11,19.92V11H9V9H11V7.83C9.83,7.42 9,6.31 9,5A3,3 0 0,1 12,2M12,4A1,1 0 0,0 11,5A1,1 0 0,0 12,6A1,1 0 0,0 13,5A1,1 0 0,0 12,4Z"/></svg>';
   function plotPorts(){
     portLayer.clearLayers();
     if(!portsOn) return;
+    var k=zf();
     (DATA.ports||[]).forEach(function(p){
       portLayer.addLayer(L.marker([p.lat,p.lng],{icon:L.divIcon({className:'',
-        html:'<div style="width:22px;height:22px;border-radius:50%;background:#0E4C7A;border:2px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 5px rgba(0,0,0,.3)">'+anchorSvg+'</div>',
+        html:'<div style="transform:scale('+k+');transform-origin:11px 11px;width:22px;height:22px;border-radius:50%;background:#0E4C7A;border:2px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 5px rgba(0,0,0,.3)">'+anchorSvg+'</div>',
         iconSize:[22,22],iconAnchor:[11,11]}),zIndexOffset:800})
         .bindTooltip('<b>'+p.name+'</b><br><small>Sea port — ferry crossing</small>',{direction:'top'}));
     });
   }
   plotPorts();
+  map.on('zoomend',function(){ if(portsOn) plotPorts(); });
   window.togglePorts=function(){ portsOn=!portsOn; plotPorts(); };
+  // Explicit on/off from RN (persisted in settings.showPorts).
+  window.setPorts=function(on){ portsOn=!!on; plotPorts(); };
 
   // Cities — only unlocked countries; discovered cities (routes driven,
   // garages, HQ) render highlighted, the rest as faint "unexplored" dots that

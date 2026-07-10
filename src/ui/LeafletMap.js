@@ -43,6 +43,8 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
     stations: STATION_DATA,
     hubs: hubData(),
     ports: PORT_DATA,
+    // Persisted port visibility — "off" stays off across restarts.
+    portsOn: useGame.getState().settings?.showPorts !== false,
   }), []);
 
   const html = useMemo(() => buildLeafletHtml(initial), [initial]);
@@ -74,8 +76,8 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
       const accent = t.status === 'delivering' ? '#0E9F5B' : t.status === 'building' ? '#D97706'
         : t.status === 'broken' ? '#DC3D43' : '#9DB2D6';
       const bt = bodyTypeFor(model);
-      // Headlights on for trucks driving at night (in-game clock).
-      const night = isNightHour(useGame.getState().gameDay().hour);
+      // Headlights on for trucks driving at night (real local clock, 6pm–6am).
+      const night = isNightHour(new Date().getHours());
       const lights = night && t.status === 'delivering' ? headlightFor(model) : null;
       const dims = truckShapes(bt, color, accent, { lights });
       return { id: t.id, lat, lng, heading, status: t.status, statusLabel: meta.label, color,
@@ -163,7 +165,13 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
         <Ctl icon="crosshairs-gps" onPress={() => inject('window.centerHQ()')} />
         <Ctl icon="gas-station" onPress={() => { inject('window.toggleStations()'); tapFuelEgg(); }} />
         <Ctl icon="city-variant-outline" onPress={() => inject('window.toggleCities()')} />
-        <Ctl icon="anchor" onPress={() => { inject('window.togglePorts()'); tapPortEgg(); }} />
+        <Ctl icon="anchor" onPress={() => {
+          // Persist the dock toggle: off stays off until explicitly re-enabled.
+          const on = useGame.getState().settings?.showPorts !== false;
+          useGame.getState().saveSettings({ showPorts: !on });
+          inject(`window.setPorts(${!on})`);
+          tapPortEgg();
+        }} />
       </View>
     </View>
   );
