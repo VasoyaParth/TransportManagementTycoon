@@ -1,13 +1,17 @@
-// Dashboard tab panels — Fleet / Routes / Staff / Economy / Marketing / Collab.
+// Dashboard tab panels — Fleet / Routes / Staff / Economy / Marketing.
 // Each is a scrollable panel rendered inside a bottom sheet.
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, FlatList, TextInput, Pressable, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, FlatList, Pressable, StyleSheet } from 'react-native';
 import { C, FONT, RADIUS } from '../theme';
 import {
-  Card, Btn, IconBtn, Pill, statusMeta, Progress, Money, Stat, Row, Icon, useToast, relTime, GameSlider,
+  Card, Btn, IconBtn, Pill, statusMeta, Progress, Money, Stat, Row, Icon, useToast, relTime, GameSlider, Sheet, useEasterEggTap,
 } from '../components';
 import Svg from 'react-native-svg';
-import { useGame, modelById, cargoById, GAME_HOUR_MS, staffMood } from '../../store/gameStore';
+import {
+  useGame, modelById, cargoById, GAME_HOUR_MS, staffMood,
+  ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, EASTER_EGGS,
+} from '../../store/gameStore';
+import { haptic } from '../../engine/haptics';
 import { CAMPAIGNS, CARGO_TYPES } from '../../data/trucks';
 import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
 import { inr, inrShort } from '../../engine/economy';
@@ -73,7 +77,7 @@ function FilterChips({ options, value, onChange }) {
         {options.map(o => {
           const on = value === o.key;
           return (
-            <Pressable key={o.key} onPress={() => onChange(o.key)}
+            <Pressable key={o.key} onPress={() => { haptic('light'); onChange(o.key); }}
               style={[st.filterChip, on && { backgroundColor: C.blue, borderColor: C.blue }]}>
               <Text style={{ fontSize: 12.5, fontWeight: '700', color: on ? '#fff' : C.sub }} numberOfLines={1}>{o.label}</Text>
               {o.count != null && (
@@ -660,6 +664,107 @@ export function StaffTab({ onOpenDriver }) {
 }
 
 // ============================== 4. ECONOMY ==============================
+// Full redesign (v2.3.0): profit & loss hero, income/expense split fed by the
+// company ledger, deeper insights (cost/km, avg profit, fleet utilisation,
+// top routes) and a premium day-wise Ledger book behind one button.
+
+function InsightRow({ icon, label, value, color = C.text, sub, divider }) {
+  return (
+    <View style={[{ paddingVertical: 9 }, divider && st.divider]}>
+      <Row style={{ justifyContent: 'space-between' }}>
+        <Row style={{ flex: 1 }}>
+          <Icon name={icon} size={17} color={C.sub} />
+          <View style={{ marginLeft: 9, flex: 1 }}>
+            <Text style={[FONT.body, { fontWeight: '600' }]}>{label}</Text>
+            {sub ? <Text style={FONT.tiny}>{sub}</Text> : null}
+          </View>
+        </Row>
+        <Text style={[FONT.mono, { fontWeight: '800', color }]}>{value}</Text>
+      </Row>
+    </View>
+  );
+}
+
+// Premium day-wise ledger book — every rupee in/out, grouped per game day
+// with a daily net subtotal, newest day first.
+function LedgerSheet({ visible, onClose }) {
+  const ledger = useGame(s => s.ledger || []);
+  const tapLedgerEgg = useEasterEggTap('ledger_lord', 12);
+  const groups = useMemo(() => {
+    const m = new Map();
+    for (const e of ledger) {
+      if (!m.has(e.day)) m.set(e.day, { day: e.day, entries: [], net: 0, income: 0, expense: 0 });
+      const g = m.get(e.day);
+      g.entries.push(e); g.net += e.amount;
+      if (e.amount >= 0) g.income += e.amount; else g.expense += -e.amount;
+    }
+    return [...m.values()].sort((a, b) => b.day - a.day);
+  }, [ledger]);
+
+  return (
+    <Sheet visible={visible} onClose={onClose} title="Company Ledger" height="88%">
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+        <Card style={{ marginBottom: 12, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <Row>
+              <Pressable onPress={tapLedgerEgg}>
+                <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: '#1E293B', alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name="notebook-outline" size={22} color={C.gold} />
+                </View>
+              </Pressable>
+              <View style={{ marginLeft: 10 }}>
+                <Text style={[FONT.h3, { color: '#F8FAFC' }]}>The Books</Text>
+                <Text style={[FONT.tiny, { color: '#94A3B8' }]}>Every rupee, day by day · last {ledger.length} entries</Text>
+              </View>
+            </Row>
+            <Icon name="check-decagram" size={18} color={C.gold} />
+          </Row>
+        </Card>
+        {groups.length === 0 ? (
+          <EmptyState icon="notebook-outline" title="No entries yet" sub="Deliveries, salaries and every purchase will be booked here automatically." />
+        ) : groups.map(g => (
+          <View key={g.day} style={{ marginBottom: 14 }}>
+            <Row style={{ justifyContent: 'space-between', marginBottom: 6, paddingHorizontal: 2 }}>
+              <Row>
+                <Icon name="calendar" size={14} color={C.sub} />
+                <Text style={[FONT.body, { fontWeight: '800', marginLeft: 5 }]}>Day {g.day}</Text>
+              </Row>
+              <Text style={[FONT.mono, { fontWeight: '800', color: g.net >= 0 ? C.green : C.red }]}>
+                {g.net >= 0 ? '+' : '−'}{inrShort(Math.abs(g.net))}
+              </Text>
+            </Row>
+            <Card style={{ padding: 0, overflow: 'hidden' }}>
+              {g.entries.map((e, i) => (
+                <Row key={e.id} style={[{ paddingVertical: 10, paddingHorizontal: 12, justifyContent: 'space-between' }, i > 0 && st.divider]}>
+                  <Row style={{ flex: 1, marginRight: 8 }}>
+                    <View style={{
+                      width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center',
+                      backgroundColor: e.amount >= 0 ? C.greenSoft : C.redSoft,
+                    }}>
+                      <Icon name={e.icon || 'cash'} size={15} color={e.amount >= 0 ? C.green : C.red} />
+                    </View>
+                    <View style={{ marginLeft: 9, flex: 1 }}>
+                      <Text style={FONT.body} numberOfLines={1}>{e.label}</Text>
+                      <Text style={FONT.tiny}>{relTime(e.ts)}</Text>
+                    </View>
+                  </Row>
+                  <Text style={[FONT.mono, { fontWeight: '700', color: e.amount >= 0 ? C.green : C.red }]}>
+                    {e.amount >= 0 ? '+' : '−'}{inrShort(Math.abs(e.amount))}
+                  </Text>
+                </Row>
+              ))}
+              <Row style={[st.divider, { paddingVertical: 8, paddingHorizontal: 12, justifyContent: 'space-between', backgroundColor: C.bgSoft }]}>
+                <Text style={[FONT.tiny, { fontWeight: '800' }]}>IN {inrShort(g.income)} · OUT {inrShort(g.expense)}</Text>
+                <Text style={[FONT.tiny, { fontWeight: '800', color: g.net >= 0 ? C.green : C.red }]}>NET {g.net >= 0 ? '+' : '−'}{inrShort(Math.abs(g.net))}</Text>
+              </Row>
+            </Card>
+          </View>
+        ))}
+      </ScrollView>
+    </Sheet>
+  );
+}
+
 export function EconomyTab() {
   const balance = useGame(s => s.balance);
   const gold = useGame(s => s.gold);
@@ -668,45 +773,130 @@ export function EconomyTab() {
   const trucks = useGame(s => s.trucks);
   const deliveries = useGame(s => s.deliveries);
   const history = useGame(s => s.history);
+  const ledger = useGame(s => s.ledger || []);
+  const hubs = useGame(s => s.hubs || []);
   const pricing = useGame(s => s.pricing);
   const savePricing = useGame(s => s.savePricing);
   const [priceEdit, setPriceEdit] = useState(null); // cargo id whose slider is open
+  const [ledgerOpen, setLedgerOpen] = useState(false);
+  const tapDistanceEgg = useEasterEggTap('long_hauler', 10);
 
   const now = useNow(deliveries.length > 0);
   const salaryBurden = useMemo(() => staff.reduce((a, x) => a + x.salary, 0), [staff]);
-  const bars = useMemo(() => history.slice(0, 8).reverse(), [history]);
+  const upkeepBurden = useMemo(() => hubs.filter(h => !h.hq).reduce((a, h) => a + (h.maint || 40000), 0), [hubs]);
+  const bars = useMemo(() => history.slice(0, 10).reverse(), [history]);
   const maxAbs = useMemo(() => Math.max(1, ...bars.map(b => Math.abs(b.net))), [bars]);
-  // Live km covered by in-progress deliveries, so the lifetime distance/delivery
-  // count reflects trucks currently en route instead of jumping only on completion.
   const liveKm = useMemo(() => deliveries.reduce((a, d) => {
     const prog = Math.max(0, Math.min(1, (now - d.startedAt) / (d.endsAt - d.startedAt)));
     return a + d.route.roadKm * prog;
   }, 0), [deliveries, now]);
-  const inProgress = deliveries.length;
+
+  // Cash-flow split from the ledger (all recorded entries).
+  const flow = useMemo(() => {
+    let income = 0, expense = 0;
+    for (const e of ledger) { if (e.amount >= 0) income += e.amount; else expense += -e.amount; }
+    return { income, expense, net: income - expense };
+  }, [ledger]);
+  const flowTotal = Math.max(1, flow.income + flow.expense);
+
+  // Insights derived from live state + history.
+  const avgProfit = history.length ? Math.round(history.reduce((a, h) => a + h.net, 0) / history.length) : 0;
+  const costPerKm = stats.km > 0 ? stats.fuelSpend / stats.km : 0;
+  const running = trucks.filter(t => t.status === 'delivering').length;
+  const utilisation = trucks.length ? Math.round((running / trucks.length) * 100) : 0;
+  const topRoutes = useMemo(() => {
+    const m = new Map();
+    for (const h of history) {
+      const key = `${h.fromCityId}~${h.toCityId}`;
+      const g = m.get(key) || { key, from: h.fromCityId, to: h.toCityId, net: 0, runs: 0 };
+      g.net += h.net; g.runs += 1; m.set(key, g);
+    }
+    return [...m.values()].sort((a, b) => b.net - a.net).slice(0, 3);
+  }, [history]);
 
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
-      <Row style={{ marginBottom: 8 }}>
-        <Stat icon="wallet" label="Balance" value={inrShort(balance)} color={balance >= 0 ? C.text : C.red} />
-        <View style={{ width: 8 }} />
-        <Stat icon="gold" label="Gold" value={String(gold)} color={C.gold} />
-      </Row>
+      {/* ---- P&L hero: cash-flow split from the ledger ---- */}
+      <Card style={{ marginBottom: 10, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
+        <Row style={{ justifyContent: 'space-between' }}>
+          <View>
+            <Text style={[FONT.tiny, { color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 1 }]}>Cash Balance</Text>
+            <Text style={[FONT.h1, { color: '#F8FAFC', marginTop: 2 }]}>{inrShort(balance)}</Text>
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Row><Icon name="gold" size={14} color={C.gold} /><Text style={[FONT.h3, { color: C.gold, marginLeft: 4 }]}>{gold}</Text></Row>
+            <Text style={[FONT.tiny, { color: flow.net >= 0 ? '#4ADE80' : '#F87171', marginTop: 4, fontWeight: '800' }]}>
+              {flow.net >= 0 ? '▲' : '▼'} {inrShort(Math.abs(flow.net))} net flow
+            </Text>
+          </View>
+        </Row>
+        {/* Income vs expense split bar */}
+        <View style={{ height: 8, borderRadius: 4, flexDirection: 'row', overflow: 'hidden', marginTop: 12, backgroundColor: '#1E293B' }}>
+          <View style={{ width: `${(flow.income / flowTotal) * 100}%`, backgroundColor: '#22C55E' }} />
+          <View style={{ width: `${(flow.expense / flowTotal) * 100}%`, backgroundColor: '#EF4444' }} />
+        </View>
+        <Row style={{ justifyContent: 'space-between', marginTop: 6 }}>
+          <Text style={[FONT.tiny, { color: '#4ADE80', fontWeight: '700' }]}>IN {inrShort(flow.income)}</Text>
+          <Text style={[FONT.tiny, { color: '#F87171', fontWeight: '700' }]}>OUT {inrShort(flow.expense)}</Text>
+        </Row>
+        <Btn title="Open Company Ledger" icon="notebook-outline" kind="soft" small
+          style={{ marginTop: 12, backgroundColor: '#1E293B' }} onPress={() => setLedgerOpen(true)} />
+      </Card>
+
       <Row style={{ marginBottom: 8 }}>
         <Stat icon="chart-line" label="Lifetime Revenue" value={inrShort(stats.revenue)} color={C.green} />
         <View style={{ width: 8 }} />
         <Stat icon="gas-station" label="Fuel Spend" value={inrShort(stats.fuelSpend)} color={C.red} />
       </Row>
-      <Row style={{ marginBottom: 8 }}>
-        <Stat icon="package-variant-closed-check" label="Deliveries"
-          value={inProgress ? `${stats.deliveries} (+${inProgress})` : String(stats.deliveries)} />
-        <View style={{ width: 8 }} />
-        <Stat icon="map-marker-distance" label="Distance" value={`${Math.round(stats.km + liveKm).toLocaleString('en-IN')} km`} />
-      </Row>
       <Row style={{ marginBottom: 14 }}>
-        <Stat icon="cash-clock" label="Salary Burden / mo" value={inrShort(salaryBurden)} color={C.amber} />
+        <Stat icon="package-variant-closed-check" label="Deliveries"
+          value={deliveries.length ? `${stats.deliveries} (+${deliveries.length})` : String(stats.deliveries)} />
         <View style={{ width: 8 }} />
-        <Stat icon="truck" label="Fleet Size" value={String(trucks.length)} />
+        <Pressable style={{ flex: 1 }} onPress={tapDistanceEgg}>
+          <Stat icon="map-marker-distance" label="Distance" value={`${Math.round(stats.km + liveKm).toLocaleString('en-IN')} km`} />
+        </Pressable>
       </Row>
+
+      {/* ---- Business insights ---- */}
+      <SectionTitle icon="lightbulb-on-outline" text="Business Insights" />
+      <Card style={{ marginBottom: 14 }}>
+        <InsightRow icon="cash-check" label="Avg profit per delivery" sub={`across last ${history.length} trips`}
+          value={inrShort(avgProfit)} color={avgProfit >= 0 ? C.green : C.red} />
+        <InsightRow divider icon="gas-station-outline" label="Fuel cost per km" sub="lifetime fuel ÷ km driven"
+          value={`₹${costPerKm.toFixed(1)}`} color={costPerKm > 30 ? C.red : C.text} />
+        <InsightRow divider icon="truck-fast" label="Fleet utilisation" sub={`${running} of ${trucks.length} trucks on the road`}
+          value={`${utilisation}%`} color={utilisation >= 50 ? C.green : C.amber} />
+        <InsightRow divider icon="cash-clock" label="Monthly fixed costs" sub={`${inrShort(salaryBurden)} salaries + ${inrShort(upkeepBurden)} upkeep`}
+          value={inrShort(salaryBurden + upkeepBurden)} color={C.amber} />
+      </Card>
+
+      {/* ---- Most profitable routes ---- */}
+      {topRoutes.length > 0 && (
+        <>
+          <SectionTitle icon="trophy-outline" text="Top Earning Routes" />
+          <Card style={{ marginBottom: 14 }}>
+            {topRoutes.map((r, i) => {
+              const from = cityById(r.from), to = cityById(r.to);
+              return (
+                <Row key={r.key} style={[{ paddingVertical: 9, justifyContent: 'space-between' }, i > 0 && st.divider]}>
+                  <Row style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={[FONT.h3, { color: i === 0 ? C.gold : C.sub, width: 24 }]}>#{i + 1}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Row>
+                        <Text style={FONT.body} numberOfLines={1}>{from?.name || '?'}</Text>
+                        <Icon name="arrow-right" size={12} color={C.faint} style={{ marginHorizontal: 4 }} />
+                        <Text style={FONT.body} numberOfLines={1}>{to?.name || '?'}</Text>
+                      </Row>
+                      <Text style={FONT.tiny}>{r.runs} run{r.runs > 1 ? 's' : ''}</Text>
+                    </View>
+                  </Row>
+                  <Text style={[FONT.mono, { fontWeight: '800', color: C.green }]}>{inrShort(r.net)}</Text>
+                </Row>
+              );
+            })}
+          </Card>
+        </>
+      )}
 
       <SectionTitle icon="chart-bar" text="Recent Net Profit" />
       {bars.length === 0 ? (
@@ -754,9 +944,7 @@ export function EconomyTab() {
           const open = priceEdit === cg.id;
           return (
             <View key={cg.id} style={[{ paddingVertical: 10 }, i > 0 && st.divider]}>
-              {/* Row is read-only by default — tap to expand the slider editor,
-                  like the Staff hire screen switch. */}
-              <Pressable onPress={() => setPriceEdit(open ? null : cg.id)}>
+              <Pressable onPress={() => { haptic('light'); setPriceEdit(open ? null : cg.id); }}>
                 <Row style={{ justifyContent: 'space-between' }}>
                   <Row style={{ flex: 1 }}>
                     <Icon name={cg.icon} size={18} color={C.sub} />
@@ -789,6 +977,8 @@ export function EconomyTab() {
           );
         })}
       </Card>
+
+      <LedgerSheet visible={ledgerOpen} onClose={() => setLedgerOpen(false)} />
     </ScrollView>
   );
 }
@@ -870,111 +1060,140 @@ export function MarketingTab() {
   );
 }
 
-// ============================== 6. COLLAB ==============================
-const COLLAB_BENEFITS = [
-  { icon: 'gas-station', text: 'Shared fuel stations' },
-  { icon: 'file-document-multiple-outline', text: 'Shared contracts' },
-  { icon: 'swap-horizontal', text: 'Cargo exchange' },
-  { icon: 'bullhorn-outline', text: 'Combined marketing' },
-  { icon: 'account-group-outline', text: 'Staff sharing' },
-];
+// ============================== 6. REWARDS ==============================
+// Daily login streak, achievements and hidden-gem progress in one place —
+// everything the game pays you for showing up.
+const STREAK_MAX = 7;
 
-function PartnerRow({ partner, onEnd }) {
-  const [confirm, setConfirm] = useState(false);
-  useEffect(() => {
-    if (!confirm) return undefined;
-    const id = setTimeout(() => setConfirm(false), 2500);
-    return () => clearTimeout(id);
-  }, [confirm]);
+function TierDots({ reached, total }) {
   return (
-    <Card style={{ marginBottom: 8, padding: 12 }}>
-      <Row style={{ justifyContent: 'space-between' }}>
-        <Row style={{ flex: 1 }}>
-          <View style={[st.iconCircle, { backgroundColor: C.blueSoft }]}>
-            <Icon name="handshake" size={18} color={C.blue} />
-          </View>
-          <View style={{ marginLeft: 10, flex: 1 }}>
-            <Text style={FONT.body} numberOfLines={1}>{partner.name}</Text>
-            <Text style={FONT.tiny}>{partner.code} · partnered {relTime(partner.since)}</Text>
-          </View>
-        </Row>
-        <Btn
-          title={confirm ? 'Confirm?' : 'End'}
-          kind="danger" small
-          onPress={() => {
-            if (confirm) { setConfirm(false); onEnd(partner); }
-            else setConfirm(true);
-          }}
-        />
-      </Row>
-    </Card>
+    <Row style={{ gap: 3 }}>
+      {Array.from({ length: total }, (_, i) => (
+        <View key={i} style={{
+          width: 7, height: 7, borderRadius: 4,
+          backgroundColor: i < reached ? C.gold : C.border,
+        }} />
+      ))}
+    </Row>
   );
 }
 
-export function CollabTab() {
-  const company = useGame(s => s.company);
-  const partners = useGame(s => s.partners);
-  const addPartner = useGame(s => s.addPartner);
-  const endPartner = useGame(s => s.endPartner);
-  const toast = useToast();
-  const [code, setCode] = useState('');
+export function RewardsTab({ onOpenGames }) {
+  const login = useGame(s => s.login || { streak: 0, lastDay: '' });
+  const gold = useGame(s => s.gold);
+  const state = useGame(s => s);
+  const unlocked = state.achievements?.unlocked || {};
+  const found = state.easterEggs?.found || [];
+  const tapStreakEgg = useEasterEggTap('streak_freak', 11);
+  const [showAll, setShowAll] = useState(false);
+
+  const streak = login.streak || 0;
+  const todayBonus = Math.min(Math.max(streak, 1), STREAK_MAX) * 2;
+  const tomorrowBonus = Math.min(streak + 1, STREAK_MAX) * 2;
+  const claimedToday = login.lastDay === new Date().toDateString();
+
+  const doneTiers = Object.keys(unlocked).length;
+  const totalTiers = ACHIEVEMENTS.length * 5;
+  const nextHint = EASTER_EGGS.find(e => !found.includes(e.id));
 
   return (
-    <ScrollView contentContainerStyle={{ paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
-      <Card style={{ alignItems: 'center', paddingVertical: 22, marginBottom: 14 }}>
-        <Text style={[FONT.tiny, { textTransform: 'uppercase', letterSpacing: 1 }]}>Your Company Code</Text>
-        <Text style={[FONT.h1, { marginTop: 6, letterSpacing: 2 }]}>{company ? company.code : '—'}</Text>
-        <Row style={{ marginTop: 6 }}>
-          <Icon name="content-copy" size={13} color={C.faint} />
-          <Text style={[FONT.tiny, { marginLeft: 4 }]}>Share this code with friends to partner up</Text>
-        </Row>
-      </Card>
-
-      <SectionTitle icon="handshake-outline" text="Add a Partner" />
-      <Card style={{ marginBottom: 14 }}>
-        <TextInput
-          value={code}
-          onChangeText={t => setCode(t.toUpperCase())}
-          placeholder="Enter partner code (e.g. TE-AB12C)"
-          placeholderTextColor={C.faint}
-          autoCapitalize="characters"
-          autoCorrect={false}
-          style={st.input}
-        />
-        <Btn
-          title="Send Request" icon="send"
-          disabled={!code.trim()}
-          style={{ marginTop: 10 }}
-          onPress={() => {
-            const r = addPartner(code.trim());
-            toast && toast(r.ok ? `Partnership request sent to ${code.trim()}` : r.err, r.ok ? 'success' : 'error');
-            if (r.ok) setCode('');
-          }}
-        />
-      </Card>
-
-      <SectionTitle icon="account-multiple" text="Partners" />
-      {partners.length === 0 ? (
-        <EmptyState icon="handshake-outline" title="No partners yet" sub="Exchange codes with friends to build a logistics alliance." />
-      ) : partners.map(p => (
-        <PartnerRow
-          key={p.code}
-          partner={p}
-          onEnd={pt => { endPartner(pt.code); toast && toast(`Partnership with ${pt.code} ended`, 'warn'); }}
-        />
-      ))}
-
-      <SectionTitle icon="star-circle-outline" text="Partnership Benefits" />
-      <Card>
-        {COLLAB_BENEFITS.map((b, i) => (
-          <Row key={b.text} style={[{ justifyContent: 'space-between', paddingVertical: 9 }, i > 0 && st.divider]}>
-            <Row style={{ flex: 1 }}>
-              <Icon name={b.icon} size={18} color={C.blue} />
-              <Text style={[FONT.body, { marginLeft: 10 }]}>{b.text}</Text>
-            </Row>
-            <Pill text="Coming soon" color={C.amber} bg={C.amberSoft} icon="clock-outline" />
+    <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
+      {/* ---- Daily streak hero ---- */}
+      <Card style={{ marginBottom: 12, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
+        <Row style={{ justifyContent: 'space-between' }}>
+          <Row style={{ flex: 1 }}>
+            <Pressable onPress={tapStreakEgg}>
+              <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: '#7C2D12', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="fire" size={30} color="#FB923C" />
+              </View>
+            </Pressable>
+            <View style={{ marginLeft: 12, flex: 1 }}>
+              <Text style={[FONT.h2, { color: '#F8FAFC' }]}>{streak} day streak</Text>
+              <Text style={[FONT.tiny, { color: '#94A3B8' }]}>
+                {claimedToday ? `+${todayBonus} Gold claimed today` : 'Open the game daily to keep it alive'}
+                {streak >= STREAK_MAX ? ' · MAX bonus!' : ` · tomorrow pays +${tomorrowBonus}`}
+              </Text>
+            </View>
           </Row>
-        ))}
+          <Row><Icon name="gold" size={15} color={C.gold} /><Text style={[FONT.h3, { color: C.gold, marginLeft: 4 }]}>{gold}</Text></Row>
+        </Row>
+        {/* 7-day track */}
+        <Row style={{ marginTop: 14, justifyContent: 'space-between' }}>
+          {Array.from({ length: STREAK_MAX }, (_, i) => {
+            const day = i + 1;
+            const hit = streak >= day;
+            return (
+              <View key={day} style={{ alignItems: 'center', flex: 1 }}>
+                <View style={{
+                  width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center',
+                  backgroundColor: hit ? '#7C2D12' : '#1E293B',
+                  borderWidth: streak + 1 === day && !claimedToday ? 1.5 : 0, borderColor: '#FB923C',
+                }}>
+                  {hit ? <Icon name="check-bold" size={15} color="#FB923C" />
+                    : <Text style={[FONT.tiny, { color: '#64748B', fontWeight: '800' }]}>+{day * 2}</Text>}
+                </View>
+                <Text style={[FONT.tiny, { color: '#64748B', marginTop: 3, fontSize: 9 }]}>D{day}</Text>
+              </View>
+            );
+          })}
+        </Row>
+        <Text style={[FONT.tiny, { color: '#64748B', marginTop: 8, textAlign: 'center' }]}>
+          Best streak: {Math.max(login.bestStreak || 0, streak)} days · miss a day and the flame resets
+        </Text>
+      </Card>
+
+      {/* ---- Free gold quick actions ---- */}
+      <Row style={{ gap: 8, marginBottom: 14 }}>
+        <View style={{ flex: 1 }}>
+          <Btn title="Mini-Games" icon="dice-multiple" kind="green" onPress={() => onOpenGames && onOpenGames()} />
+        </View>
+      </Row>
+
+      {/* ---- Achievements ---- */}
+      <SectionTitle icon="trophy" text={`Achievements — ${doneTiers}/${totalTiers} tiers`} />
+      <Card style={{ marginBottom: 14 }}>
+        {(showAll ? ACHIEVEMENTS : ACHIEVEMENTS.slice(0, 8)).map((a, idx) => {
+          const v = achievementValue(state, a.id);
+          let reached = 0;
+          for (let t = 0; t < a.levels.length; t++) if (unlocked[`${a.id}:${t}`]) reached = t + 1;
+          const next = reached < a.levels.length ? a.levels[reached] : null;
+          const pct = next ? Math.min(100, (v / next) * 100) : 100;
+          return (
+            <View key={a.id} style={[{ paddingVertical: 10 }, idx > 0 && st.divider]}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Row style={{ flex: 1, marginRight: 8 }}>
+                  <Icon name={a.icon} size={19} color={reached > 0 ? C.gold : C.sub} />
+                  <View style={{ marginLeft: 9, flex: 1 }}>
+                    <Row style={{ justifyContent: 'space-between' }}>
+                      <Text style={[FONT.body, { fontWeight: '700' }]} numberOfLines={1}>{a.title}</Text>
+                      <TierDots reached={reached} total={a.levels.length} />
+                    </Row>
+                    <Text style={FONT.tiny} numberOfLines={1}>
+                      {next != null
+                        ? `${v.toLocaleString('en-IN')} / ${next.toLocaleString('en-IN')} ${a.unit} → ${ACHIEVEMENT_TIERS[reached]} (+${ACHIEVEMENT_TIER_GOLD[reached]}G)`
+                        : `Legend complete — ${v.toLocaleString('en-IN')} ${a.unit}`}
+                    </Text>
+                  </View>
+                </Row>
+              </Row>
+              <Progress pct={pct} color={reached >= a.levels.length ? C.gold : C.blue} style={{ marginTop: 6 }} height={4} />
+            </View>
+          );
+        })}
+        <Btn title={showAll ? 'Show less' : `Show all ${ACHIEVEMENTS.length} tracks`} kind="soft" small
+          icon={showAll ? 'chevron-up' : 'chevron-down'} style={{ marginTop: 8 }} onPress={() => setShowAll(v => !v)} />
+      </Card>
+
+      {/* ---- Hidden gems ---- */}
+      <SectionTitle icon="diamond-stone" text={`Hidden Gems — ${found.length}/${EASTER_EGGS.length}`} />
+      <Card>
+        <Progress pct={(found.length / EASTER_EGGS.length) * 100} color={C.gold} style={{ marginBottom: 10 }} />
+        <Text style={FONT.sub}>
+          {found.length === EASTER_EGGS.length
+            ? 'Every gem found. You know this app better than its developer.'
+            : nextHint ? `Next clue: "${nextHint.hint}"` : ''}
+        </Text>
+        <Text style={[FONT.tiny, { marginTop: 6 }]}>Each gem pays ₹10 lakhs + 15 Gold, once. The full checklist lives in Settings → Hidden Gems.</Text>
       </Card>
     </ScrollView>
   );
@@ -1003,10 +1222,5 @@ const st = StyleSheet.create({
   loadMore: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     paddingVertical: 12, marginTop: 2, borderRadius: 22, borderWidth: 1, borderColor: C.border, backgroundColor: C.bgSoft,
-  },
-  input: {
-    borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.md,
-    paddingHorizontal: 12, paddingVertical: 11, ...FONT.body,
-    backgroundColor: C.bgSoft, letterSpacing: 1,
   },
 });

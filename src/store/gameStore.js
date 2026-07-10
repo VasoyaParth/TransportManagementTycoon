@@ -260,6 +260,13 @@ export const EASTER_EGGS = [
   { id: 'number_cruncher', title: 'Number Cruncher', hint: 'Some people really love spreadsheets.', where: 'Tap the "Economy" tab in the bottom bar 7 times fast.' },
   { id: 'speed_demon', title: 'Speed Demon', hint: 'Life in the fast lane, always.', where: 'Tap "Very Fast" game speed in Settings → Gameplay 5 times fast.' },
   { id: 'meet_the_maker', title: 'Meet the Maker', hint: 'Say hello to the person behind the wheel of the code.', where: 'Tap the Lead Developer card in Settings → About 7 times fast.' },
+  // v2.3.0 — the tough five. High tap counts, obscure corners: these are meant
+  // to survive weeks of hunting.
+  { id: 'ghost_rider', title: 'Ghost Rider', hint: 'Only night owls notice the sky change.', where: 'Tap the day/night weather icon in the top header 9 times fast.' },
+  { id: 'gold_digger', title: 'Gold Digger', hint: 'Some wallets have false bottoms.', where: 'Tap the Gold Wallet chip in the Power-Ups store 10 times fast.' },
+  { id: 'long_hauler', title: 'Long Hauler', hint: 'Obsessed with the odometer, ten times over.', where: 'Tap the Distance stat in the Economy tab 10 times fast.' },
+  { id: 'ledger_lord', title: 'Ledger Lord', hint: 'A true auditor checks the books twelve times.', where: 'Tap the Company Ledger header icon 12 times fast.' },
+  { id: 'streak_freak', title: 'Streak Freak', hint: 'Worship the daily flame, eleven-fold.', where: 'Tap the streak flame in the Rewards tab 11 times fast.' },
 ];
 const EASTER_EGG_REWARD = { cash: 1000000, gold: 15 }; // ₹10 lakhs + 15 Gold, per egg, one-time
 
@@ -285,7 +292,7 @@ export const ACHIEVEMENTS = [
   { id: 'globe_trotter', title: 'Globe Trotter', icon: 'earth', unit: 'countries',
     desc: 'Countries unlocked for delivery.', levels: [2, 3, 4, 5, 6] },
   { id: 'gem_hunter', title: 'Gem Hunter', icon: 'diamond-stone', unit: 'gems',
-    desc: 'Hidden easter eggs discovered.', levels: [1, 4, 8, 13, 18] },
+    desc: 'Hidden easter eggs discovered.', levels: [1, 4, 9, 15, 23] },
   { id: 'gold_reserve', title: 'Gold Reserve', icon: 'gold', unit: 'gold',
     desc: 'Gold held in the vault at once.', levels: [150, 300, 600, 1200, 2500] },
   // The funny ones — badges of honour nobody exactly *wants* to earn.
@@ -299,6 +306,27 @@ export const ACHIEVEMENTS = [
     desc: 'Ferries boarded. Your trucks secretly wanted to be boats.', levels: [1, 5, 15, 40, 100] },
   { id: 'passport_stamps', title: 'Passport Stamps', icon: 'passport', unit: 'borders',
     desc: 'Borders crossed. Customs officers wave like old friends.', levels: [1, 5, 15, 40, 100] },
+  // v2.3.0 — ten fresh tracks, all fed by counters the store already bumps.
+  { id: 'contract_king', title: 'Contract King', icon: 'file-sign', unit: 'contracts',
+    desc: 'Contracts completed for clients on the board.', levels: [1, 10, 40, 150, 500] },
+  { id: 'campaign_guru', title: 'Campaign Guru', icon: 'bullhorn-variant', unit: 'campaigns',
+    desc: 'Marketing campaigns launched.', levels: [1, 5, 15, 40, 100] },
+  { id: 'people_person', title: 'People Person', icon: 'account-arrow-up', unit: 'promotions',
+    desc: 'Staff promotions handed out. HR loves you.', levels: [1, 3, 8, 20, 50] },
+  { id: 'teleporter', title: 'Teleporter', icon: 'transfer', unit: 'transfers',
+    desc: 'Fast-travels between your garages.', levels: [1, 5, 20, 60, 150] },
+  { id: 'lucky_streak', title: 'Lucky Streak', icon: 'dice-multiple', unit: 'plays',
+    desc: 'Mini-games played. The house always wins... or does it?', levels: [5, 25, 100, 400, 1000] },
+  { id: 'network_weaver', title: 'Network Weaver', icon: 'map-marker-path', unit: 'routes',
+    desc: 'Unique routes lit up on the map.', levels: [3, 10, 30, 80, 200] },
+  { id: 'cash_hoarder', title: 'Cash Hoarder', icon: 'safe', unit: '₹',
+    desc: 'Cash balance held at one time.', levels: [10000000, 50000000, 200000000, 500000000, 2000000000] },
+  { id: 'mechanic_bff', title: "Mechanic's BFF", icon: 'wrench-clock', unit: 'call-outs',
+    desc: 'Roadside mechanic call-outs paid for.', levels: [1, 5, 15, 40, 100] },
+  { id: 'daily_devotee', title: 'Daily Devotee', icon: 'calendar-star', unit: 'days',
+    desc: 'Best daily-login streak reached.', levels: [3, 7, 14, 30, 90] },
+  { id: 'big_spender', title: 'Big Spender', icon: 'gold', unit: 'gold',
+    desc: 'Gold spent on power-ups and repairs.', levels: [25, 100, 400, 1200, 4000] },
 ];
 // Current metric value for a track, computed from live state.
 export function achievementValue(s, id) {
@@ -317,6 +345,16 @@ export function achievementValue(s, id) {
     case 'fuel_baron': return Math.floor(s.stats.fuelSpend || 0);
     case 'sea_legs': return s.stats.ferries || 0;
     case 'passport_stamps': return s.stats.borders || 0;
+    case 'contract_king': return s.stats.contracts || 0;
+    case 'campaign_guru': return s.stats.campaigns || 0;
+    case 'people_person': return s.stats.promotions || 0;
+    case 'teleporter': return s.stats.fastTravels || 0;
+    case 'lucky_streak': return s.stats.gamesPlayed || 0;
+    case 'network_weaver': return (s.corridors || []).length;
+    case 'cash_hoarder': return Math.max(0, Math.floor(s.balance));
+    case 'mechanic_bff': return s.stats.mechanicCalls || 0;
+    case 'daily_devotee': return Math.max(s.login?.bestStreak || 0, s.login?.streak || 0);
+    case 'big_spender': return s.stats.goldSpent || 0;
     default: return 0;
   }
 }
@@ -390,7 +428,11 @@ const initialState = {
   campaigns: [], // {id, campaignId, startedAt, endsAt}
   notifications: [],
   boosts: { speedUntil: 0, doubleNext: false },
-  stats: { revenue: 0, fuelSpend: 0, deliveries: 0, km: 0, incidents: 0, thefts: 0, ferries: 0, borders: 0 },
+  stats: {
+    revenue: 0, fuelSpend: 0, deliveries: 0, km: 0, incidents: 0, thefts: 0, ferries: 0, borders: 0,
+    contracts: 0, campaigns: 0, promotions: 0, fastTravels: 0, gamesPlayed: 0, mechanicCalls: 0, goldSpent: 0,
+  },
+  ledger: [], // day-wise money book: {id, ts, day, kind, icon, label, amount} — newest first, capped
   clockStart: 0, // real ms when day 1 hour 0 began
   lastSalaryDay: 0,
   lastContractDay: 0,
@@ -403,13 +445,12 @@ const initialState = {
     speed: 1, autosave: true, sound: true, haptics: true, showStations: true, showPorts: true,
     difficulty: 'normal', events: 'rare', tutorialSeen: false,
     musicVolume: 0.4, sfxVolume: 1, hapticIntensity: 'medium',
-    notif: { delivery: true, truck: true, fuel: true, collab: true, daily: true },
+    notif: { delivery: true, truck: true, fuel: true, daily: true },
   },
-  partners: [], // {code, name, since}
   easterEggs: { found: [] }, // ids of discovered hidden gems (persisted, one-time rewards)
   achievements: { unlocked: {} }, // {"road_warrior:2": ts} — track:tierIndex reached (persisted)
   lastBackupAt: 0, // real ms of the last rolling auto-backup
-  login: { lastDay: '', streak: 0 }, // daily login gold streak (real calendar days)
+  login: { lastDay: '', streak: 0, bestStreak: 0 }, // daily login gold streak (real calendar days)
 };
 
 export const useGame = create(
@@ -418,6 +459,17 @@ export const useGame = create(
       ...initialState,
 
       // ---------- helpers ----------
+      // Company ledger — every rupee in or out gets a day-stamped book entry.
+      // `amount` is signed (+income / -expense). Capped so old saves stay light.
+      logLedger(kind, icon, label, amount) {
+        if (!amount) return;
+        const { day } = get().gameDay();
+        set({
+          ledger: [{ id: uid('lg'), ts: Date.now(), day, kind, icon, label, amount: Math.round(amount) },
+          ...(get().ledger || [])].slice(0, 300),
+        });
+      },
+
       notify(type, icon, message) {
         const s = get();
         const cat = { delivery: 'delivery', truck: 'truck', system: 'daily' }[type] || 'daily';
@@ -560,7 +612,7 @@ export const useGame = create(
             const yesterday = new Date(now - 24 * 3600 * 1000).toDateString();
             const streak = lg.lastDay === yesterday ? lg.streak + 1 : 1;
             const bonus = Math.min(streak, 7) * 2;
-            set({ login: { lastDay: today, streak }, gold: get().gold + bonus });
+            set({ login: { lastDay: today, streak, bestStreak: Math.max(lg.bestStreak || 0, streak) }, gold: get().gold + bonus });
             get().notify('system', 'calendar-star', `Daily login bonus: +${bonus} Gold — day ${streak} streak${streak >= 7 ? ' (max!)' : ''}. Come back tomorrow for more.`);
           }
         }
@@ -572,6 +624,8 @@ export const useGame = create(
           const total = salaries + upkeep;
           if (total > 0) {
             set({ balance: s.balance - total, lastSalaryDay: day });
+            if (salaries) get().logLedger('salary', 'account-cash', 'Staff salaries', -salaries);
+            if (upkeep) get().logLedger('upkeep', 'garage', 'Garage upkeep & light bills', -upkeep);
             get().notify('system', 'cash-minus', `Monthly costs: ${inr(salaries)} salaries + ${inr(upkeep)} garage upkeep = ${inr(total)}.`);
           } else {
             set({ lastSalaryDay: day });
@@ -668,6 +722,7 @@ export const useGame = create(
           const loss = Math.min(s.balance, Math.round(50000 + Math.random() * 200000));
           const c = anyCity();
           set({ balance: s.balance - loss });
+          get().logLedger('theft', 'shield-alert', `Cargo theft near ${c ? c.name : 'a depot'}`, -loss);
           if (c) pushMapEvent('theft', 'shield-alert', '#C0392B', c.lat, c.lng, 'Cargo theft');
           get().notify('system', 'shield-alert', `Cargo theft! Bandits stole goods worth ${inr(loss)} near ${c ? c.name : 'a depot'}.`);
           pushFlavor('theft', { amount: inr(loss), city: c ? c.name : 'a depot' });
@@ -692,6 +747,7 @@ export const useGame = create(
           const bonus = Math.round(40000 + Math.random() * 120000);
           const c = anyCity();
           set({ balance: get().balance + bonus });
+          get().logLedger('bonus', 'gift', `Loyal client bonus${c ? ` · ${c.name}` : ''}`, bonus);
           if (c) pushMapEvent('windfall', 'gift', '#12A150', c.lat, c.lng, 'Client bonus');
           get().notify('system', 'gift', `Loyal client bonus! You received ${inr(bonus)}${c ? ` in ${c.name}` : ''}.`);
           pushFlavor('windfall', { amount: inr(bonus), city: c ? c.name : null });
@@ -745,6 +801,7 @@ export const useGame = create(
             : s.trucks,
         });
         const name = t.customName || modelById(t.modelId).name;
+        if (penalty) get().logLedger('incident', meta.icon, `${meta.title.replace('!', '')} — ${name}`, -penalty);
         get().notify('truck', meta.icon, `${meta.title} ${meta.notify(name, penalty)}`);
         pushNow(meta.title, meta.notify(name, penalty));
       },
@@ -764,11 +821,13 @@ export const useGame = create(
         const cut = Math.round(remaining * MECHANIC_DELAY_CUT);
         set({
           balance: s.balance - cost,
+          stats: { ...s.stats, mechanicCalls: (s.stats.mechanicCalls || 0) + 1 },
           deliveries: s.deliveries.map(x => x.id === deliveryId ? {
             ...x, endsAt: x.endsAt - cut,
             incident: { ...x.incident, mechanicCalled: true, resolveAt: x.incident.resolveAt - cut },
           } : x),
         });
+        get().logLedger('repair', 'wrench', 'Roadside mechanic call-out', -cost);
         get().notify('truck', 'wrench', `Mechanic dispatched for ${inr(cost)} — delay cut short.`);
         return { ok: true, cost };
       },
@@ -786,6 +845,7 @@ export const useGame = create(
           km: 0, deliveries: 0, driverId: null, condition: 100,
         };
         set({ balance: s.balance - model.price, trucks: [...s.trucks, truck] });
+        get().logLedger('truck', 'truck', `Bought ${model.name}`, -model.price);
         get().notify('truck', 'factory', `${model.name} ordered — building at HQ (${model.build}s).`);
         {
           const hqCity = cityById(s.company?.hqCityId);
@@ -812,13 +872,14 @@ export const useGame = create(
         const hasMechanic = s.staff.some(x => x.role === 'mechanic');
         if (withGold) {
           if (s.gold < 15) return { ok: false, err: 'Not enough Gold' };
-          set({ gold: s.gold - 15 });
+          set({ gold: s.gold - 15, stats: { ...s.stats, goldSpent: (s.stats.goldSpent || 0) + 15 } });
         } else {
           if (!hasMechanic) return { ok: false, err: 'Hire a mechanic to repair trucks (or use 15 Gold)' };
           // Mechanic skill trims the bill (see mechDiscount).
           const fee = Math.round(modelById(t.modelId).price * 0.04 * (1 - get().mechDiscount()));
           if (s.balance < fee) return { ok: false, err: 'Insufficient funds for repair' };
           set({ balance: s.balance - fee });
+          get().logLedger('repair', 'wrench-check', `Repair · ${t.customName || modelById(t.modelId).name}`, -fee);
         }
         set({ trucks: get().trucks.map(x => x.id === truckId ? { ...x, status: 'parked' } : x) });
         get().notify('truck', 'wrench-check', `${modelById(t.modelId).name} repaired and back in service.`);
@@ -844,6 +905,7 @@ export const useGame = create(
           balance: s.balance - cost,
           trucks: s.trucks.map(x => x.id === truckId ? { ...x, condition: 100 } : x),
         });
+        get().logLedger('repair', 'wrench', `Service · ${t.customName || modelById(t.modelId).name}`, -cost);
         get().notify('truck', 'wrench', `${t.customName || modelById(t.modelId).name} serviced — back to full condition.`);
         return { ok: true, cost };
       },
@@ -870,6 +932,7 @@ export const useGame = create(
           // free the driver that was assigned to it
           staff: s.staff.map(x => x.truckId === truckId ? { ...x, truckId: null } : x),
         });
+        get().logLedger('truck', 'cash-refund', `Sold ${t.customName || modelById(t.modelId).name}`, value);
         get().notify('system', 'cash-refund', `Sold ${t.customName || modelById(t.modelId).name} for ${inr(value)}.`);
         return { ok: true, value };
       },
@@ -893,6 +956,7 @@ export const useGame = create(
             tier: city.tier, cost, maint: hubMaintForCity(city),
           }],
         });
+        get().logLedger('garage', 'garage-variant', `Garage opened in ${city.name}`, -cost);
         get().notify('system', 'garage', `New garage opened in ${city.name} for ${inr(cost)}! Free refuelling + fast-travel here.`);
         return { ok: true };
       },
@@ -905,6 +969,7 @@ export const useGame = create(
         if (hub.hq) return { ok: false, err: 'Your HQ can’t be sold' };
         const refund = Math.round((hub.cost || 0) * 0.5);
         set({ balance: s.balance + refund, hubs: s.hubs.filter(h => h.cityId !== cityId) });
+        get().logLedger('garage', 'garage', `Sold garage · ${hub.name.replace(' Garage', '')}`, refund);
         get().notify('system', 'garage', `Garage in ${hub.name.replace(' Garage', '')} sold for ${inr(refund)}.`);
         return { ok: true, refund };
       },
@@ -937,8 +1002,10 @@ export const useGame = create(
         if (s.balance < fee) return { ok: false, err: `Need ${inr(fee)} for the transfer` };
         set({
           balance: s.balance - fee,
+          stats: { ...s.stats, fastTravels: (s.stats.fastTravels || 0) + 1 },
           trucks: s.trucks.map(x => x.id === truckId ? { ...x, lat: to.lat, lng: to.lng, cityId: to.id } : x),
         });
+        get().logLedger('transfer', 'transfer', `Fast-travel to ${to.name}`, -fee);
         get().notify('truck', 'transfer', `${t.customName || modelById(t.modelId).name} fast-travelled to ${to.name} for ${inr(fee)}.`);
         return { ok: true, fee, km };
       },
@@ -1168,6 +1235,7 @@ export const useGame = create(
             revenue: s.stats.revenue + d.econ.gross + reward,
             fuelSpend: s.stats.fuelSpend + d.econ.fuel,
             deliveries: s.stats.deliveries + 1,
+            contracts: (s.stats.contracts || 0) + (contract ? 1 : 0),
             km: s.stats.km + d.route.roadKm,
             // Achievement feed: sea hops sailed & borders crossed this trip.
             ferries: (s.stats.ferries || 0) + ((d.route.ferrySegments || (d.route.ferrySegment ? [d.route.ferrySegment] : [])).length),
@@ -1178,6 +1246,8 @@ export const useGame = create(
             : s.contracts,
         });
         play('coin', 0.9);
+        get().logLedger('delivery', 'truck-check', `Delivery to ${to.name} (${d.route.roadKm} km)`, d.econ.net);
+        if (reward) get().logLedger('contract', 'file-check', `Contract bonus · ${to.name}`, reward);
         get().notify('delivery', 'cash-check', `Delivered to ${to.name}: ${inr(d.econ.net)} earned.`);
         if (goldTip) get().notify('delivery', 'gold', `Happy client at ${to.name} tipped the driver +${goldTip} Gold!`);
         if (contract) get().notify('delivery', 'file-check', `Contract complete! Bonus reward ${inr(reward)}.`);
@@ -1218,10 +1288,12 @@ export const useGame = create(
         if (s.balance < fee) return { ok: false, err: `Need ${inr(fee)} for the promotion package` };
         set({
           balance: s.balance - fee,
+          stats: { ...s.stats, promotions: (s.stats.promotions || 0) + 1 },
           staff: s.staff.map(x => x.id === staffId
             ? { ...x, level: next.id, salary: newSalary, skill: newSkill, promoBoostUntil: Date.now() + 3 * 24 * 3600 * 1000 }
             : x),
         });
+        get().logLedger('staff', 'account-arrow-up', `Promotion package · ${m.name}`, -fee);
         get().notify('system', 'account-arrow-up',
           `${m.name} promoted to ${next.name}! ${inr(newSalary)}/mo · skill ${newSkill} · 2× ${m.role === 'driver' ? 'driving pace' : 'workshop efficiency'} for 3 days!`);
         play('coin', 0.8);
@@ -1237,6 +1309,7 @@ export const useGame = create(
           staff: [...s.staff, { ...c, hiredAt: Date.now(), truckId: null }],
           candidates: s.candidates.filter(x => x.id !== candId),
         });
+        get().logLedger('staff', 'account-plus', `Signing bonus · ${c.name}`, -c.bonus);
         get().notify('system', 'account-plus', `${c.name} joined as ${c.level} ${c.role}.`);
         return { ok: true };
       },
@@ -1269,6 +1342,8 @@ export const useGame = create(
             id: uid('mk'), campaignId, startedAt: Date.now(), endsAt: Date.now() + def.days * dayMs,
           }],
         });
+        set({ stats: { ...get().stats, campaigns: (get().stats.campaigns || 0) + 1 } });
+        get().logLedger('marketing', 'bullhorn', `Campaign · ${def.name}`, -def.cost);
         get().notify('system', 'bullhorn', `${def.name} launched! +${Math.round(def.boost * 100)}% revenue for ${def.days} days.`);
         return { ok: true };
       },
@@ -1297,6 +1372,8 @@ export const useGame = create(
           gold: s.gold + (def.bonusGold || 0),
           unlockedCountries: [...unlocked, code],
         });
+        get().logLedger('expansion', 'flag-checkered', `Expanded into ${def.name}`, -def.unlockCost);
+        if (def.bonusCash) get().logLedger('bonus', 'gift', `${def.name} welcome bonus`, def.bonusCash);
         get().notify('system', 'flag-checkered',
           `${def.name} unlocked! Welcome bonus: ${inr(def.bonusCash || 0)} + ${def.bonusGold || 0} Gold. New cities are open for delivery.`);
         play('coin', 0.9);
@@ -1370,6 +1447,8 @@ export const useGame = create(
           diceLeft: Math.max(0, DAILY_PLAYS - (g.diceUsed || 0)),
           slotLeft: Math.max(0, DAILY_PLAYS - (g.slotUsed || 0)),
           convoyLeft: Math.max(0, DAILY_PLAYS - (g.convoyUsed || 0)),
+          betLeft: Math.max(0, DAILY_PLAYS - (g.betUsed || 0)),
+          plateLeft: Math.max(0, DAILY_PLAYS - (g.plateUsed || 0)),
           scratchUsed: g.scratchUsed, spinUsed: g.spinUsed, diceUsed: g.diceUsed || 0, slotUsed: g.slotUsed || 0, convoyUsed: g.convoyUsed || 0,
         };
       },
@@ -1378,7 +1457,7 @@ export const useGame = create(
         const s = get();
         const g = s.games && s.games.day === day ? { ...s.games } : { day, scratchUsed: 0, spinUsed: 0, diceUsed: 0, slotUsed: 0 };
         g[kind] = (g[kind] || 0) + 1;
-        set({ games: g });
+        set({ games: g, stats: { ...get().stats, gamesPlayed: (get().stats.gamesPlayed || 0) + 1 } });
       },
 
       // Scratch card: 6 tiles (0–5 gold), a random rule decides the payout (≤5).
@@ -1483,6 +1562,54 @@ export const useGame = create(
         return { ok: true, reels, isJackpot, reward, message, left: t.slotLeft - 1 };
       },
 
+      // High-Stakes Slots: the player picks a CASH bet with a slider, then the
+      // same weighted reels spin. Three-of-a-kind pays bet × symbol jackpot,
+      // a pair pays the bet back ×1.5, anything else loses the stake.
+      playSlotBet(bet) {
+        const s = get();
+        const t = get().gamesToday();
+        if (t.betLeft <= 0) return { ok: false, err: 'No high-stakes spins left today — come back tomorrow!' };
+        const stake = Math.round(bet);
+        if (!stake || stake < 10000) return { ok: false, err: 'Minimum bet is ₹10,000' };
+        if (s.balance < stake) return { ok: false, err: 'Insufficient funds for this bet' };
+        const reels = [rollSlotSymbol(), rollSlotSymbol(), rollSlotSymbol()].map(x => x.id);
+        const isJackpot = reels[0] === reels[1] && reels[1] === reels[2];
+        const pairId = !isJackpot ? reels.find((v, i) => reels.indexOf(v) !== i) : null;
+        const winnings = isJackpot ? stake * SLOT_JACKPOT[reels[0]] : pairId ? Math.round(stake * 1.5) : 0;
+        const net = winnings - stake;
+        get()._bumpGame('betUsed');
+        set({ balance: get().balance + net });
+        get().logLedger('gamble', 'slot-machine', isJackpot ? 'High-Stakes Slots — JACKPOT!' : winnings ? 'High-Stakes Slots — pair' : 'High-Stakes Slots — lost bet', net);
+        const message = isJackpot ? `High-Stakes JACKPOT! ${reels[0]} ×3 → won ${inr(winnings)}!`
+          : winnings ? `High-Stakes Slots: pair → ${inr(winnings)} back on a ${inr(stake)} bet.`
+            : `High-Stakes Slots: no match — ${inr(stake)} lost.`;
+        return { ok: true, reels, isJackpot, stake, winnings, net, message, left: t.betLeft - 1 };
+      },
+
+      // Lucky Plate: a truck number plate is shown with 4 digits visible and
+      // the last digit hidden. Guess the hidden digit for +8 Gold. The "trick"
+      // (shh): the hidden digit is always the SUM of the visible digits mod 10
+      // — crack the pattern and it pays out every single time.
+      startPlate() {
+        const t = get().gamesToday();
+        if (t.plateLeft <= 0) return { ok: false, err: 'No plates left today — come back tomorrow!' };
+        const digits = Array.from({ length: 4 }, () => Math.floor(Math.random() * 10));
+        const series = ['GJ', 'MH', 'DL', 'KA', 'TN', 'RJ', 'UP', 'PB'][Math.floor(Math.random() * 8)];
+        set({ _plate: { digits, answer: digits.reduce((a, b) => a + b, 0) % 10 } });
+        get()._bumpGame('plateUsed');
+        return { ok: true, digits, series, left: t.plateLeft - 1 };
+      },
+      guessPlate(guess) {
+        const s = get();
+        const p = s._plate;
+        if (!p) return { ok: false, err: 'Start a new plate first' };
+        const win = Number(guess) === p.answer;
+        set({ _plate: null, gold: s.gold + (win ? 8 : 0) });
+        if (win) play('coin', 0.9);
+        get().notify('system', 'card-text', win ? `Lucky Plate: dead right — +8 Gold!` : `Lucky Plate: it was ${p.answer}. Study the plates closely...`);
+        return { ok: true, win, answer: p.answer, reward: win ? 8 : 0 };
+      },
+
       // ---------- gold exchange ----------
       // Cash out premium Gold into spendable ₹ (₹50,000 per Gold).
       convertGoldToCash(goldAmount) {
@@ -1492,6 +1619,7 @@ export const useGame = create(
         if (s.gold < amt) return { ok: false, err: 'Not enough Gold' };
         const cash = amt * GOLD_TO_CASH;
         set({ gold: s.gold - amt, balance: s.balance + cash });
+        get().logLedger('gold', 'cash-plus', `Exchanged ${amt} Gold`, cash);
         get().notify('system', 'cash-plus', `Exchanged ${amt} Gold for ${inr(cash)} cash.`);
         return { ok: true, cash };
       },
@@ -1507,6 +1635,7 @@ export const useGame = create(
           return { ok: true };
         }
         if (s.gold < p.gold) return { ok: false, err: 'Not enough Gold — buy a Gold Pack' };
+        set({ stats: { ...s.stats, goldSpent: (s.stats.goldSpent || 0) + p.gold } });
         if (pid === 'refuel') {
           if (!truckId) return { ok: false, err: 'Pick a truck first' };
           set({ gold: s.gold - p.gold, trucks: s.trucks.map(t => t.id === truckId ? { ...t, fuelPct: 100 } : t) });
@@ -1570,21 +1699,11 @@ export const useGame = create(
           balance: s.balance + EASTER_EGG_REWARD.cash,
           gold: s.gold + EASTER_EGG_REWARD.gold,
         });
+        get().logLedger('bonus', 'diamond-stone', `Hidden gem — "${egg.title}"`, EASTER_EGG_REWARD.cash);
         get().notify('system', 'diamond-stone', `Hidden gem found — "${egg.title}"! +₹1,00,00,00 & +${EASTER_EGG_REWARD.gold} Gold.`);
         play('coin', 1);
         return { ok: true, egg, reward: EASTER_EGG_REWARD, foundCount: found.length + 1, total: EASTER_EGGS.length };
       },
-
-      // ---------- collaboration (offline-stub: local partners registry) ----------
-      addPartner(code) {
-        const s = get();
-        if (!code || code === s.company.code) return { ok: false, err: 'Enter a valid partner code' };
-        if (s.partners.some(p => p.code === code)) return { ok: false, err: 'Already partnered' };
-        set({ partners: [...s.partners, { code, name: 'Partner ' + code, since: Date.now() }] });
-        get().notify('system', 'handshake', `Collaboration request sent to ${code}. Partnership active locally; syncs when online play arrives.`);
-        return { ok: true };
-      },
-      endPartner(code) { set({ partners: get().partners.filter(p => p.code !== code) }); },
 
       setPhase(phase) { set({ phase }); },
 

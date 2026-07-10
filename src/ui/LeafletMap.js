@@ -12,13 +12,14 @@ import { C } from './theme';
 import { useGame, modelById, deliveryPhase } from '../store/gameStore';
 import { cityById, ferryPorts } from '../engine/routing';
 import { statusMeta, useEasterEggTap } from './components';
+import { haptic } from '../engine/haptics';
 import { truckSvgString, truckShapes, bodyTypeFor, defaultBodyColor, headlightFor, isNightHour, ferrySvgString } from './truckArt';
 
 const CITY_DATA = CITIES.map(c => ({ id: c.id, name: c.name, state: c.state, lat: c.lat, lng: c.lng, tier: c.tier, country: c.country || 'IN' }));
 const STATION_DATA = STATIONS.map(s => ({ lat: s.lat, lng: s.lng, type: s.type, price: s.price, name: s.name }));
 const PORT_DATA = ferryPorts();
 
-export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focus, onTruckTap, onReady, onOffline }) {
+export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focus, onTruckTap, onHubTap, onReady, onOffline }) {
   const tapPortEgg = useEasterEggTap('port_master', 6);
   const tapFuelEgg = useEasterEggTap('fuel_sniffer', 7);
   const ref = useRef(null);
@@ -33,7 +34,7 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
   const hubs = useGame(s => s.hubs || []);
   const hubData = useCallback(() => hubs.filter(h => !h.hq).map(h => {
     const c = cityById(h.cityId);
-    return c ? { lat: c.lat, lng: c.lng, name: h.name, hq: false } : null;
+    return c ? { lat: c.lat, lng: c.lng, name: h.name, hq: false, cityId: h.cityId } : null;
   }).filter(Boolean), [hubs]);
 
   const initial = useMemo(() => ({
@@ -138,6 +139,8 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
     else if (msg.type === 'offline') onOffline && onOffline();
     else if (msg.type === 'pickCity') { const c = cityById(msg.id); if (c) onCityPick && onCityPick(c); }
     else if (msg.type === 'truckTap') { const t = trucks.find(x => x.id === msg.id); if (t) onTruckTap && onTruckTap(t); }
+    else if (msg.type === 'hubTap') { onHubTap && onHubTap(msg.cityId); }
+    else if (msg.type === 'hqTap') { if (company) onHubTap && onHubTap(company.hqCityId); }
   };
 
   return (
@@ -178,8 +181,9 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
 }
 
 function Ctl({ icon, onPress }) {
+  // Every map control gives the same light haptic tick as the rest of the UI.
   return (
-    <Pressable onPress={onPress} style={st.ctl}>
+    <Pressable onPress={(...a) => { haptic('light'); onPress && onPress(...a); }} style={st.ctl}>
       <Icon name={icon} size={19} color={C.text} />
     </Pressable>
   );

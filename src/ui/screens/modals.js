@@ -1136,6 +1136,7 @@ export function PowerupsModal({ visible, onClose, onOpenGames }) {
   const [page, setPage] = useState('store'); // store | wallet
   const [expand, setExpand] = useState(null);
   const [xGold, setXGold] = useState(5);
+  const tapGoldDiggerEgg = useEasterEggTap('gold_digger', 10);
   useEffect(() => { if (visible) { setPage('store'); setExpand(null); setXGold(g => Math.min(Math.max(1, g), Math.max(1, gold))); } }, [visible]);
   useEffect(() => { setXGold(g => Math.min(Math.max(1, g), Math.max(1, gold))); }, [gold]);
   const xClamp = Math.min(Math.max(1, xGold), Math.max(1, gold));
@@ -1170,7 +1171,7 @@ export function PowerupsModal({ visible, onClose, onOpenGames }) {
           pinned cards eating the store's scroll space. */}
       <Row style={{ gap: 6, marginBottom: 12 }}>
         <Chip label="Power-Ups" icon="star-four-points" active={page === 'store'} onPress={() => setPage('store')} />
-        <Chip label={`Gold Wallet · ${gold}`} icon="gold" color={C.gold} active={page === 'wallet'} onPress={() => setPage('wallet')} />
+        <Chip label={`Gold Wallet · ${gold}`} icon="gold" color={C.gold} active={page === 'wallet'} onPress={() => { tapGoldDiggerEgg(); setPage('wallet'); }} />
       </Row>
 
       {page === 'wallet' && (
@@ -1614,6 +1615,166 @@ function ConvoyGame({ toast }) {
   );
 }
 
+// High-Stakes Slots — pick your CASH bet with a slider, spin the same weighted
+// reels. Three-of-a-kind pays bet × symbol multiplier (cherry ×2 … seven ×20),
+// a pair returns 1.5×, anything else burns the stake. Real gambling economics.
+function BetSlotGame({ toast }) {
+  const playSlotBet = useGame(s => s.playSlotBet);
+  const balance = useGame(s => s.balance);
+  const games = useGame(s => s.games); // re-render on play
+  const gamesToday = useGame(s => s.gamesToday);
+  const left = gamesToday().betLeft;
+  const maxBet = Math.max(10000, Math.min(1000000, Math.floor(balance / 1000) * 1000));
+  const [bet, setBet] = useState(50000);
+  const [spinning, setSpinning] = useState(false);
+  const [result, setResult] = useState(null);
+  const [display, setDisplay] = useState(['help', 'help', 'help']);
+  const betClamped = Math.min(bet, maxBet);
+
+  const doSpin = () => {
+    if (spinning) return;
+    const r = playSlotBet(betClamped);
+    if (!r.ok) { toast(r.err, 'warn'); return; }
+    setSpinning(true); setResult(null);
+    haptic('medium');
+    let ticks = 0;
+    const iv = setInterval(() => {
+      ticks++;
+      setDisplay([0, 1, 2].map(() => SLOT_SYMBOLS[Math.floor(Math.random() * SLOT_SYMBOLS.length)].icon));
+      if (ticks > 10) {
+        clearInterval(iv);
+        setDisplay(r.reels.map(id => (SLOT_SYMBOLS.find(s => s.id === id) || {}).icon));
+        setSpinning(false); setResult(r);
+        haptic(r.isJackpot ? 'success' : r.winnings > 0 ? 'medium' : 'warn');
+        if (r.winnings > 0) play('coin', 0.9);
+        toast(r.message, r.net > 0 ? 'success' : r.winnings > 0 ? 'info' : 'error');
+      }
+    }, 90);
+  };
+
+  return (
+    <View style={{ alignItems: 'center' }}>
+      <Text style={[FONT.sub, { textAlign: 'center', marginBottom: 4 }]}>
+        Bet your own cash. Three of a kind pays 2×–20× the bet, a pair returns 1.5× — miss and the stake is gone.
+      </Text>
+      <Text style={[FONT.tiny, { marginBottom: 12 }]}>{left} of {DAILY_PLAYS} high-stakes spins left today</Text>
+      <Row style={{ gap: 12, marginBottom: 14 }}>
+        {[0, 1, 2].map(i => (
+          <View key={i} style={{
+            width: 60, height: 60, borderRadius: 12, borderWidth: 2,
+            borderColor: result && result.isJackpot ? C.gold : C.border,
+            alignItems: 'center', justifyContent: 'center', backgroundColor: C.bgSoft,
+          }}>
+            <Icon name={display[i] || 'help'} size={30} color={spinning ? C.faint : C.text} />
+          </View>
+        ))}
+      </Row>
+      <View style={{ alignSelf: 'stretch', marginBottom: 6 }}>
+        <Row style={{ justifyContent: 'space-between', marginBottom: 4 }}>
+          <Text style={FONT.tiny}>YOUR BET</Text>
+          <Text style={[FONT.mono, { fontWeight: '800', color: C.blue }]}>{inr(betClamped)}</Text>
+        </Row>
+        <GameSlider min={10000} max={maxBet} step={10000} value={betClamped} onChange={setBet}
+          minLabel="₹10K" maxLabel={inrShort(maxBet)} />
+      </View>
+      <View style={{ minHeight: 30, alignItems: 'center' }}>
+        {result ? (
+          <Text style={[FONT.h3, { color: result.net > 0 ? C.green : result.winnings > 0 ? C.sub : C.red }]}>
+            {result.isJackpot ? 'JACKPOT! ' : ''}{result.net > 0 ? `+${inr(result.net)}` : result.winnings > 0 ? `${inr(result.net)} net` : `−${inr(result.stake)}`}
+          </Text>
+        ) : null}
+      </View>
+      <Btn title={spinning ? 'Spinning…' : `Bet ${inrShort(betClamped)} & spin`} kind="primary" icon="slot-machine-outline"
+        style={{ marginTop: 8, alignSelf: 'stretch' }} disabled={spinning || left <= 0 || balance < 10000} onPress={doSpin} />
+      {balance < 10000 ? <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 6 }]}>Need at least ₹10,000 to play.</Text>
+        : left <= 0 ? <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 6 }]}>Come back tomorrow for 10 more.</Text> : null}
+    </View>
+  );
+}
+
+// Lucky Plate — a truck number plate rolls in with its last digit smudged.
+// Guess it for +8 Gold. There IS a pattern hiding in plain sight; players who
+// crack it win every time (and honestly, they've earned it).
+function PlateGame({ toast }) {
+  const startPlate = useGame(s => s.startPlate);
+  const guessPlate = useGame(s => s.guessPlate);
+  const games = useGame(s => s.games); // re-render on play
+  const gamesToday = useGame(s => s.gamesToday);
+  const left = gamesToday().plateLeft;
+  const [plate, setPlate] = useState(null);
+  const [result, setResult] = useState(null);
+
+  const start = () => {
+    const r = startPlate();
+    if (!r.ok) { toast(r.err, 'warn'); return; }
+    haptic('medium');
+    setPlate(r); setResult(null);
+  };
+  const guess = (d) => {
+    if (!plate || result) return;
+    haptic('light'); play('tap', 0.4);
+    const r = guessPlate(d);
+    if (!r.ok) { toast(r.err, 'error'); return; }
+    setResult(r);
+    haptic(r.win ? 'success' : 'warn');
+    toast(r.win ? '+8 Gold — dead right!' : `It was ${r.answer}. Look closer at the plate...`, r.win ? 'success' : 'info');
+  };
+
+  return (
+    <View style={{ alignItems: 'center' }}>
+      <Text style={[FONT.sub, { textAlign: 'center', marginBottom: 4 }]}>
+        The last digit of this plate is smudged. Guess it right for +8 Gold. Rumour says the digits aren't as random as they look…
+      </Text>
+      <Text style={[FONT.tiny, { marginBottom: 12 }]}>{left} of {DAILY_PLAYS} plates left today</Text>
+      {plate ? (
+        <View style={{
+          flexDirection: 'row', alignItems: 'center', backgroundColor: '#FDF3C7', borderWidth: 2.5,
+          borderColor: '#0B0F14', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14,
+        }}>
+          <Text style={{ fontSize: 22, fontWeight: '900', color: '#0B0F14', letterSpacing: 2 }}>
+            {plate.series}-{String(plate.digits[0])}{String(plate.digits[1])}-{String(plate.digits[2])}{String(plate.digits[3])}-
+          </Text>
+          <View style={{
+            width: 30, height: 30, borderRadius: 6, marginLeft: 2, alignItems: 'center', justifyContent: 'center',
+            backgroundColor: result ? (result.win ? C.greenSoft : C.redSoft) : '#B9AE8B',
+          }}>
+            <Text style={{ fontSize: 18, fontWeight: '900', color: result ? (result.win ? C.green : C.red) : '#6B6250' }}>
+              {result ? result.answer : '?'}
+            </Text>
+          </View>
+        </View>
+      ) : (
+        <View style={{ alignItems: 'center', paddingVertical: 18 }}>
+          <Icon name="card-text-outline" size={42} color={C.faint} />
+          <Text style={[FONT.sub, { marginTop: 8 }]}>Tap below to flag down a passing truck.</Text>
+        </View>
+      )}
+      {plate && !result ? (
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center', marginBottom: 8 }}>
+          {[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(d => (
+            <Pressable key={d} onPress={() => guess(d)} style={{
+              width: 48, height: 48, borderRadius: 12, borderWidth: 1.5, borderColor: C.border,
+              backgroundColor: C.bgSoft, alignItems: 'center', justifyContent: 'center',
+            }}>
+              <Text style={[FONT.h3]}>{d}</Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
+      <View style={{ minHeight: 26, alignItems: 'center' }}>
+        {result ? (
+          <Text style={[FONT.h3, { color: result.win ? C.green : C.sub }]}>
+            {result.win ? '+8 Gold!' : 'Wrong — study the digits you CAN see.'}
+          </Text>
+        ) : null}
+      </View>
+      <Btn title={plate && !result ? 'Pick the digit above' : 'New plate'} kind="green" icon="card-text"
+        style={{ marginTop: 8, alignSelf: 'stretch' }} disabled={(plate && !result) || left <= 0} onPress={start} />
+      {left <= 0 ? <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 6 }]}>Come back tomorrow for 10 more.</Text> : null}
+    </View>
+  );
+}
+
 export function MiniGamesModal({ visible, onClose }) {
   const toast = useToast();
   const gold = useGame(s => s.gold);
@@ -1635,11 +1796,14 @@ export function MiniGamesModal({ visible, onClose }) {
           <Chip label="Dice Roll" icon="dice-multiple" active={tab === 'dice'} onPress={() => setTab('dice')} />
           <Chip label="Slot Machine" icon="slot-machine" active={tab === 'slot'} onPress={() => setTab('slot')} />
           <Chip label="Golden Convoy" icon="treasure-chest" active={tab === 'convoy'} onPress={() => setTab('convoy')} />
+          <Chip label="High-Stakes" icon="slot-machine-outline" color={C.red} active={tab === 'bet'} onPress={() => setTab('bet')} />
+          <Chip label="Lucky Plate" icon="card-text" color={C.gold} active={tab === 'plate'} onPress={() => setTab('plate')} />
         </Row>
       </ScrollView>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
         {tab === 'scratch' ? <ScratchGame toast={toast} /> : tab === 'spin' ? <SpinGame toast={toast} /> : tab === 'dice' ? <DiceGame toast={toast} />
-          : tab === 'slot' ? <SlotGame toast={toast} /> : <ConvoyGame toast={toast} />}
+          : tab === 'slot' ? <SlotGame toast={toast} /> : tab === 'bet' ? <BetSlotGame toast={toast} />
+            : tab === 'plate' ? <PlateGame toast={toast} /> : <ConvoyGame toast={toast} />}
       </ScrollView>
     </Sheet>
   );
@@ -2092,12 +2256,6 @@ export function SettingsModal({ visible, onClose, initialTab }) {
               <Text style={[FONT.tiny, { marginTop: 14, marginBottom: 4 }]}>LOGO</Text>
               <IconGrid options={LOGOS} value={logo} onChange={o => { if (o === logo) tapBrandedEgg(); setLogo(o); }} />
             </Card>
-            <SectionTitle icon="account-multiple-plus-outline" text="Collaboration" />
-            <Card>
-              <Text style={FONT.tiny}>COMPANY CODE</Text>
-              <Text style={[FONT.h2, { letterSpacing: 2, marginTop: 2 }]}>{company?.code}</Text>
-              <Text style={FONT.tiny}>Share this with partners to collaborate.</Text>
-            </Card>
             <Btn title="Save Company" kind="green" icon="content-save-outline" style={{ marginTop: 14 }} onPress={() => { saveCompany({ name: cname, logo }); toast('Company saved', 'success'); }} />
           </>
         )}
@@ -2166,7 +2324,7 @@ export function SettingsModal({ visible, onClose, initialTab }) {
           <>
             <SectionTitle icon="bell-ring-outline" text="Notifications" />
             <Card>
-              {[['delivery', 'Delivery updates'], ['truck', 'Truck ready'], ['fuel', 'Low fuel warning'], ['collab', 'Collaboration requests'], ['daily', 'Daily summary']].map(([k, l]) => (
+              {[['delivery', 'Delivery updates'], ['truck', 'Truck ready'], ['fuel', 'Low fuel warning'], ['daily', 'Daily summary']].map(([k, l]) => (
                 <ToggleRow key={k} label={l} value={settings.notif[k]} onChange={v => saveSettings({ notif: { ...settings.notif, [k]: v } })} />
               ))}
             </Card>
@@ -2563,6 +2721,171 @@ export function HubsModal({ visible, onClose, onShowOnMap }) {
             );
           })}
         </View>
+      </ScrollView>
+    </Sheet>
+  );
+}
+
+// ============ HQ / Garage info (tap the building on the map) ============
+// One modal for both: HQ shows the whole company picture (network, monthly
+// bills incl. electricity, fleet ops); a garage shows its own books and lets
+// you operate the trucks parked there — refuel, dispatch, fast-travel in.
+export function HubInfoModal({ visible, onClose, cityId, onNewDelivery, onOpenTruck }) {
+  const toast = useToast();
+  const hubs = useGame(s => s.hubs || []);
+  const trucks = useGame(s => s.trucks);
+  const deliveries = useGame(s => s.deliveries);
+  const staff = useGame(s => s.staff);
+  const history = useGame(s => s.history);
+  const company = useGame(s => s.company);
+  const refuelAtHub = useGame(s => s.refuelAtHub);
+  const fastTravel = useGame(s => s.fastTravel);
+  const [travelOpen, setTravelOpen] = useState(false);
+  useEffect(() => { if (!visible) setTravelOpen(false); }, [visible]);
+
+  const hub = hubs.find(h => h.cityId === cityId);
+  const city = cityId ? cityById(cityId) : null;
+  if (!hub || !city) return <Sheet visible={visible} onClose={onClose} title="Garage" height="40%"><View /></Sheet>;
+
+  const isHQ = !!hub.hq;
+  const here = trucks.filter(t => t.cityId === cityId);
+  const parked = here.filter(t => t.status === 'parked');
+  const delivering = trucks.filter(t => t.status === 'delivering' && deliveries.some(d => d.truckId === t.id && (d.fromCityId === cityId || d.toCityId === cityId)));
+  const needFuel = parked.filter(t => (t.fuelPct || 0) < 100);
+  const elsewhere = trucks.filter(t => t.status === 'parked' && t.cityId !== cityId && hubs.some(h => h.cityId === t.cityId));
+  const trips = history.filter(h => h.fromCityId === cityId || h.toCityId === cityId);
+  const tripNet = trips.reduce((a, h) => a + h.net, 0);
+  // Monthly bills — upkeep covers rent/maintenance; the light bill is a slice
+  // of it (deterministic per tier) so the invoice reads like a real one.
+  const upkeep = isHQ ? 0 : (hub.maint || hubMaintForCity(city));
+  const lightBill = isHQ ? 25000 : Math.round(upkeep * 0.18);
+  const rentMaint = isHQ ? 0 : upkeep - lightBill;
+  const salaries = staff.reduce((a, x) => a + x.salary, 0);
+  const netUpkeep = hubs.filter(h => !h.hq).reduce((a, h) => a + (h.maint || hubMaintForCity(cityById(h.cityId))), 0);
+
+  return (
+    <Sheet visible={visible} onClose={onClose} title={hub.name} height="88%">
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+        {/* Hero */}
+        <Card style={{ marginBottom: 12, backgroundColor: isHQ ? '#0F172A' : C.bgSoft, borderColor: isHQ ? '#1E293B' : C.border }}>
+          <Row>
+            <View style={[cs.heroIcon, { width: 52, height: 52, backgroundColor: isHQ ? '#1E293B' : C.blueSoft }]}>
+              <Icon name={isHQ ? 'office-building-marker' : 'garage-variant'} size={28} color={isHQ ? '#5B8DF0' : C.blue} />
+            </View>
+            <View style={{ marginLeft: 12, flex: 1 }}>
+              <Text style={[FONT.h2, isHQ && { color: '#F8FAFC' }]}>{isHQ ? company?.name : hub.name}</Text>
+              <Text style={[FONT.tiny, isHQ && { color: '#94A3B8' }]}>
+                {isHQ ? `Headquarters · ${city.name}, ${city.state}` : `${city.name}, ${city.state} · Tier ${city.tier}`} · since {relTime(hub.since)}
+              </Text>
+            </View>
+            <Pill text={isHQ ? 'HQ' : 'Garage'} color={isHQ ? '#5B8DF0' : C.blue} bg={isHQ ? '#1E293B' : C.blueSoft} />
+          </Row>
+        </Card>
+
+        {/* Location stats */}
+        <Row style={{ marginBottom: 8, backgroundColor: C.bgSoft, borderRadius: RADIUS.md, paddingVertical: 10 }}>
+          <ContractStat icon="truck" label="Trucks here" value={String(here.length)} />
+          <ContractStat icon="parking" label="Parked" value={String(parked.length)} color={C.blue} />
+          <ContractStat icon="truck-fast" label="To / from" value={String(delivering.length)} color={C.green} />
+          <ContractStat icon="history" label="Past trips" value={String(trips.length)} />
+        </Row>
+        {trips.length > 0 && (
+          <Card style={{ marginBottom: 12 }}>
+            <Row style={{ justifyContent: 'space-between' }}>
+              <Row><Icon name="cash-check" size={16} color={C.green} /><Text style={[FONT.body, { fontWeight: '700', marginLeft: 6 }]}>Earnings through this {isHQ ? 'HQ' : 'garage'}</Text></Row>
+              <Text style={[FONT.mono, { fontWeight: '800', color: tripNet >= 0 ? C.green : C.red }]}>{inrShort(tripNet)}</Text>
+            </Row>
+          </Card>
+        )}
+
+        {/* Monthly bills */}
+        <SectionTitle icon="file-document-outline" text="Monthly Bills" />
+        <Card style={{ marginBottom: 12 }}>
+          <Row style={{ justifyContent: 'space-between', paddingVertical: 7 }}>
+            <Row><Icon name="lightbulb-on-outline" size={16} color={C.amber} /><Text style={[FONT.body, { marginLeft: 8 }]}>Electricity (light bill)</Text></Row>
+            <Text style={[FONT.mono, { fontWeight: '700' }]}>{inr(lightBill)}</Text>
+          </Row>
+          {!isHQ && (
+            <Row style={{ justifyContent: 'space-between', paddingVertical: 7, borderTopWidth: 1, borderTopColor: C.border }}>
+              <Row><Icon name="home-city-outline" size={16} color={C.sub} /><Text style={[FONT.body, { marginLeft: 8 }]}>Rent & maintenance</Text></Row>
+              <Text style={[FONT.mono, { fontWeight: '700' }]}>{inr(rentMaint)}</Text>
+            </Row>
+          )}
+          {isHQ && (
+            <>
+              <Row style={{ justifyContent: 'space-between', paddingVertical: 7, borderTopWidth: 1, borderTopColor: C.border }}>
+                <Row><Icon name="account-cash" size={16} color={C.sub} /><Text style={[FONT.body, { marginLeft: 8 }]}>Staff salaries (company-wide)</Text></Row>
+                <Text style={[FONT.mono, { fontWeight: '700' }]}>{inr(salaries)}</Text>
+              </Row>
+              <Row style={{ justifyContent: 'space-between', paddingVertical: 7, borderTopWidth: 1, borderTopColor: C.border }}>
+                <Row><Icon name="garage" size={16} color={C.sub} /><Text style={[FONT.body, { marginLeft: 8 }]}>Garage network upkeep</Text></Row>
+                <Text style={[FONT.mono, { fontWeight: '700' }]}>{inr(netUpkeep)}</Text>
+              </Row>
+            </>
+          )}
+          <Row style={{ justifyContent: 'space-between', paddingVertical: 8, borderTopWidth: 1, borderTopColor: C.border, marginTop: 2 }}>
+            <Text style={[FONT.body, { fontWeight: '800' }]}>Total / month</Text>
+            <Text style={[FONT.mono, { fontWeight: '800', color: C.amber }]}>
+              {inr(isHQ ? lightBill + salaries + netUpkeep : upkeep)}
+            </Text>
+          </Row>
+          <Text style={[FONT.tiny, { marginTop: 6 }]}>Billed automatically with monthly costs every 30 game days.</Text>
+        </Card>
+
+        {/* Operate trucks from here */}
+        <SectionTitle icon="steering" text="Operate From Here" right={
+          needFuel.length > 0 ? <Btn title={`Refuel ${needFuel.length} free`} kind="green" small icon="gas-station"
+            onPress={() => { needFuel.forEach(t => refuelAtHub(t.id)); toast(`Refuelled ${needFuel.length} truck(s) free`, 'success'); }} /> : null
+        } />
+        {parked.length === 0 ? (
+          <Card style={{ marginBottom: 10 }}>
+            <Text style={FONT.sub}>No trucks parked here right now.</Text>
+            {elsewhere.length > 0 && (
+              <Btn title="Fast-travel a truck here" kind="blue" small icon="transfer" style={{ marginTop: 10 }}
+                onPress={() => setTravelOpen(v => !v)} />
+            )}
+          </Card>
+        ) : parked.map(t => {
+          const m = modelById(t.modelId);
+          return (
+            <Card key={t.id} style={{ marginBottom: 8, padding: 12 }}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Pressable style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }} onPress={() => onOpenTruck && onOpenTruck(t.id)}>
+                  <Icon name={m.icon} size={20} color={C.blue} />
+                  <View style={{ marginLeft: 8, flex: 1 }}>
+                    <Text style={FONT.body} numberOfLines={1}>{t.customName || m.name}</Text>
+                    <Text style={FONT.tiny}>Fuel {Math.round(t.fuelPct)}% · condition {Math.round(t.condition == null ? 100 : t.condition)}%</Text>
+                  </View>
+                </Pressable>
+                <Btn title="Dispatch" kind="primary" small icon="truck-fast"
+                  onPress={() => { onClose(); onNewDelivery && onNewDelivery(t.id); }} />
+              </Row>
+            </Card>
+          );
+        })}
+        {parked.length > 0 && elsewhere.length > 0 && (
+          <Btn title="Fast-travel another truck here" kind="soft" small icon="transfer" style={{ marginBottom: 8 }}
+            onPress={() => setTravelOpen(v => !v)} />
+        )}
+        {travelOpen && (
+          <View style={[cs.pickerBox, { marginBottom: 10 }]}>
+            <Text style={[FONT.tiny, { marginBottom: 6 }]}>PICK A PARKED TRUCK TO BRING HERE</Text>
+            {elsewhere.map(t => {
+              const m = modelById(t.modelId), from = cityById(t.cityId);
+              return (
+                <Pressable key={t.id} style={cs.resRow} onPress={() => {
+                  const r = fastTravel(t.id, cityId);
+                  toast(r.ok ? `Moved to ${city.name} for ${inr(r.fee)}` : r.err, r.ok ? 'success' : 'error');
+                  if (r.ok) setTravelOpen(false);
+                }}>
+                  <Icon name={m.icon} size={16} color={C.sub} />
+                  <Text style={[FONT.body, { flex: 1, marginLeft: 8 }]} numberOfLines={1}>{t.customName || m.name}</Text>
+                  <Text style={FONT.tiny}>{from?.name}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
       </ScrollView>
     </Sheet>
   );

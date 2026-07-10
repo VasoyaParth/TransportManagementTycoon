@@ -527,3 +527,46 @@ export const CITIES = [
 import { INTL_CITIES } from './expansion';
 for (const c of CITIES) { if (!c.country) c.country = 'IN'; }
 CITIES.push(...INTL_CITIES);
+
+// ============================================================================
+// v2.3.0 "Every Corner" expansion — thousands of tappable locality points.
+// Every city grows real drivable zones (Transport Nagar, Industrial Estate,
+// Truck Terminal, Market Yard...) so trucks can travel to any point INSIDE a
+// city, not just its centre — city and state level density. Offsets are
+// deterministic (hashed per city id) so coordinates stay identical across
+// restarts and saved games. Each zone is wired into the road graph with a
+// city-road edge back to its parent, so routing is road → road → zone (and
+// road → dock → sea → dock for ferry cities) end to end.
+// ============================================================================
+const ZONES_T1 = ['Transport Nagar', 'Industrial Estate', 'Old City Market', 'Railway Yard', 'Airport Cargo', 'Ring Road Depot', 'Wholesale Mandi', 'Truck Terminal'];
+const ZONES_T2 = ['Transport Nagar', 'Industrial Estate', 'Market Yard', 'Bypass Depot'];
+const ZONES_T3 = ['Industrial Area', 'Market Yard'];
+function zoneHash(id) { let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0; return h; }
+
+export const LOCALITY_EDGES = [];
+export const LOCALITY_NODES = {};
+{
+  const base = [...CITIES];
+  for (const c of base) {
+    const zones = c.tier === 1 ? ZONES_T1 : c.tier === 2 ? ZONES_T2 : ZONES_T3;
+    const h = zoneHash(c.id);
+    const spread = c.tier === 1 ? 0.16 : c.tier === 2 ? 0.09 : 0.05; // ~5-18 km ring
+    zones.forEach((z, i) => {
+      const ang = (((h >> (i * 3)) % 360) * Math.PI) / 180 + i * ((2 * Math.PI) / zones.length);
+      const r = spread * (0.6 + ((h >> (i * 2)) % 40) / 100);
+      const lat = +(c.lat + Math.sin(ang) * r).toFixed(3);
+      const lng = +(c.lng + Math.cos(ang) * r).toFixed(3);
+      const id = `${c.id}-z${i}`;
+      CITIES.push({
+        id, name: `${c.name} · ${z}`, state: c.state, country: c.country || 'IN',
+        lat, lng, pop: Math.max(5000, Math.round((c.pop || 50000) / (zones.length * 5))),
+        tier: 3, locality: true, parent: c.id,
+      });
+      LOCALITY_NODES[id] = { lat, lng };
+      // Parent city might not be a named road node — expose its coords so
+      // highways.js can seed it as one (never overwriting an existing node).
+      LOCALITY_NODES[c.id] = LOCALITY_NODES[c.id] || { lat: c.lat, lng: c.lng, seedOnly: true };
+      LOCALITY_EDGES.push({ a: c.id, b: id, nh: 'City Road' });
+    });
+  }
+}
