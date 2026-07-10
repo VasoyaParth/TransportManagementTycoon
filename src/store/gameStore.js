@@ -115,23 +115,25 @@ export const incidentMeta = id => INCIDENT_TYPES.find(x => x.id === id) || INCID
 export function deliveryPhase(d, now = Date.now()) {
   const total = Math.max(1, (d.endsAt - d.startedAt) / 1000);
   const load = d.loadSec || 0, unload = d.unloadSec || 0;
-  const fs = d.route && d.route.ferrySegment;
-  const board = fs ? (d.ferryBoardSec || 0) : 0, unboard = fs ? (d.ferryUnboardSec || 0) : 0;
-  const drive = Math.max(1, total - load - unload - board - unboard);
-  const sf = fs ? fs.startFrac : 1, ef = fs ? fs.endFrac : 1;
-  const segs = fs ? [
-    { phase: 'loading', dur: load, f0: 0, f1: 0 },
-    { phase: 'driving', dur: drive * sf, f0: 0, f1: sf },
-    { phase: 'ferry-board', dur: board, f0: sf, f1: sf },
-    { phase: 'ferry', dur: drive * (ef - sf), f0: sf, f1: ef },
-    { phase: 'ferry-unboard', dur: unboard, f0: ef, f1: ef },
-    { phase: 'driving', dur: drive * (1 - ef), f0: ef, f1: 1 },
-    { phase: 'unloading', dur: unload, f0: 1, f1: 1 },
-  ] : [
-    { phase: 'loading', dur: load, f0: 0, f1: 0 },
-    { phase: 'driving', dur: drive, f0: 0, f1: 1 },
-    { phase: 'unloading', dur: unload, f0: 1, f1: 1 },
-  ];
+  // Every sea hop gets its own board → sail → roll-off cycle, so multi-ferry
+  // routes (mainland → island → island) convert truck↔ferry at each port
+  // instead of treating everything between the first and last hop as "at sea".
+  const hops = (d.route && (d.route.ferrySegments
+    || (d.route.ferrySegment ? [d.route.ferrySegment] : []))) || [];
+  const board = hops.length ? (d.ferryBoardSec || 0) : 0;
+  const unboard = hops.length ? (d.ferryUnboardSec || 0) : 0;
+  const drive = Math.max(1, total - load - unload - (board + unboard) * hops.length);
+  const segs = [{ phase: 'loading', dur: load, f0: 0, f1: 0 }];
+  let prev = 0;
+  for (const h of hops) {
+    if (h.startFrac > prev) segs.push({ phase: 'driving', dur: drive * (h.startFrac - prev), f0: prev, f1: h.startFrac });
+    segs.push({ phase: 'ferry-board', dur: board, f0: h.startFrac, f1: h.startFrac });
+    segs.push({ phase: 'ferry', dur: drive * (h.endFrac - h.startFrac), f0: h.startFrac, f1: h.endFrac });
+    segs.push({ phase: 'ferry-unboard', dur: unboard, f0: h.endFrac, f1: h.endFrac });
+    prev = h.endFrac;
+  }
+  if (prev < 1) segs.push({ phase: 'driving', dur: drive * (1 - prev), f0: prev, f1: 1 });
+  segs.push({ phase: 'unloading', dur: unload, f0: 1, f1: 1 });
   let t = (now - d.startedAt) / 1000;
   if (t <= 0) return { phase: 'loading', frac: 0 };
   for (const sg of segs) {
@@ -205,6 +207,8 @@ export const EASTER_EGGS = [
   { id: 'patient_parker', title: 'Patient Parker', hint: 'Good things come to those who wait — parked.', where: 'Tap the "Parked" tab in the Fleet Manager drawer 3 times fast.' },
   { id: 'not_a_bug', title: 'Not a Bug, a Feature', hint: 'The mascot has a sense of humour.', where: 'Tap the truck logo on the splash screen 10 times fast.' },
   { id: 'nice_try', title: 'Nice Try', hint: 'Reading the warning label a little too closely.', where: 'Tap the Danger Zone warning text in Settings → Gameplay 6 times fast (doesn’t actually reset anything).' },
+  { id: 'port_master', title: 'Harbour Master', hint: 'The sea rewards those who keep checking the docks.', where: 'Tap the anchor (ports) button on the map 6 times fast.' },
+  { id: 'fuel_sniffer', title: 'Fuel Sniffer', hint: 'Always hunting for the cheapest litre.', where: 'Tap the fuel-station toggle on the map 7 times fast.' },
 ];
 const EASTER_EGG_REWARD = { cash: 1000000, gold: 15 }; // ₹10 lakhs + 15 Gold, per egg, one-time
 
@@ -652,7 +656,10 @@ export const useGame = create(
         if (t.status === 'delivering') return { ok: false, err: 'Truck is out on delivery' };
         const cond = t.condition == null ? 100 : t.condition;
         if (cond >= 99) return { ok: false, err: 'Already in top condition' };
-        const cost = Math.round(modelById(t.modelId).price * SERVICE_COST_PCT);
+        // Realistic bill: proportional to the wear being fixed, capped at ₹5L
+        // so servicing a premium rig never costs a fortune. Floor ₹15k.
+        const cost = Math.max(15000, Math.min(500000,
+          Math.round(modelById(t.modelId).price * SERVICE_COST_PCT * ((100 - cond) / 100))));
         if (s.balance < cost) return { ok: false, err: 'Insufficient funds for service' };
         set({
           balance: s.balance - cost,

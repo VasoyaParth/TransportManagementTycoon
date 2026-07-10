@@ -623,11 +623,76 @@ export const ROAD_EDGES = [
   { a: 'madurai', b: 'kollam', nh: 'NH-744', via: [[9.45, 77.55], [9.05, 77.05]] },
 ];
 
+// Sea crossings run PORT-to-PORT only — never from a city centre. Every port
+// node sits on the actual coastline (real Indian ports) and connects to its
+// city by a short dock road, so trucks drive to the dock, board there, and
+// the ferry line never starts inland.
 export const FERRY_EDGES = [
-  { a: 'chennai', b: 'port-blair', type: 'ferry' },
-  { a: 'kochi', b: 'kavaratti', type: 'ferry' },
-  { a: 'visakhapatnam', b: 'port-blair', type: 'ferry' },
+  // Bay of Bengal / Andamans
+  { a: 'chennai-port', b: 'port-blair', type: 'ferry' },
+  { a: 'vizag-port', b: 'port-blair', type: 'ferry' },
+  // Arabian Sea / Lakshadweep
+  { a: 'kochi-port', b: 'kavaratti', type: 'ferry' },
+  // Gujarat — real RO-PAX routes: Ghogha–Dahej across the Gulf of Khambhat,
+  // Okha–Bedi around the Gulf of Kutch, Kandla/Mundra–Mumbai coastal shipping.
+  { a: 'ghogha-port', b: 'dahej-port', type: 'ferry' },
+  { a: 'okha-port', b: 'bedi-port', type: 'ferry' },
+  { a: 'kandla-port', b: 'mumbai-port', type: 'ferry' },
+  { a: 'mundra-port', b: 'mumbai-port', type: 'ferry' },
+  // West-coast coastal shipping chain
+  { a: 'mumbai-port', b: 'mormugao-port', type: 'ferry' },
+  { a: 'mormugao-port', b: 'mangalore-port', type: 'ferry' },
+  { a: 'mangalore-port', b: 'kochi-port', type: 'ferry' },
+  // East-coast coastal shipping chain
+  { a: 'chennai-port', b: 'tuticorin-port', type: 'ferry' },
+  { a: 'vizag-port', b: 'paradip-port', type: 'ferry' },
+  { a: 'paradip-port', b: 'haldia-port', type: 'ferry' },
 ];
+
+// Real Indian sea ports — coastal coordinates (on the waterline, not city
+// centres), each tied into the road grid by a short dock road.
+Object.assign(ROAD_NODES, {
+  'kandla-port': { lat: 22.98, lng: 70.22 },
+  'mundra-port': { lat: 22.72, lng: 69.70 },
+  'okha-port': { lat: 22.47, lng: 69.07 },
+  'bedi-port': { lat: 22.52, lng: 70.04 },
+  'porbandar-port': { lat: 21.63, lng: 69.60 },
+  'veraval-port': { lat: 20.90, lng: 70.36 },
+  'pipavav-port': { lat: 20.92, lng: 71.51 },
+  'ghogha-port': { lat: 21.68, lng: 72.28 },
+  'dahej-port': { lat: 21.70, lng: 72.52 },
+  'hazira-port': { lat: 21.10, lng: 72.62 },
+  'mumbai-port': { lat: 18.94, lng: 72.85 },
+  'mormugao-port': { lat: 15.41, lng: 73.80 },
+  'mangalore-port': { lat: 12.99, lng: 74.80 },
+  'kochi-port': { lat: 9.97, lng: 76.24 },
+  'tuticorin-port': { lat: 8.75, lng: 78.20 },
+  'chennai-port': { lat: 13.11, lng: 80.30 },
+  'vizag-port': { lat: 17.68, lng: 83.30 },
+  'paradip-port': { lat: 20.27, lng: 86.67 },
+  'haldia-port': { lat: 22.03, lng: 88.06 },
+});
+ROAD_EDGES.push(
+  { a: 'gandhidham', b: 'kandla-port', nh: 'Port Rd' },
+  { a: 'gandhidham', b: 'mundra-port', nh: 'Port Rd' },
+  { a: 'dwarka', b: 'okha-port', nh: 'Port Rd' },
+  { a: 'jamnagar', b: 'bedi-port', nh: 'Port Rd' },
+  { a: 'porbandar', b: 'porbandar-port', nh: 'Port Rd' },
+  { a: 'junagadh', b: 'veraval-port', nh: 'Port Rd' },
+  { a: 'bhavnagar', b: 'pipavav-port', nh: 'Port Rd' },
+  { a: 'bhavnagar', b: 'ghogha-port', nh: 'Port Rd' },
+  { a: 'bharuch', b: 'dahej-port', nh: 'Port Rd' },
+  { a: 'surat', b: 'hazira-port', nh: 'Port Rd' },
+  { a: 'mumbai', b: 'mumbai-port', nh: 'Port Rd' },
+  { a: 'panaji', b: 'mormugao-port', nh: 'Port Rd' },
+  { a: 'mangaluru', b: 'mangalore-port', nh: 'Port Rd' },
+  { a: 'kochi', b: 'kochi-port', nh: 'Port Rd' },
+  { a: 'madurai', b: 'tuticorin-port', nh: 'NH-38' },
+  { a: 'chennai', b: 'chennai-port', nh: 'Port Rd' },
+  { a: 'visakhapatnam', b: 'vizag-port', nh: 'Port Rd' },
+  { a: 'cuttack', b: 'paradip-port', nh: 'NH-53' },
+  { a: 'kolkata', b: 'haldia-port', nh: 'NH-116' },
+);
 
 // --- v2 supplemental network: Gujarat/Saurashtra + central-west India ---
 // Densifies routing and gives realistic multi-hop corridors (e.g. Surat->Rajkot

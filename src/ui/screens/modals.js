@@ -180,6 +180,18 @@ function buildJourney(d, model, now = Date.now()) {
     if (wp.some(w => w.type === 'sleep' && Math.abs(w.atKm - atKm) < speed * 0.6)) continue;
     wp.push({ type: 'short', atKm, title: `Short break ${j}`, sub: '~5 min stop', icon: 'coffee-outline', color: C.sub });
   }
+  // Ferry crossings: a board + roll-off waypoint per sea hop, named after the
+  // actual port nodes the route passes through (in order).
+  const ferrySegs = d.route.ferrySegments || (d.route.ferrySegment ? [d.route.ferrySegment] : []);
+  if (ferrySegs.length) {
+    const portName = id => id ? id.replace(/-port$/, '').split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : null;
+    const portIds = (d.route.nodeIds || []).filter(id => /-port$/.test(id) || id === 'port-blair' || id === 'kavaratti' || id === 'rameswaram');
+    ferrySegs.forEach((fs, i) => {
+      const a = portName(portIds[2 * i]), b = portName(portIds[2 * i + 1]);
+      wp.push({ type: 'port', atKm: Math.round(fs.startFrac * total), title: `Board ferry${a ? ` · ${a} Port` : ''}`, sub: 'Roll-on at the dock', icon: 'ferry', color: '#0E4C7A' });
+      wp.push({ type: 'port', atKm: Math.round(fs.endFrac * total), title: `Leave ferry${b ? ` · ${b} Port` : ''}`, sub: 'Roll-off — back on the road', icon: 'anchor', color: '#0E4C7A' });
+    });
+  }
   wp.push({ type: 'dest', atKm: total, title: `Deliver to ${cityById(d.toCityId)?.name || 'Destination'}`, sub: prog >= 1 ? 'Arrived' : 'Pending arrival', icon: 'map-marker-check', color: C.green });
 
   const waypoints = wp.filter(w => w.atKm >= 0 && w.atKm <= total).sort((a, b) => a.atKm - b.atKm);

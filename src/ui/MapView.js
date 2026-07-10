@@ -203,6 +203,8 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
   };
 
   const tapHqEgg = useEasterEggTap('hq_home', 5);
+  const tapPortEgg = useEasterEggTap('port_master', 6);
+  const tapFuelEgg = useEasterEggTap('fuel_sniffer', 7);
   const centerHQ = () => {
     if (!company) return;
     const hq = cityById(company.hqCityId);
@@ -460,9 +462,9 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
       {/* Map controls (pinch to zoom — no +/- buttons) */}
       <View style={st.controls}>
         <Ctl icon="home-map-marker" onPress={centerHQ} />
-        <Ctl icon="gas-station" active={showStations} onPress={() => setShowStations(v => !v)} />
+        <Ctl icon="gas-station" active={showStations} onPress={() => { setShowStations(v => !v); tapFuelEgg(); }} />
         <Ctl icon="city-variant-outline" active={showCities} onPress={() => setShowCities(v => !v)} />
-        <Ctl icon="anchor" active={showPorts} onPress={() => setShowPorts(v => !v)} />
+        <Ctl icon="anchor" active={showPorts} onPress={() => { setShowPorts(v => !v); tapPortEgg(); }} />
       </View>
 
     </View>
