@@ -39,6 +39,13 @@ export default function GameScreen() {
   const settings = useGame(s => s.settings);
   const [tab, setTab] = useState(null);
   const [modal, setModal] = useState(null); // {kind, ...props}
+  // Lazy modal mounting: every modal used to render (hidden) on first paint,
+  // which made app start-up do the work of ten sheets. Instead a modal only
+  // mounts once its kind has been opened, then stays mounted so the Sheet's
+  // open/close animation keeps working on subsequent opens.
+  const mountedModals = useRef(new Set());
+  if (modal?.kind) mountedModals.current.add(modal.kind);
+  const mounted = (kind) => mountedModals.current.has(kind);
   const [picking, setPicking] = useState(null); // {truckId, contract}
   const [focus, setFocus] = useState(null);
   const [sidebar, setSidebar] = useState(false);
@@ -229,33 +236,33 @@ export default function GameScreen() {
         {tab === 'collab' && <CollabTab />}
       </Sheet>
 
-      {/* ---- Modals ---- */}
-      <NewDeliveryModal
+      {/* ---- Modals (lazy — each mounts on first open, see mountedModals) ---- */}
+      {mounted('delivery') && <NewDeliveryModal
         visible={modal?.kind === 'delivery'}
         onClose={() => setModal(null)}
         presetTruckId={modal?.truckId}
         presetDest={modal?.dest}
         contract={modal?.contract}
         onPickOnMap={() => { setPicking({ truckId: modal?.truckId, contract: modal?.contract }); setModal(null); }}
-      />
-      <TruckDetailModal
+      />}
+      {mounted('truck') && <TruckDetailModal
         visible={modal?.kind === 'truck'} onClose={() => setModal(null)} truckId={modal?.truckId}
         onNewDelivery={(tid) => openNewDelivery(tid)}
         onShowOnMap={showOnMap}
-      />
-      <DriverDetailModal
+      />}
+      {mounted('driver') && <DriverDetailModal
         visible={modal?.kind === 'driver'} onClose={() => setModal(null)} staffId={modal?.staffId}
         onShowOnMap={(t) => { setModal(null); setTab(null); showOnMap(t); }}
-      />
-      <CountriesModal visible={modal?.kind === 'countries'} onClose={() => setModal(null)} />
-      <MiniGamesModal visible={modal?.kind === 'games'} onClose={() => setModal(null)} />
-      <BuyTruckModal visible={modal?.kind === 'buy'} onClose={() => setModal(null)} />
-      <ContractsModal visible={modal?.kind === 'contracts'} onClose={() => setModal(null)}
-        onAccept={(c) => openNewDelivery(undefined, c.destCityId, c)} />
-      <PowerupsModal visible={modal?.kind === 'powerups'} onClose={() => setModal(null)} onOpenGames={() => setModal({ kind: 'games' })} />
-      <NotificationsModal visible={modal?.kind === 'notifications'} onClose={() => setModal(null)} />
-      <HubsModal visible={modal?.kind === 'hubs'} onClose={() => setModal(null)} onShowOnMap={(f) => { setModal(null); setFocus(f); }} />
-      <SettingsModal visible={modal?.kind === 'settings'} onClose={() => setModal(null)} initialTab={modal?.tab} />
+      />}
+      {mounted('countries') && <CountriesModal visible={modal?.kind === 'countries'} onClose={() => setModal(null)} />}
+      {mounted('games') && <MiniGamesModal visible={modal?.kind === 'games'} onClose={() => setModal(null)} />}
+      {mounted('buy') && <BuyTruckModal visible={modal?.kind === 'buy'} onClose={() => setModal(null)} />}
+      {mounted('contracts') && <ContractsModal visible={modal?.kind === 'contracts'} onClose={() => setModal(null)}
+        onAccept={(c) => openNewDelivery(undefined, c.destCityId, c)} />}
+      {mounted('powerups') && <PowerupsModal visible={modal?.kind === 'powerups'} onClose={() => setModal(null)} onOpenGames={() => setModal({ kind: 'games' })} />}
+      {mounted('notifications') && <NotificationsModal visible={modal?.kind === 'notifications'} onClose={() => setModal(null)} />}
+      {mounted('hubs') && <HubsModal visible={modal?.kind === 'hubs'} onClose={() => setModal(null)} onShowOnMap={(f) => { setModal(null); setFocus(f); }} />}
+      {mounted('settings') && <SettingsModal visible={modal?.kind === 'settings'} onClose={() => setModal(null)} initialTab={modal?.tab} />}
 
       {/* Left fleet-management drawer */}
       <FleetSidebar

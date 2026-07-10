@@ -1607,12 +1607,20 @@ export function DriverDetailModal({ visible, onClose, staffId, onShowOnMap }) {
 }
 
 // ============ Notifications ============
+// The feed can hold hundreds of entries — rendering them all makes the sheet
+// heavy to open. Show the newest NOTIF_PAGE, and load the rest in pages via a
+// "Show more" footer (count resets whenever the sheet reopens or filter flips).
+const NOTIF_PAGE = 12;
 export function NotificationsModal({ visible, onClose }) {
   const notifications = useGame(s => s.notifications);
   const markRead = useGame(s => s.markRead);
   const markAllRead = useGame(s => s.markAllRead);
   const [filter, setFilter] = useState('all');
+  const [shownCount, setShownCount] = useState(NOTIF_PAGE);
+  useEffect(() => { if (visible) setShownCount(NOTIF_PAGE); }, [visible, filter]);
   const list = notifications.filter(n => filter === 'all' || (filter === 'delivery' ? n.type === 'delivery' : n.type !== 'delivery'));
+  const shown = list.slice(0, shownCount);
+  const hidden = list.length - shown.length;
   return (
     <Sheet visible={visible} onClose={onClose} title="Notifications" height="82%">
       <Row style={{ justifyContent: 'space-between', marginBottom: 10 }}>
@@ -1624,9 +1632,17 @@ export function NotificationsModal({ visible, onClose }) {
         <Btn title="Mark all read" kind="ghost" small onPress={markAllRead} />
       </Row>
       <FlatList
-        data={list} keyExtractor={n => n.id} showsVerticalScrollIndicator={false}
+        data={shown} keyExtractor={n => n.id} showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 30 }}
+        initialNumToRender={NOTIF_PAGE} windowSize={5} removeClippedSubviews
         ListEmptyComponent={<View style={{ alignItems: 'center', padding: 30 }}><Icon name="bell-sleep-outline" size={30} color={C.faint} /><Text style={[FONT.sub, { marginTop: 6 }]}>Nothing yet.</Text></View>}
+        ListFooterComponent={hidden > 0 ? (
+          <Pressable onPress={() => setShownCount(c => c + 15)}
+            style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12 }}>
+            <Icon name="chevron-down" size={16} color={C.blue} />
+            <Text style={{ color: C.blue, fontWeight: '700', marginLeft: 4 }}>Show more ({hidden} older)</Text>
+          </Pressable>
+        ) : null}
         renderItem={({ item: n }) => (
           <Pressable onPress={() => markRead(n.id)} style={[cs.notif, !n.read && { backgroundColor: C.blueSoft }]}>
             <View style={[cs.notifIcon, { backgroundColor: n.read ? C.bgSoft : '#fff' }]}><Icon name={n.icon} size={18} color={C.blue} /></View>
