@@ -855,10 +855,13 @@ export const useGame = create(
         // paperwork + rolling the truck on/off the ferry at each dock.
         const loadSec = Math.round(120 + Math.random() * 180);       // 2–5 min loading
         const unloadSec = Math.round(180 + Math.random() * 180);     // 3–6 min unloading
-        const hasFerry = !!(p.route && p.route.ferrySegment);
-        const ferryBoardSec = hasFerry ? Math.round(300 + Math.random() * 300) : 0;   // 5–10 min customs + roll-on
-        const ferryUnboardSec = hasFerry ? Math.round(240 + Math.random() * 120) : 0; // 4–6 min roll-off + papers
-        const extraSec = loadSec + unloadSec + ferryBoardSec + ferryUnboardSec;
+        const ferryHops = (p.route && (p.route.ferrySegments
+          || (p.route.ferrySegment ? [p.route.ferrySegment] : [])).length) || 0;
+        const ferryBoardSec = ferryHops ? Math.round(300 + Math.random() * 300) : 0;   // 5–10 min customs + roll-on, per hop
+        const ferryUnboardSec = ferryHops ? Math.round(240 + Math.random() * 120) : 0; // 4–6 min roll-off + papers, per hop
+        // Board/roll-off happens at EVERY port — matches deliveryPhase, which
+        // deducts (board+unboard) once per sea hop when building the timeline.
+        const extraSec = loadSec + unloadSec + (ferryBoardSec + ferryUnboardSec) * ferryHops;
         const d = {
           id: uid('d'), truckId, fromCityId: t.cityId, toCityId, cargoType,
           cargoTons: p.tons, route: p.route, stops: p.stops,
