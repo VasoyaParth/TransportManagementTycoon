@@ -5,7 +5,7 @@ import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Swi
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, CONVOY_SYMBOLS, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, CONVOY_SYMBOLS, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
@@ -102,6 +102,32 @@ function liveSpeed(base, key) {
   const v = Math.max(20, Math.round(prev + Math.max(-step, Math.min(step, target - prev))));
   _speedCache[key] = { v, t };
   return v;
+}
+
+// While a delivery is paused — loading/unloading, ferry legs, an incident, an
+// auto-refuel halt, or a driver break — the truck is physically parked, so the
+// speed gauge must read 0 instead of pretending it's still cruising. Break and
+// fuel windows are approximated from the journey waypoints' clock times plus
+// each stop's dwell duration (fuel stops cost 60 real seconds in startDelivery;
+// rest breaks are game-hours long).
+const STOP_LABELS = { fuel: 'Refuelling at a fuel stop', sleep: 'Driver on a sleep break', short: 'Driver on a short break' };
+function deliveryStop(d, model, now = Date.now()) {
+  if (d.incident && d.incident.resolveAt > now) {
+    return { stopped: true, label: incidentMeta(d.incident.type).title };
+  }
+  const ph = deliveryPhase(d, now);
+  if (ph.phase !== 'driving' && ph.phase !== 'done') {
+    return { stopped: true, label: PHASE_LABELS[ph.phase] };
+  }
+  const DWELL = { fuel: 60 * 1000, sleep: 2 * GAME_HOUR_MS, short: (5 / 60) * GAME_HOUR_MS };
+  const j = buildJourney(d, model, now);
+  for (const w of j.waypoints) {
+    const dwell = DWELL[w.type];
+    if (dwell && now >= w.ts && now < w.ts + dwell) {
+      return { stopped: true, label: STOP_LABELS[w.type] };
+    }
+  }
+  return { stopped: false, label: null };
 }
 
 // Semicircular gauge (speed / fuel) — pure SVG.
@@ -647,12 +673,28 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
               <Text style={FONT.tiny}>{kmCovered} / {totalKm} km</Text>
               <Text style={FONT.tiny}>{Math.round(prog)}%</Text>
             </Row>
-            {/* Live gauges — speed varies realistically, fuel drains as it drives */}
-            <Row style={{ marginTop: 10 }}>
-              <Gauge value={liveSpeed(m.speed, truck.id)} max={Math.round(m.speed * 1.15)} label="Speed" unit="km/h" color={C.green} />
-              <Gauge value={curFuel} max={100} label={m.propulsion === 'electric' ? 'Charge' : 'Fuel'} unit="%"
-                color={curFuel > 50 ? C.green : curFuel > 20 ? C.amber : C.red} />
-            </Row>
+            {/* Live gauges — speed varies realistically while driving, and drops
+                to 0 whenever the truck is actually halted (loading, unloading,
+                ferry, incident, refuelling, driver breaks). */}
+            {(() => {
+              const stop = deliveryStop(d, m, now);
+              return (
+                <>
+                  <Row style={{ marginTop: 10 }}>
+                    <Gauge value={stop.stopped ? 0 : liveSpeed(m.speed, truck.id)} max={Math.round(m.speed * 1.15)}
+                      label="Speed" unit="km/h" color={stop.stopped ? C.amber : C.green} />
+                    <Gauge value={curFuel} max={100} label={m.propulsion === 'electric' ? 'Charge' : 'Fuel'} unit="%"
+                      color={curFuel > 50 ? C.green : curFuel > 20 ? C.amber : C.red} />
+                  </Row>
+                  {stop.stopped && (
+                    <Row style={{ marginTop: 8, backgroundColor: C.amberSoft, borderRadius: RADIUS.md, padding: 8 }}>
+                      <Icon name="pause-circle-outline" size={14} color={C.amber} />
+                      <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.text }]}>Truck halted — {stop.label}.</Text>
+                    </Row>
+                  )}
+                </>
+              );
+            })()}
           </Card>
         )}
 
@@ -1617,6 +1659,7 @@ export function NotificationsModal({ visible, onClose }) {
   const markAllRead = useGame(s => s.markAllRead);
   const [filter, setFilter] = useState('all');
   const [shownCount, setShownCount] = useState(NOTIF_PAGE);
+  const tapInboxEgg = useEasterEggTap('inbox_zero', 5);
   useEffect(() => { if (visible) setShownCount(NOTIF_PAGE); }, [visible, filter]);
   const list = notifications.filter(n => filter === 'all' || (filter === 'delivery' ? n.type === 'delivery' : n.type !== 'delivery'));
   const shown = list.slice(0, shownCount);
@@ -1629,7 +1672,7 @@ export function NotificationsModal({ visible, onClose }) {
           <Chip label="Deliveries" active={filter === 'delivery'} onPress={() => setFilter('delivery')} />
           <Chip label="System" active={filter === 'system'} onPress={() => setFilter('system')} />
         </Row>
-        <Btn title="Mark all read" kind="ghost" small onPress={markAllRead} />
+        <Btn title="Mark all read" kind="ghost" small onPress={() => { tapInboxEgg(); markAllRead(); }} />
       </Row>
       <FlatList
         data={shown} keyExtractor={n => n.id} showsVerticalScrollIndicator={false}
@@ -1658,6 +1701,73 @@ export function NotificationsModal({ visible, onClose }) {
   );
 }
 
+const EGGS_INITIAL = 6;
+
+// ============ Achievements (Steam-style: tiered tracks with progress) ============
+const TIER_COLORS = ['#8D99AE', '#B08D57', '#8FA6B2', '#E9B949', '#7D3C98'];
+function AchievementsTab() {
+  const state = useGame();
+  const unlocked = state.achievements?.unlocked || {};
+  const fmtVal = (a, v) => a.unit === '₹' ? inrShort(v) : Math.floor(v).toLocaleString();
+  const totalTiers = ACHIEVEMENTS.length * ACHIEVEMENT_TIERS.length;
+  const doneTiers = Object.keys(unlocked).length;
+  return (
+    <>
+      <SectionTitle icon="trophy" text={`Achievements — ${doneTiers}/${totalTiers} unlocked`} />
+      <Card style={{ marginBottom: 12, backgroundColor: C.bgSoft }}>
+        <Text style={FONT.sub}>Every track has 5 levels — {ACHIEVEMENT_TIERS.join(' → ')}. Each level pays a one-time gold bonus the moment you reach it.</Text>
+      </Card>
+      {ACHIEVEMENTS.map(a => {
+        const v = achievementValue(state, a.id);
+        // Highest tier reached, and the next target being chased.
+        let reached = -1;
+        for (let i = 0; i < a.levels.length; i++) if (unlocked[`${a.id}:${i}`] || v >= a.levels[i]) reached = i;
+        const next = reached + 1 < a.levels.length ? a.levels[reached + 1] : null;
+        const base = reached >= 0 ? a.levels[reached] : 0;
+        const pct = next ? Math.min(100, ((v - base) / (next - base)) * 100) : 100;
+        const maxed = next === null;
+        return (
+          <Card key={a.id} style={{ marginBottom: 8 }}>
+            <Row>
+              <View style={[cs.heroIcon, { width: 44, height: 44, backgroundColor: maxed ? C.amberSoft : C.bgSoft }]}>
+                <Icon name={a.icon} size={24} color={maxed ? C.gold : reached >= 0 ? C.blue : C.faint} />
+              </View>
+              <View style={{ flex: 1, marginLeft: 10 }}>
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <Text style={[FONT.body, { fontWeight: '800' }]}>{a.title}</Text>
+                  <Pill
+                    text={maxed ? 'Legend ★' : reached >= 0 ? ACHIEVEMENT_TIERS[reached] : 'Locked'}
+                    icon={maxed ? 'crown' : reached >= 0 ? 'medal' : 'lock-outline'}
+                    color={reached >= 0 ? TIER_COLORS[Math.min(reached, 4)] : C.faint}
+                    bg={reached >= 0 ? TIER_COLORS[Math.min(reached, 4)] + '22' : C.bgSoft} />
+                </Row>
+                <Text style={FONT.tiny}>{a.desc}</Text>
+              </View>
+            </Row>
+            <Progress pct={pct} color={maxed ? C.gold : C.blue} style={{ marginTop: 10 }} />
+            <Row style={{ justifyContent: 'space-between', marginTop: 4 }}>
+              <Text style={FONT.tiny}>{fmtVal(a, v)} {a.unit}</Text>
+              <Text style={FONT.tiny}>
+                {maxed ? 'All 5 levels complete!' : `Next: ${ACHIEVEMENT_TIERS[reached + 1]} at ${fmtVal(a, next)} (+${ACHIEVEMENT_TIER_GOLD[reached + 1]} gold)`}
+              </Text>
+            </Row>
+            {/* 5 tier dots */}
+            <Row style={{ gap: 6, marginTop: 8 }}>
+              {a.levels.map((lv, i) => (
+                <View key={i} style={{ flex: 1, alignItems: 'center', paddingVertical: 4, borderRadius: 8,
+                  backgroundColor: i <= reached ? TIER_COLORS[i] + '22' : C.bgSoft }}>
+                  <Icon name={i <= reached ? 'check-decagram' : 'circle-outline'} size={13} color={i <= reached ? TIER_COLORS[i] : C.faint} />
+                  <Text style={[FONT.tiny, { fontSize: 9 }]} numberOfLines={1}>{fmtVal(a, lv)}</Text>
+                </View>
+              ))}
+            </Row>
+          </Card>
+        );
+      })}
+    </>
+  );
+}
+
 // ============ Settings ============
 export function SettingsModal({ visible, onClose, initialTab }) {
   const toast = useToast();
@@ -1677,11 +1787,15 @@ export function SettingsModal({ visible, onClose, initialTab }) {
   const [cname, setCname] = useState(company?.name || '');
   const [logo, setLogo] = useState(company?.logo);
   const [confirmReset, setConfirmReset] = useState(false);
+  // Easter-egg checklist renders only the first few cards by default —
+  // the full list mounts behind "Show more" so the tab opens without lag.
+  const [allEggs, setAllEggs] = useState(false);
   const tapMirrorEgg = useEasterEggTap('mirror_mirror', 5);
   const tapBrandedEgg = useEasterEggTap('branded', 4);
   const tapCuriousEgg = useEasterEggTap('curious_mind', 5);
   const tapSteadyEgg = useEasterEggTap('steady_hands', 4);
   const tapDangerEgg = useEasterEggTap('nice_try', 6);
+  const tapSpeedEgg = useEasterEggTap('speed_demon', 5);
 
   useEffect(() => {
     if (visible && company) { setCeo(company.ceo); setAvatar(company.avatar); setCname(company.name); setLogo(company.logo); setConfirmReset(false); }
@@ -1690,6 +1804,7 @@ export function SettingsModal({ visible, onClose, initialTab }) {
   const TABS = [
     ['profile', 'Profile', 'account-circle'], ['company', 'Company', 'domain'],
     ['gameplay', 'Gameplay', 'controller-classic'], ['notif', 'Alerts', 'bell-ring-outline'],
+    ['achievements', 'Achievements', 'trophy'],
     ['eggs', 'Easter Eggs', 'egg-easter'], ['about', 'About', 'information-outline'],
   ];
   const day = gameDay().day;
@@ -1747,7 +1862,7 @@ export function SettingsModal({ visible, onClose, initialTab }) {
               <Text style={[FONT.tiny, { marginBottom: 6 }]}>GAME SPEED</Text>
               <Row style={{ gap: 6, flexWrap: 'wrap' }}>
                 {[[0.5, 'Slow'], [1, 'Normal'], [2, 'Fast'], [4, 'Very Fast']].map(([v, l]) => (
-                  <Chip key={v} label={l} active={settings.speed === v} onPress={() => saveSettings({ speed: v })} />
+                  <Chip key={v} label={l} active={settings.speed === v} onPress={() => { if (v === 4) tapSpeedEgg(); saveSettings({ speed: v }); }} />
                 ))}
               </Row>
               <Text style={[FONT.tiny, { marginTop: 14, marginBottom: 6 }]}>DIFFICULTY</Text>
@@ -1811,13 +1926,14 @@ export function SettingsModal({ visible, onClose, initialTab }) {
             </Card>
           </>
         )}
+        {tab === 'achievements' && <AchievementsTab />}
         {tab === 'eggs' && (
           <>
             <SectionTitle icon="egg-easter" text={`Hidden Gems — ${foundEggs.length}/${EASTER_EGGS.length} found`} />
             <Card style={{ marginBottom: 12, backgroundColor: C.bgSoft }}>
               <Text style={FONT.sub}>Scattered around the app are {EASTER_EGGS.length} hidden gems. Each one is found by repeatedly tapping something specific, fast. Find one and it pays out big — once. The rest stay a secret until you stumble onto them.</Text>
             </Card>
-            {EASTER_EGGS.map(egg => {
+            {(allEggs ? EASTER_EGGS : EASTER_EGGS.slice(0, EGGS_INITIAL)).map(egg => {
               const found = foundEggs.includes(egg.id);
               return (
                 <Card key={egg.id} style={{ marginBottom: 8, opacity: found ? 1 : 0.75 }}>
@@ -1834,6 +1950,15 @@ export function SettingsModal({ visible, onClose, initialTab }) {
                 </Card>
               );
             })}
+            {EASTER_EGGS.length > EGGS_INITIAL && (
+              <Pressable onPress={() => setAllEggs(v => !v)}
+                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12 }}>
+                <Icon name={allEggs ? 'chevron-up' : 'chevron-down'} size={16} color={C.blue} />
+                <Text style={{ color: C.blue, fontWeight: '700', marginLeft: 4 }}>
+                  {allEggs ? 'Show less' : `Show more gems (${EASTER_EGGS.length - EGGS_INITIAL} hidden)`}
+                </Text>
+              </Pressable>
+            )}
           </>
         )}
         {tab === 'about' && (
@@ -1887,6 +2012,7 @@ function AboutTab({ onReplayTutorial }) {
   const [state, setState] = useState({ status: 'idle', data: null, err: null }); // idle|checking|done|error
   const [allHistory, setAllHistory] = useState(false);
   const tapVersionEgg = useEasterEggTap('version_detective', 6);
+  const tapMakerEgg = useEasterEggTap('meet_the_maker', 7);
 
   const check = async () => {
     setState({ status: 'checking', data: null, err: null });
@@ -2006,11 +2132,13 @@ function AboutTab({ onReplayTutorial }) {
       {/* Developers */}
       <Text style={cs.section}>Developed By</Text>
       <Row style={{ gap: 10 }}>
-        {DEVELOPERS.map(dev => (
-          <Card key={dev.name} style={{ flex: 1, alignItems: 'center', padding: 16 }}>
-            <View style={[cs.heroIcon, { width: 52, height: 52, backgroundColor: dev.bg }]}><Icon name={dev.icon} size={28} color={dev.color} /></View>
-            <Text style={[FONT.body, { fontWeight: '800', marginTop: 8, textAlign: 'center' }]}>{dev.name}</Text>
-            <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 2 }]}>{dev.title}</Text>
+        {DEVELOPERS.map((dev, i) => (
+          <Card key={dev.name} style={{ flex: 1, padding: 0 }}>
+            <Pressable onPress={() => { if (i === 0) tapMakerEgg(); }} style={{ alignItems: 'center', padding: 16 }}>
+              <View style={[cs.heroIcon, { width: 52, height: 52, backgroundColor: dev.bg }]}><Icon name={dev.icon} size={28} color={dev.color} /></View>
+              <Text style={[FONT.body, { fontWeight: '800', marginTop: 8, textAlign: 'center' }]}>{dev.name}</Text>
+              <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 2 }]}>{dev.title}</Text>
+            </Pressable>
           </Card>
         ))}
       </Row>
