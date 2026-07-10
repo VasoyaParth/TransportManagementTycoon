@@ -7,7 +7,7 @@ import {
   Card, Btn, IconBtn, Pill, statusMeta, Progress, Money, Stat, Row, Icon, useToast, relTime, GameSlider,
 } from '../components';
 import Svg from 'react-native-svg';
-import { useGame, modelById, cargoById, GAME_HOUR_MS } from '../../store/gameStore';
+import { useGame, modelById, cargoById, GAME_HOUR_MS, staffMood } from '../../store/gameStore';
 import { CAMPAIGNS, CARGO_TYPES } from '../../data/trucks';
 import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
 import { inr, inrShort } from '../../engine/economy';
@@ -362,7 +362,7 @@ function DriverStat({ icon, label, value }) {
   );
 }
 
-function StaffCard({ member, trucks, onAssign, onFire, onOpen }) {
+function StaffCard({ member, trucks, onAssign, onFire, onOpen, onPromote }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [confirmFire, setConfirmFire] = useState(false);
   useEffect(() => {
@@ -396,16 +396,21 @@ function StaffCard({ member, trucks, onAssign, onFire, onOpen }) {
           </View>
           <View style={{ marginLeft: 10, flex: 1 }}>
             <Text style={FONT.h3} numberOfLines={1}>{member.name}</Text>
-            <Row style={{ marginTop: 3 }}>
+            <Row style={{ marginTop: 3, flexWrap: 'wrap' }}>
               <Pill
                 text={`${level ? level.name : member.level} ${role ? role.name : member.role}`}
                 icon={role ? role.icon : 'account'}
               />
-              {member.role === 'driver' ? (
-                <Row style={{ marginLeft: 6 }}>
-                  <Icon name="map-marker-path" size={12} color={C.blue} />
-                  <Text style={[FONT.tiny, { color: C.blue, marginLeft: 2 }]}>Tap for live route</Text>
-                </Row>
+              {/* Mood — tired after a trip, energetic when rested, busy when fixing */}
+              {(() => { const mood = staffMood(member, { trucks, deliveries }); return (
+                <View style={{ marginLeft: 6 }}>
+                  <Pill text={mood.label} icon={mood.icon} color={mood.color} bg={mood.color + '22'} />
+                </View>
+              ); })()}
+              {(member.promoBoostUntil || 0) > Date.now() ? (
+                <View style={{ marginLeft: 6 }}>
+                  <Pill text="2× promo boost" icon="rocket-launch" color={C.gold} bg={C.amberSoft} />
+                </View>
               ) : null}
             </Row>
           </View>
@@ -429,6 +434,22 @@ function StaffCard({ member, trucks, onAssign, onFire, onOpen }) {
         </Row>
         <Progress pct={member.skill} color={C.blue} />
       </View>
+      {/* Manual promotion: junior → senior → expert. Salary lands in the next
+          level's min–max band and the promo buzz doubles output for 3 days. */}
+      {(() => {
+        const ladder = ['junior', 'senior', 'expert'];
+        const idx = ladder.indexOf(member.level);
+        if (idx === -1 || idx >= ladder.length - 1) return null;
+        const next = STAFF_LEVELS.find(l => l.id === ladder[idx + 1]);
+        return (
+          <Btn
+            title={`Promote to ${next.name} · ${inrShort(Math.max(member.salary * 1.1, next.salary[0]))}–${inrShort(next.salary[1])}/mo`}
+            kind="soft" small icon="account-arrow-up"
+            style={{ marginTop: 10 }}
+            onPress={() => onPromote && onPromote(member)}
+          />
+        );
+      })()}
       {/* Driver career profile — live: the active trip is added in real time. */}
       {member.role === 'driver' && (member.deliveries || member.hoursDriven || active) ? (() => {
         const liveKm = (member.kmDriven || 0) + (active ? active.d.route.roadKm * active.prog : 0);
@@ -487,6 +508,7 @@ export function StaffTab({ onOpenDriver }) {
   const fire = useGame(s => s.fire);
   const assignDriver = useGame(s => s.assignDriver);
   const refreshCandidates = useGame(s => s.refreshCandidates);
+  const promoteStaff = useGame(s => s.promoteStaff);
   const toast = useToast();
 
   const [role, setRole] = useState('all');
@@ -496,35 +518,39 @@ export function StaffTab({ onOpenDriver }) {
   const [hireRole, setHireRole] = useState('all');
   const [hireSort, setHireSort] = useState('skill');
 
+  // Managers are disabled for now (no gameplay use yet) — their filter chips
+  // and counts are commented out below; restore when managers get a purpose.
   const counts = useMemo(() => ({
     driver: staff.filter(x => x.role === 'driver').length,
     mechanic: staff.filter(x => x.role === 'mechanic').length,
-    manager: staff.filter(x => x.role === 'manager').length,
+    // manager: staff.filter(x => x.role === 'manager').length,
     salary: staff.reduce((a, x) => a + x.salary, 0),
   }), [staff]);
 
-  const roster = role === 'all' ? staff : staff.filter(x => x.role === role);
+  const roster = role === 'all' ? staff.filter(x => x.role !== 'manager') : staff.filter(x => x.role === role);
   const shown = roster.slice(0, page * STAFF_PAGE);
   const roleOpts = [
-    { key: 'all', label: 'All', count: staff.length },
+    { key: 'all', label: 'All', count: staff.filter(x => x.role !== 'manager').length },
     { key: 'driver', label: 'Drivers', count: counts.driver },
     { key: 'mechanic', label: 'Mechanics', count: counts.mechanic },
-    { key: 'manager', label: 'Managers', count: counts.manager },
+    // { key: 'manager', label: 'Managers', count: counts.manager },
   ];
 
   const candCounts = useMemo(() => ({
     driver: candidates.filter(x => x.role === 'driver').length,
     mechanic: candidates.filter(x => x.role === 'mechanic').length,
-    manager: candidates.filter(x => x.role === 'manager').length,
+    // manager: candidates.filter(x => x.role === 'manager').length,
   }), [candidates]);
   const hireRoleOpts = [
-    { key: 'all', label: 'All', count: candidates.length },
+    { key: 'all', label: 'All', count: candidates.filter(x => x.role !== 'manager').length },
     { key: 'driver', label: 'Drivers', count: candCounts.driver },
     { key: 'mechanic', label: 'Mechanics', count: candCounts.mechanic },
-    { key: 'manager', label: 'Managers', count: candCounts.manager },
+    // { key: 'manager', label: 'Managers', count: candCounts.manager },
   ];
   const filteredCandidates = useMemo(() => {
-    const arr = hireRole === 'all' ? [...candidates] : candidates.filter(x => x.role === hireRole);
+    // managers filtered out while the role is disabled
+    const pool = candidates.filter(x => x.role !== 'manager');
+    const arr = hireRole === 'all' ? [...pool] : pool.filter(x => x.role === hireRole);
     if (hireSort === 'skill') arr.sort((a, b) => b.skill - a.skill);
     else if (hireSort === 'salary-asc') arr.sort((a, b) => a.salary - b.salary);
     else if (hireSort === 'salary-desc') arr.sort((a, b) => b.salary - a.salary);
@@ -550,7 +576,7 @@ export function StaffTab({ onOpenDriver }) {
         </Row>
         <FilterChips options={roleOpts} value={role} onChange={setRole} />
         {staff.length === 0 ? (
-          <EmptyState icon="account-group-outline" title="No staff yet" sub="Hire drivers, mechanics and managers to grow your team."
+          <EmptyState icon="account-group-outline" title="No staff yet" sub="Hire drivers and mechanics to grow your team."
             action={<Btn title="Hire Staff" icon="account-plus" small onPress={() => setScreen('hire')} />} />
         ) : roster.length === 0 ? (
           <EmptyState icon="account-search-outline" title="None in this role" sub="Switch the filter or hire more staff." />
@@ -564,6 +590,12 @@ export function StaffTab({ onOpenDriver }) {
                 onAssign={(mem, t) => { assignDriver(mem.id, t.id); toast && toast(`${mem.name} assigned to ${modelById(t.modelId).name}`, 'success'); }}
                 onFire={mem => { fire(mem.id); toast && toast(`${mem.name} has been let go`, 'warn'); }}
                 onOpen={mem => onOpenDriver && onOpenDriver(mem)}
+                onPromote={mem => {
+                  const r = promoteStaff(mem.id);
+                  toast && toast(r.ok
+                    ? `${mem.name} is now ${r.level} — ${inrShort(r.newSalary)}/mo, skill ${r.newSkill}, 2× boost for 3 days!`
+                    : r.err, r.ok ? 'success' : 'error');
+                }}
               />
             ))}
             <LoadMore shown={shown.length} total={roster.length} onMore={() => setPage(p => p + 1)} />

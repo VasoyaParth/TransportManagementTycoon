@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Pressable, useWindowDimensions, AppState, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native';
-import { C, FONT, SHADOW, RADIUS } from '../theme';
+import { C, FONT, RADIUS } from '../theme';
 import { IconBtn, Icon, Money, Sheet, useToast, Row, useEasterEggTap } from '../components';
 import MapContainer from '../MapContainer';
 import { useGame, modelById, GAME_HOUR_MS } from '../../store/gameStore';
@@ -15,7 +15,6 @@ import {
 } from './modals';
 import { haptic } from '../../engine/haptics';
 import Tutorial from './Tutorial';
-import FleetSidebar from './FleetSidebar';
 import { checkForUpdate } from '../../net/updates';
 
 const TABS = [
@@ -48,7 +47,6 @@ export default function GameScreen() {
   const mounted = (kind) => mountedModals.current.has(kind);
   const [picking, setPicking] = useState(null); // {truckId, contract}
   const [focus, setFocus] = useState(null);
-  const [sidebar, setSidebar] = useState(false);
   const [clock, setClock] = useState({ day: 1, hour: 8 });
   const lastToastN = useRef(null);
   const tapMoneyEgg = useEasterEggTap('money_gazer', 6);
@@ -205,11 +203,6 @@ export default function GameScreen() {
             </Pressable>
           </Pressable>
         ) : null}
-        {/* Left-edge fleet-manager strip with arrow (opens sidebar) */}
-        <Pressable style={[st.mgrStrip, SHADOW.pop]} onPress={() => { haptic('light'); setSidebar(true); }}>
-          <Icon name="truck" size={18} color={C.blue} />
-          <Icon name="chevron-right" size={18} color={C.sub} />
-        </Pressable>
         {/* Delivery action — matches the map toggle buttons (same size/style) */}
         <Pressable style={st.fab} onPress={() => { haptic('medium'); openNewDelivery(); }}>
           <Icon name="truck-plus" size={19} color={C.text} />
@@ -266,14 +259,6 @@ export default function GameScreen() {
       {mounted('hubs') && <HubsModal visible={modal?.kind === 'hubs'} onClose={() => setModal(null)} onShowOnMap={(f) => { setModal(null); setFocus(f); }} />}
       {mounted('settings') && <SettingsModal visible={modal?.kind === 'settings'} onClose={() => setModal(null)} initialTab={modal?.tab} />}
 
-      {/* Left fleet-management drawer */}
-      <FleetSidebar
-        visible={sidebar}
-        onClose={() => setSidebar(false)}
-        onTruckPress={(t) => setModal({ kind: 'truck', truckId: t.id })}
-        onToast={toast}
-      />
-
       {/* First-time guided tour */}
       {settings.tutorialSeen !== true && (
         <Tutorial onDone={() => useGame.getState().saveSettings({ tutorialSeen: true })} />
@@ -318,12 +303,6 @@ const st = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.9)', paddingLeft: 6, paddingRight: 12, paddingVertical: 5,
     borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.7)',
     shadowColor: '#0B0F14', shadowOpacity: 0.12, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 4,
-  },
-  // Left-edge fleet-manager strip tab with arrow.
-  mgrStrip: {
-    position: 'absolute', left: 0, top: '46%', flexDirection: 'row', alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.94)', paddingLeft: 8, paddingRight: 4, paddingVertical: 12,
-    borderTopRightRadius: 18, borderBottomRightRadius: 18, borderWidth: 1, borderLeftWidth: 0, borderColor: 'rgba(255,255,255,0.7)',
   },
   // Floating pill navigation (Samsung-style) — not edge-to-edge, frosted glass.
   nav: {

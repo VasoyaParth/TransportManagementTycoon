@@ -53,8 +53,9 @@ export function headlightFor(model) {
   return model && model.propulsion === 'electric' ? LIGHTS_EV : LIGHTS_ICE;
 }
 
-// Night is 19:00–05:59 on the in-game clock.
-export function isNightHour(hour) { return hour >= 19 || hour < 6; }
+// Night is 18:00–05:59 (6pm to 6am) on the player's REAL local clock — the
+// same signal as the map's night tint, so headlights and darkness agree.
+export function isNightHour(hour) { return hour >= 18 || hour < 6; }
 
 // Returns { w, h, bodyH, shapes } — shapes are plain descriptors so they can be
 // rendered both as react-native-svg elements and as an HTML SVG string.
