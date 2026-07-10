@@ -120,6 +120,23 @@ function boot(){
   plotHubs(DATA.hubs);
   window.setHubs=function(hubs){ plotHubs(hubs); };
 
+  // Fixed sea ports (ferry endpoints) — always-visible anchor badges,
+  // toggleable from the RN control stack. Trucks board/leave ships here.
+  var portsOn=true, portLayer=L.layerGroup().addTo(map);
+  var anchorSvg='<svg viewBox="0 0 24 24" width="14" height="14"><path fill="#fff" d="M12,2A3,3 0 0,1 15,5C15,6.31 14.17,7.42 13,7.83V9H15V11H13V19.92C14.26,19.75 15.62,19.29 16.66,18.63C16.09,18.05 15.72,17.28 15.66,16.43L17.66,16.29C17.72,17.13 18.44,17.8 19.3,17.8C20.21,17.8 20.95,17.06 20.95,16.15H22.95C22.95,18.16 21.31,19.8 19.3,19.8L19.13,19.8C17.55,21.07 14.89,22 12,22C9.11,22 6.45,21.07 4.87,19.8L4.7,19.8C2.69,19.8 1.05,18.16 1.05,16.15H3.05C3.05,17.06 3.79,17.8 4.7,17.8C5.56,17.8 6.28,17.13 6.34,16.29L8.34,16.43C8.28,17.28 7.91,18.05 7.34,18.63C8.38,19.29 9.74,19.75 11,19.92V11H9V9H11V7.83C9.83,7.42 9,6.31 9,5A3,3 0 0,1 12,2M12,4A1,1 0 0,0 11,5A1,1 0 0,0 12,6A1,1 0 0,0 13,5A1,1 0 0,0 12,4Z"/></svg>';
+  function plotPorts(){
+    portLayer.clearLayers();
+    if(!portsOn) return;
+    (DATA.ports||[]).forEach(function(p){
+      portLayer.addLayer(L.marker([p.lat,p.lng],{icon:L.divIcon({className:'',
+        html:'<div style="width:22px;height:22px;border-radius:50%;background:#0E4C7A;border:2px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 5px rgba(0,0,0,.3)">'+anchorSvg+'</div>',
+        iconSize:[22,22],iconAnchor:[11,11]}),zIndexOffset:800})
+        .bindTooltip('<b>'+p.name+'</b><br><small>Sea port — ferry crossing</small>',{direction:'top'}));
+    });
+  }
+  plotPorts();
+  window.togglePorts=function(){ portsOn=!portsOn; plotPorts(); };
+
   // Cities — only unlocked countries; discovered cities (routes driven,
   // garages, HQ) render highlighted, the rest as faint "unexplored" dots that
   // only appear once zoomed in (big perf win: hundreds fewer markers).
@@ -165,29 +182,32 @@ function boot(){
     var accent = t.status==='delivering'?'#0E9F5B':t.status==='building'?'#D97706':t.status==='broken'?'#DC3D43':'#9DB2D6';
     var color = t.color || '#3A5A8C';
     var html, w=40, h=48, anchorY=24;
-    if(t.ferryOn && !t.ferryLoading && t.ferryArt){
-      // Crossing the sea hop — swap the truck art for a ferry icon.
-      // No perspective wrapper: it distorted the art (wide rear / pinched
-      // front, changing with heading). Clean flat top-down rotation only.
-      w=40; h=36; anchorY=18;
+    if((t.ferryOn || t.ferryLoading) && t.ferryArt){
+      // On (or boarding/leaving) the ferry: always the big RO-RO steamer with
+      // the truck on deck — never a truck on water, never a blurred truck.
+      // While docked (paperwork + roll-on/off) a pulsing ring marks the port.
+      w=48; h=72; anchorY=36;
       html='<div class="truck3d" style="transform:rotate('+((t.heading||0)+180)+'deg);width:'+w+'px;height:'+h+'px;transform-origin:'+(w/2)+'px '+anchorY+'px">'
         +t.ferryArt+'</div>';
+      if(t.ferryLoading){
+        html='<div style="position:relative">'+html
+          +'<div style="position:absolute;left:50%;top:50%;width:30px;height:30px;margin:-15px;border-radius:50%;background:rgba(37,99,235,.45);animation:pulseDot 1s ease-in-out infinite alternate"></div></div>';
+      }
     } else if(t.art){
       // Detailed per-model artwork pre-rendered on the RN side (truckArt.js).
       w=t.artW||40; h=t.artH||48; anchorY=(t.bodyH||h)/2;
-      var loadStyle = t.ferryLoading ? 'opacity:.55;' : '';
-      html='<div class="truck3d" style="'+loadStyle+'transform:rotate('+((t.heading||0)+180)+'deg)'+(t.ferryLoading?' scale(0.8)':'')+';width:'+w+'px;height:'+h+'px;transform-origin:'+(w/2)+'px '+anchorY+'px">'
+      html='<div class="truck3d" style="transform:rotate('+((t.heading||0)+180)+'deg);width:'+w+'px;height:'+h+'px;transform-origin:'+(w/2)+'px '+anchorY+'px">'
         +t.art+'</div>';
-      if(t.ferryLoading){
+      if(t.phase==='loading'||t.phase==='unloading'){
         html='<div style="position:relative">'+html
-          +'<div style="position:absolute;left:50%;top:50%;width:24px;height:24px;margin:-12px;border-radius:50%;background:rgba(37,99,235,.5);animation:pulseDot 1s ease-in-out infinite alternate"></div></div>';
+          +'<div style="position:absolute;left:50%;top:50%;width:26px;height:26px;margin:-13px;border-radius:50%;background:rgba(217,119,6,.4);animation:pulseDot 1s ease-in-out infinite alternate"></div></div>';
       }
     } else {
       html=truck3d(color,accent,t.heading);
     }
     if(t.incidentType){
       // Damage/theft badge — small colored dot, offset to the corner.
-      var badgeColor = t.incidentType==='accident' ? '#DC3D43' : '#7D3C98';
+      var badgeColor = {accident:'#DC3D43',flat:'#D97706',theft:'#7D3C98',checkpost:'#2563EB',weather:'#0E7C86'}[t.incidentType]||'#DC3D43';
       html='<div style="position:relative">'+html
         +'<div style="position:absolute;right:2px;top:0;width:15px;height:15px;border-radius:50%;'
         +'background:'+badgeColor+';border:1.5px solid #fff;color:#fff;font-size:10px;font-weight:700;'

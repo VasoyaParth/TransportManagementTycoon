@@ -71,6 +71,20 @@ export function cityById(id) {
   return CITIES.find(c => c.id === id);
 }
 
+// Fixed sea ports — both endpoints of every ferry/sea edge in the network.
+// Trucks always route through these to cross water; the maps show them with
+// a dedicated port marker (toggleable) so crossings are legible.
+export function ferryPorts() {
+  const ids = new Set();
+  FERRY_EDGES.forEach(f => { ids.add(f.a); ids.add(f.b); });
+  ROAD_EDGES.forEach(e => { if (e.ferry) { ids.add(e.a); ids.add(e.b); } });
+  return [...ids].filter(id => ROAD_NODES[id]).map(id => ({
+    id,
+    name: id.replace(/^[a-z]{2}-/, '').split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') + ' Port',
+    lat: ROAD_NODES[id].lat, lng: ROAD_NODES[id].lng,
+  }));
+}
+
 // ---- Dijkstra ------------------------------------------------------------
 function dijkstra(startId, endId) {
   const dist = { [startId]: 0 };

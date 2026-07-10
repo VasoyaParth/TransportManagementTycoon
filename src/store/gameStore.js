@@ -85,6 +85,73 @@ const INCIDENT_INTERVAL_MS = { rare: 22 * 60 * 1000, sometimes: 10 * 60 * 1000 }
 const INCIDENT_CHANCE = { rare: 0.16, sometimes: 0.3 };
 const MECHANIC_DELAY_CUT = 0.6; // mechanic call-out shaves this fraction off the remaining delay
 
+// On-road incident catalog. `mechanic: true` = a mechanic call-out can cut the
+// delay (physical breakdowns only — you can't "repair" a theft or a police
+// checkpost, those you just accept and ride out). Weights sum to 1.
+export const INCIDENT_TYPES = [
+  { id: 'accident', weight: 0.28, title: 'Accident on the road!', icon: 'car-brake-alert', color: '#DC3D43',
+    mechanic: true, conditionHit: [8, 18], delayMin: 600, delayMax: 2400, penaltyMin: 0.04, penaltyMax: 0.12,
+    notify: (name, p) => `${name} was clipped on the highway — ${inr(p)} in damage. A mechanic can get it moving faster.` },
+  { id: 'flat', weight: 0.24, title: 'Tyre burst!', icon: 'car-tire-alert', color: '#D97706',
+    mechanic: true, conditionHit: [3, 8], delayMin: 300, delayMax: 1200, penaltyMin: 0.01, penaltyMax: 0.04,
+    notify: (name, p) => `${name} blew a tyre — ${inr(p)} for a roadside replacement. A mechanic can speed it up.` },
+  { id: 'theft', weight: 0.2, title: 'Cargo theft in transit!', icon: 'shield-alert', color: '#7D3C98',
+    mechanic: false, conditionHit: null, delayMin: 600, delayMax: 1800, penaltyMin: 0.05, penaltyMax: 0.12,
+    notify: (name, p) => `Bandits grabbed part of ${name}'s cargo — lost ${inr(p)}. Nothing to fix; the driver carries on.` },
+  { id: 'checkpost', weight: 0.16, title: 'Police checkpost', icon: 'police-badge', color: '#2563EB',
+    mechanic: false, conditionHit: null, delayMin: 240, delayMax: 900, penaltyMin: 0.01, penaltyMax: 0.03,
+    notify: (name, p) => `${name} pulled over for papers — ${inr(p)} in fines/chai-pani and a short wait.` },
+  { id: 'weather', weight: 0.12, title: 'Heavy weather ahead', icon: 'weather-pouring', color: '#0E7C86',
+    mechanic: false, conditionHit: null, delayMin: 480, delayMax: 1500, penaltyMin: 0, penaltyMax: 0.01,
+    notify: (name) => `${name} slowed to a crawl in a downpour — waiting it out safely.` },
+];
+export const incidentMeta = id => INCIDENT_TYPES.find(x => x.id === id) || INCIDENT_TYPES[0];
+
+// Where a live delivery is in its lifecycle at `now`, and how far along the
+// ROUTE (0..1) the truck should be drawn. Walks the phase timeline built from
+// the per-delivery durations saved by startDelivery: loading at origin →
+// drive → (ferry paperwork/board → sail → dock/roll-off) → drive → unloading.
+// Old saves without phase fields degrade gracefully to pure driving.
+export function deliveryPhase(d, now = Date.now()) {
+  const total = Math.max(1, (d.endsAt - d.startedAt) / 1000);
+  const load = d.loadSec || 0, unload = d.unloadSec || 0;
+  const fs = d.route && d.route.ferrySegment;
+  const board = fs ? (d.ferryBoardSec || 0) : 0, unboard = fs ? (d.ferryUnboardSec || 0) : 0;
+  const drive = Math.max(1, total - load - unload - board - unboard);
+  const sf = fs ? fs.startFrac : 1, ef = fs ? fs.endFrac : 1;
+  const segs = fs ? [
+    { phase: 'loading', dur: load, f0: 0, f1: 0 },
+    { phase: 'driving', dur: drive * sf, f0: 0, f1: sf },
+    { phase: 'ferry-board', dur: board, f0: sf, f1: sf },
+    { phase: 'ferry', dur: drive * (ef - sf), f0: sf, f1: ef },
+    { phase: 'ferry-unboard', dur: unboard, f0: ef, f1: ef },
+    { phase: 'driving', dur: drive * (1 - ef), f0: ef, f1: 1 },
+    { phase: 'unloading', dur: unload, f0: 1, f1: 1 },
+  ] : [
+    { phase: 'loading', dur: load, f0: 0, f1: 0 },
+    { phase: 'driving', dur: drive, f0: 0, f1: 1 },
+    { phase: 'unloading', dur: unload, f0: 1, f1: 1 },
+  ];
+  let t = (now - d.startedAt) / 1000;
+  if (t <= 0) return { phase: 'loading', frac: 0 };
+  for (const sg of segs) {
+    if (t < sg.dur) return { phase: sg.phase, frac: sg.f0 + (sg.f1 - sg.f0) * (sg.dur > 0 ? t / sg.dur : 0) };
+    t -= sg.dur;
+  }
+  return { phase: 'done', frac: 1 };
+}
+
+// Short human label per phase for banners/trackers.
+export const PHASE_LABELS = {
+  loading: 'Loading goods at origin',
+  driving: 'On the road',
+  'ferry-board': 'Clearing paperwork & boarding the ferry',
+  ferry: 'At sea — truck aboard the ferry',
+  'ferry-unboard': 'Docked — rolling off & clearing papers',
+  unloading: 'Unloading at destination',
+  done: 'Arrived',
+};
+
 let idSeq = 1;
 const uid = p => `${p}-${Date.now().toString(36)}-${(idSeq++).toString(36)}`;
 
@@ -483,25 +550,25 @@ export const useGame = create(
         const d = active[Math.floor(Math.random() * active.length)];
         const t = s.trucks.find(x => x.id === d.truckId);
         if (!t) return;
-        const type = Math.random() < 0.5 ? 'accident' : 'theft';
-        const delaySec = Math.round(600 + Math.random() * 1800); // 10–40 min real-time delay
-        const penaltyPct = 0.04 + Math.random() * 0.08; // 4%–12% of the delivery's gross — partial, never total
+        // Weighted pick across the incident catalog (INCIDENT_TYPES).
+        const roll = Math.random();
+        let acc = 0, meta = INCIDENT_TYPES[0];
+        for (const it of INCIDENT_TYPES) { acc += it.weight; if (roll < acc) { meta = it; break; } }
+        const type = meta.id;
+        const delaySec = Math.round(meta.delayMin + Math.random() * (meta.delayMax - meta.delayMin));
+        const penaltyPct = meta.penaltyMin + Math.random() * (meta.penaltyMax - meta.penaltyMin);
         const penalty = Math.min(s.balance, Math.round((d.econ.gross || d.econ.net || 0) * penaltyPct));
         const incident = { type, startedAt: now, resolveAt: now + delaySec * 1000, penalty, mechanicCalled: false };
         set({
           balance: s.balance - penalty,
           deliveries: s.deliveries.map(x => x.id === d.id ? { ...x, incident, endsAt: x.endsAt + delaySec * 1000 } : x),
-          trucks: type === 'accident'
-            ? s.trucks.map(x => x.id === t.id ? { ...x, condition: Math.max(10, (x.condition == null ? 100 : x.condition) - (8 + Math.random() * 10)) } : x)
+          trucks: meta.conditionHit
+            ? s.trucks.map(x => x.id === t.id ? { ...x, condition: Math.max(10, (x.condition == null ? 100 : x.condition) - (meta.conditionHit[0] + Math.random() * (meta.conditionHit[1] - meta.conditionHit[0]))) } : x)
             : s.trucks,
         });
         const name = t.customName || modelById(t.modelId).name;
-        get().notify('truck', type === 'accident' ? 'car-brake-alert' : 'shield-alert',
-          type === 'accident' ? `Accident! ${name} was clipped on the road — ${inr(penalty)} in damage and a delay.`
-            : `Theft! Bandits grabbed part of ${name}'s cargo — lost ${inr(penalty)}.`);
-        pushNow(type === 'accident' ? 'Accident on the road!' : 'Cargo theft in transit!',
-          type === 'accident' ? `${name} needs a mechanic — ${inr(penalty)} in damage so far.`
-            : `${name} lost ${inr(penalty)} of cargo to thieves.`);
+        get().notify('truck', meta.icon, `${meta.title} ${meta.notify(name, penalty)}`);
+        pushNow(meta.title, meta.notify(name, penalty));
       },
 
       // Pay to have a mechanic come out to a delivery mid-incident, cutting
@@ -510,6 +577,7 @@ export const useGame = create(
         const s = get();
         const d = s.deliveries.find(x => x.id === deliveryId);
         if (!d || !d.incident) return { ok: false, err: 'No active incident on this delivery' };
+        if (!incidentMeta(d.incident.type).mechanic) return { ok: false, err: 'A mechanic can’t help with this — it will clear on its own' };
         if (d.incident.mechanicCalled) return { ok: false, err: 'Mechanic already on the way' };
         const cost = Math.round(30000 + Math.random() * 40000);
         if (s.balance < cost) return { ok: false, err: 'Insufficient funds' };
@@ -775,12 +843,22 @@ export const useGame = create(
         const p = get().previewDelivery(truckId, toCityId, cargoType, cargoTons);
         if (p.err) return { ok: false, err: p.err };
         const now = Date.now();
+        // Real-time lifecycle phases layered around the drive: loading the
+        // goods at origin, unloading at destination, and (for sea routes)
+        // paperwork + rolling the truck on/off the ferry at each dock.
+        const loadSec = Math.round(120 + Math.random() * 180);       // 2–5 min loading
+        const unloadSec = Math.round(180 + Math.random() * 180);     // 3–6 min unloading
+        const hasFerry = !!(p.route && p.route.ferrySegment);
+        const ferryBoardSec = hasFerry ? Math.round(300 + Math.random() * 300) : 0;   // 5–10 min customs + roll-on
+        const ferryUnboardSec = hasFerry ? Math.round(240 + Math.random() * 120) : 0; // 4–6 min roll-off + papers
+        const extraSec = loadSec + unloadSec + ferryBoardSec + ferryUnboardSec;
         const d = {
           id: uid('d'), truckId, fromCityId: t.cityId, toCityId, cargoType,
           cargoTons: p.tons, route: p.route, stops: p.stops,
-          startedAt: now, endsAt: now + p.durationSec * 1000, econ: p.econ, contractId,
+          startedAt: now, endsAt: now + (p.durationSec + extraSec) * 1000, econ: p.econ, contractId,
           arriveFuelPct: p.arriveFuelPct, startFuelPct: p.startFuelPct,
           sleepBreaks: p.sleepBreaks, shortBreaks: p.shortBreaks, restHours: p.restHours,
+          loadSec, unloadSec, ferryBoardSec, ferryUnboardSec,
         };
         // Record the corridor so it stays highlighted on the map (cap 8, dedup).
         const corrId = [d.fromCityId, toCityId].sort().join('~');

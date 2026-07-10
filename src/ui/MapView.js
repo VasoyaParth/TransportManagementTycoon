@@ -12,8 +12,8 @@ import { CITIES } from '../data/cities';
 import { STATIONS } from '../engine/stations';
 import { project, WORLD_W, WORLD_H, pointAlong } from '../engine/geo';
 import { C } from './theme';
-import { useGame, modelById } from '../store/gameStore';
-import { cityById } from '../engine/routing';
+import { useGame, modelById, deliveryPhase } from '../store/gameStore';
+import { cityById, ferryPorts } from '../engine/routing';
 import { TruckTopShapes, truckShapes, bodyTypeFor, defaultBodyColor, headlightFor, isNightHour, FerryTopShape } from './truckArt';
 import { useEasterEggTap } from './components';
 
@@ -55,6 +55,9 @@ const ROAD_LINES = ROAD_EDGES.map(e => {
 
 const CITY_PTS = CITIES.map(c => ({ ...c, ...project(c.lat, c.lng) }));
 const STATION_PTS = STATIONS.map(s => ({ ...s, ...project(s.lat, s.lng) }));
+const PORT_PTS = ferryPorts().map(p => ({ ...p, ...project(p.lat, p.lng) }));
+// MDI "anchor" glyph path (24x24) for the port markers.
+const ANCHOR_PATH = 'M12,2A3,3 0 0,1 15,5C15,6.31 14.17,7.42 13,7.83V9H15V11H13V19.92C14.26,19.75 15.62,19.29 16.66,18.63C16.09,18.05 15.72,17.28 15.66,16.43L17.66,16.29C17.72,17.13 18.44,17.8 19.3,17.8C20.21,17.8 20.95,17.06 20.95,16.15H22.95C22.95,18.16 21.31,19.8 19.3,19.8L19.13,19.8C17.55,21.07 14.89,22 12,22C9.11,22 6.45,21.07 4.87,19.8L4.7,19.8C2.69,19.8 1.05,18.16 1.05,16.15H3.05C3.05,17.06 3.79,17.8 4.7,17.8C5.56,17.8 6.28,17.13 6.34,16.29L8.34,16.43C8.28,17.28 7.91,18.05 7.34,18.63C8.38,19.29 9.74,19.75 11,19.92V11H9V9H11V7.83C9.83,7.42 9,6.31 9,5A3,3 0 0,1 12,2M12,4A1,1 0 0,0 11,5A1,1 0 0,0 12,6A1,1 0 0,0 13,5A1,1 0 0,0 12,4Z';
 
 function routeToSvg(points) {
   return points.map(p => { const q = project(p.lat, p.lng); return `${q.x.toFixed(1)},${q.y.toFixed(1)}`; }).join(' ');
@@ -68,6 +71,7 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
   viewRef.current = view;
   const [showCities, setShowCities] = useState(true);
   const [showStations, setShowStations] = useState(showStationsDefault);
+  const [showPorts, setShowPorts] = useState(true);
   const [popup, setPopup] = useState(null); // {kind, data, x, y}
   const trucks = useGame(s => s.trucks);
   const deliveries = useGame(s => s.deliveries);
@@ -182,16 +186,13 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
     if (d.incident) {
       effNow = now < d.incident.resolveAt ? d.incident.startedAt : now - (d.incident.resolveAt - d.incident.startedAt);
     }
-    const prog = Math.min(1, Math.max(0, (effNow - d.startedAt) / (d.endsAt - d.startedAt)));
-    const pos = pointAlong(d.route.points, d.route.cum, prog);
-    const fs = d.route.ferrySegment;
-    let ferryOn = false, ferryLoading = false;
-    if (fs && prog >= fs.startFrac && prog <= fs.endFrac) {
-      ferryOn = true;
-      const loadWin = Math.min((fs.endFrac - fs.startFrac) * 0.25, 0.015);
-      ferryLoading = prog <= fs.startFrac + loadWin;
-    }
-    return { ...pos, ferryOn, ferryLoading, incident: d.incident || null };
+    // Lifecycle phases: loading at origin, driving, ferry paperwork/boarding
+    // at the port, sailing (ship art), docking, final unloading.
+    const pp = deliveryPhase(d, effNow);
+    const pos = pointAlong(d.route.points, d.route.cum, Math.min(1, Math.max(0, pp.frac)));
+    const ferryOn = pp.phase === 'ferry';
+    const ferryDock = pp.phase === 'ferry-board' || pp.phase === 'ferry-unboard';
+    return { ...pos, ferryOn, ferryLoading: ferryDock, phase: pp.phase, incident: d.incident || null };
   };
 
   const zoomBy = (f) => {
@@ -292,6 +293,18 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
           </G>
         );
       })}
+      {/* Fixed sea ports — always-on markers (toggleable) so ferry crossings
+          are legible: trucks drive to the port, board the ship, sail, dock. */}
+      {showPorts && PORT_PTS.map(pt => (
+        inView(pt.x, pt.y) ? (
+          <G key={pt.id} transform={`translate(${pt.x},${pt.y}) scale(${mk * 1.1})`}>
+            <Circle r={8} fill="#0E4C7A" stroke="#fff" strokeWidth={1.4} />
+            <G transform="translate(-6,-6) scale(0.5)">
+              <Path d={ANCHOR_PATH} fill="#fff" />
+            </G>
+          </G>
+        ) : null
+      ))}
       {/* Purchased hubs (garages) — small pseudo-3D building */}
       {hubs.filter(h => !h.hq).map(h => {
         const c = cityById(h.cityId); if (!c) return null; const q = project(c.lat, c.lng);
@@ -326,7 +339,7 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
         </G>
       )}
     </G>
-  ), [view, showCities, showStations, pickingMode, corridors, hubs, discovered, hqP && hqP.x]);
+  ), [view, showCities, showStations, showPorts, pickingMode, corridors, hubs, discovered, hqP && hqP.x]);
 
   return (
     <View style={{ flex: 1, backgroundColor: C.mapWater }}
@@ -374,25 +387,17 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
                   </SvgText>
                 </G>
               ) : null;
-              if (p.ferryOn && !p.ferryLoading) {
-                // Crossing the sea hop — swap the truck art for a ferry icon.
-                return (
-                  <G key={t.id}>
-                    <G transform={`translate(${q.x}, ${q.y}) rotate(${p.heading + 180}) scale(${k}) translate(-20, -18)`}>
-                      <FerryTopShape />
-                    </G>
-                    {incidentBadge}
-                  </G>
-                );
-              }
-              if (p.ferryLoading) {
-                // Brief loading state at the ferry dock — truck fades/shrinks with a pulsing dot.
+              if (p.ferryOn || p.ferryLoading) {
+                // On (or boarding/leaving) the ferry: always the big RO-RO
+                // steamer with the truck on deck — never a truck on water.
+                // While docked (paperwork + roll-on/off) the ship holds at the
+                // port with a pulsing ring.
                 const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 260);
                 return (
                   <G key={t.id}>
-                    <Circle cx={q.x} cy={q.y} r={(7 + 5 * pulse) * sz} fill={C.blue} opacity={0.18} />
-                    <G opacity={0.55} transform={`translate(${q.x}, ${q.y}) rotate(${p.heading + 180}) scale(${k * 0.8}) translate(-20, ${-bodyH / 2})`}>
-                      <TruckTopShapes type={bt} body={body} accent={accent} lights={lights} />
+                    {p.ferryLoading && <Circle cx={q.x} cy={q.y} r={(8 + 5 * pulse) * sz} fill={C.blue} opacity={0.18} />}
+                    <G transform={`translate(${q.x}, ${q.y}) rotate(${p.heading + 180}) scale(${k}) translate(-24, -36)`}>
+                      <FerryTopShape />
                     </G>
                     {incidentBadge}
                   </G>
@@ -400,6 +405,10 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
               }
               return (
                 <G key={t.id}>
+                  {/* Amber pulse while loading at origin / unloading at destination */}
+                  {(p.phase === 'loading' || p.phase === 'unloading') && (
+                    <Circle cx={q.x} cy={q.y} r={(7 + 4 * (0.5 + 0.5 * Math.sin(Date.now() / 300))) * sz} fill={C.amber} opacity={0.2} />
+                  )}
                   <G transform={`translate(${q.x}, ${q.y}) rotate(${p.heading + 180}) scale(${k}) translate(-20, ${-bodyH / 2})`}>
                     <TruckTopShapes type={bt} body={body} accent={accent} lights={lights} />
                   </G>
@@ -453,6 +462,7 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
         <Ctl icon="home-map-marker" onPress={centerHQ} />
         <Ctl icon="gas-station" active={showStations} onPress={() => setShowStations(v => !v)} />
         <Ctl icon="city-variant-outline" active={showCities} onPress={() => setShowCities(v => !v)} />
+        <Ctl icon="anchor" active={showPorts} onPress={() => setShowPorts(v => !v)} />
       </View>
 
     </View>

@@ -304,31 +304,61 @@ export const TruckTopShapes = React.memo(function TruckTopShapes({ type, body, a
   );
 });
 
-// Simple top-down ferry boat — swapped in for the truck marker while a
-// delivery crosses a FERRY_EDGES sea hop (v1.5.0). Kept visually consistent
-// with the 2.5D truck art (white-stroked hull, pale glass windows).
+// Big top-down RO-RO steamer for sea crossings — a proper cargo ship with the
+// player's truck visibly lashed on deck (never a truck "driving on water").
+// Faces DOWN (bow at the bottom) like the truck art so heading rotation works.
+export const FERRY_W = 48;
+export const FERRY_H = 72;
+const FERRY_SHAPES = [
+  // wake + hull
+  { k: 'ellipse', cx: 24, cy: 12, rx: 14, ry: 5, fill: 'rgba(255,255,255,0.35)' },
+  { k: 'path', d: 'M 9 8 L 39 8 L 39 48 Q 39 62 24 69 Q 9 62 9 48 Z', fill: '#26415C' },
+  { k: 'path', d: 'M 11 10 L 37 10 L 37 47 Q 37 60 24 66 Q 11 60 11 47 Z', fill: '#4A7AA8', stroke: '#fff', sw: 1.2 },
+  // main cargo deck
+  { k: 'rect', x: 13, y: 20, w: 22, h: 32, rx: 2, fill: '#5C82A8' },
+  // deck containers (port side)
+  { k: 'rect', x: 14.5, y: 23, w: 6, h: 12, rx: 0.8, fill: '#C25048' },
+  { k: 'rect', x: 14.5, y: 37, w: 6, h: 12, rx: 0.8, fill: '#2E8B57' },
+  // the truck lashed on deck (cab + trailer, facing the bow)
+  { k: 'rect', x: 23.5, y: 22.5, w: 9.5, h: 18, rx: 1.2, fill: '#3A5A8C', stroke: '#fff', sw: 0.8 },
+  { k: 'rect', x: 24.6, y: 24, w: 7.3, h: 3.5, rx: 0.8, fill: '#5B8DF0' },
+  { k: 'rect', x: 23.5, y: 42.5, w: 9.5, h: 7.5, rx: 1.4, fill: '#3A5A8C', stroke: '#fff', sw: 0.8 },
+  { k: 'rect', x: 25, y: 46, w: 6.5, h: 2.6, rx: 0.8, fill: '#AECBF5' },
+  // bridge / superstructure at the stern
+  { k: 'rect', x: 14, y: 11.5, w: 20, h: 7, rx: 1.4, fill: '#E8ECF2', stroke: '#9DB2D6', sw: 1 },
+  { k: 'rect', x: 16, y: 13, w: 4.5, h: 3.4, rx: 0.6, fill: '#AECBF5' },
+  { k: 'rect', x: 22, y: 13, w: 4.5, h: 3.4, rx: 0.6, fill: '#AECBF5' },
+  { k: 'rect', x: 28, y: 13, w: 4.5, h: 3.4, rx: 0.6, fill: '#AECBF5' },
+  // funnel with stripe
+  { k: 'rect', x: 21.5, y: 5.5, w: 5, h: 5.5, rx: 1, fill: '#DC3D43' },
+  { k: 'rect', x: 21.5, y: 7.3, w: 5, h: 1.6, rx: 0, fill: '#fff' },
+  // bow mast light
+  { k: 'circle', cx: 24, cy: 63.5, r: 1.4, fill: '#FFE9A8' },
+];
+
 export function FerryTopShape() {
   return (
     <G>
-      <Ellipse cx={20} cy={26} rx={17} ry={9} fill="#2E4F6E" />
-      <Ellipse cx={20} cy={24} rx={15} ry={7.5} fill="#4A7AA8" stroke="#fff" strokeWidth={1} />
-      <Rect x={10} y={12} width={20} height={10} rx={2} fill="#E8ECF2" stroke="#9DB2D6" strokeWidth={1} />
-      <Rect x={13} y={14} width={5} height={4} rx={0.6} fill="#AECBF5" />
-      <Rect x={22} y={14} width={5} height={4} rx={0.6} fill="#AECBF5" />
-      <Rect x={19} y={4} width={2} height={9} fill="#333" />
+      {FERRY_SHAPES.map((p, i) => p.k === 'rect'
+        ? <Rect key={i} x={p.x} y={p.y} width={p.w} height={p.h} rx={p.rx} fill={p.fill} stroke={p.stroke} strokeWidth={p.sw} />
+        : p.k === 'circle'
+          ? <Circle key={i} cx={p.cx} cy={p.cy} r={p.r} fill={p.fill} />
+          : p.k === 'path'
+            ? <Path key={i} d={p.d} fill={p.fill} stroke={p.stroke} strokeWidth={p.sw} />
+            : <Ellipse key={i} cx={p.cx} cy={p.cy} rx={p.rx} ry={p.ry} fill={p.fill} />)}
     </G>
   );
 }
 
 export function ferrySvgString() {
-  return '<svg width="40" height="36" viewBox="0 0 40 36">'
-    + '<ellipse cx="20" cy="26" rx="17" ry="9" fill="#2E4F6E"/>'
-    + '<ellipse cx="20" cy="24" rx="15" ry="7.5" fill="#4A7AA8" stroke="#fff" stroke-width="1"/>'
-    + '<rect x="10" y="12" width="20" height="10" rx="2" fill="#E8ECF2" stroke="#9DB2D6" stroke-width="1"/>'
-    + '<rect x="13" y="14" width="5" height="4" rx="0.6" fill="#AECBF5"/>'
-    + '<rect x="22" y="14" width="5" height="4" rx="0.6" fill="#AECBF5"/>'
-    + '<rect x="19" y="4" width="2" height="9" fill="#333"/>'
-    + '</svg>';
+  const els = FERRY_SHAPES.map(p => p.k === 'rect'
+    ? `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="${p.rx}" fill="${p.fill}"${p.stroke ? ` stroke="${p.stroke}" stroke-width="${p.sw}"` : ''}/>`
+    : p.k === 'circle'
+      ? `<circle cx="${p.cx}" cy="${p.cy}" r="${p.r}" fill="${p.fill}"/>`
+      : p.k === 'path'
+        ? `<path d="${p.d}" fill="${p.fill}"${p.stroke ? ` stroke="${p.stroke}" stroke-width="${p.sw}"` : ''}/>`
+        : `<ellipse cx="${p.cx}" cy="${p.cy}" rx="${p.rx}" ry="${p.ry}" fill="${p.fill}"/>`).join('');
+  return `<svg width="${FERRY_W}" height="${FERRY_H}" viewBox="0 0 ${FERRY_W} ${FERRY_H}">${els}</svg>`;
 }
 
 // HTML SVG string for the Leaflet WebView marker.
