@@ -2,7 +2,7 @@
 // Running / Parked / Pending (building+broken), with a one-tap "Depart All"
 // to dispatch every idle truck. Pill-shaped, frosted, Samsung-style.
 import React, { useRef, useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, Animated, FlatList, Dimensions } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Animated, ScrollView, FlatList, Dimensions } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import Svg from 'react-native-svg';
 import { C, FONT, SHADOW } from '../theme';
@@ -184,10 +184,11 @@ export default function FleetSidebar({ visible, onClose, onTruckPress, onToast }
           <Text style={st.departTxt}>Depart All ({parkedCount})</Text>
         </Pressable>
 
-        {/* 3 tabs — Running / Parked / Pending. A fixed equal-width row (not a
-            horizontal scroller): each pill gets exactly a third of the drawer,
-            with single-line labels, so nothing squishes, wraps or overlaps. */}
-        <View style={st.tabBar}>
+        {/* 3 tabs — Running / Parked / Pending. Horizontal scroller of pills
+            that are never allowed to shrink (flexShrink: 0 + generous padding)
+            so every label is fully readable; overflow just scrolls sideways. */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}
+          style={{ flexGrow: 0 }} contentContainerStyle={st.tabBar}>
           {GROUPS.map(g => {
             const count = trucks.filter(g.match).length;
             const on = tab === g.key;
@@ -202,7 +203,7 @@ export default function FleetSidebar({ visible, onClose, onTruckPress, onToast }
               </Pressable>
             );
           })}
-        </View>
+        </ScrollView>
 
         {(() => {
           const g = GROUPS.find(x => x.key === tab);
@@ -275,12 +276,12 @@ const st = StyleSheet.create({
     backgroundColor: C.green, paddingVertical: 13, borderRadius: 26,
   },
   departTxt: { color: '#fff', fontWeight: '800', fontSize: 14 },
-  tabBar: { flexDirection: 'row', gap: 6, marginTop: 12 },
+  tabBar: { flexDirection: 'row', gap: 8, marginTop: 12, paddingRight: 8 },
   tab: {
-    flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
-    paddingVertical: 9, paddingHorizontal: 4, borderRadius: 16, backgroundColor: C.bgSoft,
+    flexShrink: 0, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    paddingVertical: 10, paddingHorizontal: 16, borderRadius: 18, backgroundColor: C.bgSoft,
   },
-  tabTxt: { fontSize: 11, fontWeight: '800', flexShrink: 1 },
+  tabTxt: { fontSize: 12, fontWeight: '800' },
   grpHead: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   countPill: { marginLeft: 8, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12, minWidth: 22, alignItems: 'center' },
   row: {

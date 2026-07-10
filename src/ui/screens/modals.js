@@ -14,7 +14,7 @@ import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
 import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, TRUCK_COLORS, TRUCK_LOGOS } from '../../data/trucks';
 import { inr, inrShort } from '../../engine/economy';
 import { APP_VERSION, checkForUpdate, fmtMB, cmpVer } from '../../net/updates';
-import { exportBackup, parseBackup, readAutoBackup } from '../../engine/backup';
+import { exportBackup, parseBackup, readAutoBackup, pickBackupFile } from '../../engine/backup';
 import { COUNTRIES, COUNTRY_BY_CODE } from '../../data/expansion';
 import { TruckTopShapes, truckShapes, bodyTypeFor, defaultBodyColor } from '../truckArt';
 import { BrandEmblem } from '../BrandLogo';
@@ -650,7 +650,8 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
   const sellTruck = useGame(s => s.sellTruck);
   const truckResale = useGame(s => s.truckResale);
   const [confirmSell, setConfirmSell] = useState(false);
-  useEffect(() => { if (!visible) setConfirmSell(false); }, [visible]);
+  const [histAll, setHistAll] = useState(false);
+  useEffect(() => { if (!visible) { setConfirmSell(false); setHistAll(false); } }, [visible]);
   const truck = trucks.find(t => t.id === truckId);
   useTick(visible && !!truck && (truck.status === 'delivering' || truck.status === 'building'));
   if (!truck) return <Sheet visible={visible} onClose={onClose} title="Truck" height="50%"><View /></Sheet>;
@@ -823,11 +824,19 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
           <SpecRow icon="map-marker" label="Location" value={cityById(truck.cityId)?.name || '—'} />
         </Card>
 
-        {/* This truck's own delivery history */}
-        {(truck.log || []).length > 0 && (
+        {/* This truck's own route history — every completed trip (up to the
+            last 100), 5 shown initially with a Show-more expander. */}
+        {(truck.log || []).length > 0 && (() => {
+          const log = truck.log || [];
+          const shownLog = histAll ? log : log.slice(0, 5);
+          const moreCount = log.length - shownLog.length;
+          return (
           <Card style={{ marginTop: 10 }}>
-            <Text style={[FONT.h3, { marginBottom: 8 }]}>Delivery History</Text>
-            {(truck.log || []).slice(0, 8).map(h => {
+            <Row style={{ justifyContent: 'space-between', marginBottom: 8 }}>
+              <Text style={FONT.h3}>Route History</Text>
+              <Pill text={`${log.length} trip${log.length === 1 ? '' : 's'}`} icon="map-marker-path" color={C.blue} bg={C.blueSoft} />
+            </Row>
+            {shownLog.map(h => {
               const f = cityById(h.fromCityId), t2 = cityById(h.toCityId);
               return (
                 <Row key={h.id} style={{ justifyContent: 'space-between', paddingVertical: 6, borderTopWidth: 1, borderTopColor: C.border }}>
@@ -842,8 +851,18 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
                 </Row>
               );
             })}
+            {(moreCount > 0 || histAll) && (
+              <Pressable onPress={() => setHistAll(v => !v)}
+                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingTop: 10, borderTopWidth: 1, borderTopColor: C.border }}>
+                <Icon name={histAll ? 'chevron-up' : 'chevron-down'} size={16} color={C.blue} />
+                <Text style={{ color: C.blue, fontWeight: '700', marginLeft: 4 }}>
+                  {histAll ? 'Show less' : `Show full history (${moreCount} more trip${moreCount === 1 ? '' : 's'})`}
+                </Text>
+              </Pressable>
+            )}
           </Card>
-        )}
+          );
+        })()}
 
         <Card style={{ marginTop: 10 }}>
           <Text style={[FONT.h3, { marginBottom: 8 }]}>Customize</Text>
@@ -1789,8 +1808,8 @@ function BackupTab({ onClose }) {
   const cloudSnapshot = useGame(s => s.cloudSnapshot);
   const applyCloudState = useGame(s => s.applyCloudState);
   const backupNow = useGame(s => s.backupNow);
-  const [importText, setImportText] = useState('');
-  const [confirmImport, setConfirmImport] = useState(false);
+  // pending = a picked & validated file waiting for the confirm tap.
+  const [pending, setPending] = useState(null); // {data, meta, fileName}
   const [confirmRestore, setConfirmRestore] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -1798,18 +1817,29 @@ function BackupTab({ onClose }) {
     setBusy(true);
     try {
       const r = await exportBackup(cloudSnapshot());
-      toast(r.file ? 'Backup saved to Downloads & ready to share' : 'Backup ready — share it anywhere', 'success');
+      toast(r.ok ? `Backup file saved: ${r.path}` : r.err, r.ok ? 'success' : 'error');
     } catch (e) { toast('Export failed — try again', 'error'); }
     setBusy(false);
   };
 
+  // Step 1: pick the .json via the system file picker and validate it.
+  const doPickFile = async () => {
+    setBusy(true);
+    const f = await pickBackupFile();
+    setBusy(false);
+    if (f.cancelled) return;
+    if (!f.ok) { toast(f.err, 'error'); return; }
+    const r = parseBackup(f.text);
+    if (!r.ok) { setPending(null); toast(r.err, 'error'); return; }
+    setPending({ data: r.data, meta: r.meta, fileName: f.name });
+  };
+
+  // Step 2: explicit confirm replaces the current game.
   const doImport = () => {
-    const r = parseBackup(importText);
-    if (!r.ok) { setConfirmImport(false); toast(r.err, 'error'); return; }
-    if (!confirmImport) { setConfirmImport(true); return; }
-    applyCloudState(r.data);
-    setImportText(''); setConfirmImport(false);
-    toast(`Backup from ${r.meta.version} imported — welcome back, boss!`, 'success');
+    if (!pending) return;
+    applyCloudState(pending.data);
+    toast(`Backup from ${pending.meta.version} imported — welcome back, boss!`, 'success');
+    setPending(null);
     onClose && onClose();
   };
 
@@ -1829,9 +1859,9 @@ function BackupTab({ onClose }) {
       <Card>
         <Text style={FONT.sub}>
           Exports your entire game — A to Z, from money and trucks to unlocked countries and achievements — as a
-          <Text style={{ fontWeight: '800' }}> versioned JSON backup</Text>. It saves to Downloads (when possible) and opens the share sheet, so you can move it to another phone.
+          <Text style={{ fontWeight: '800' }}> versioned .json backup file</Text> saved into your phone's Downloads folder. Copy or send that file to move your empire to another device.
         </Text>
-        <Btn title={busy ? 'Preparing…' : 'Export backup'} kind="green" icon="export-variant" disabled={busy} onPress={doExport} style={{ marginTop: 12 }} />
+        <Btn title={busy ? 'Working…' : 'Export backup file'} kind="green" icon="file-export-outline" disabled={busy} onPress={doExport} style={{ marginTop: 12 }} />
         <Text style={[FONT.tiny, { marginTop: 8 }]}>
           Format: TruckEmpire-backup-{APP_VERSION}-date.json · importable on {APP_VERSION} or any newer version.
         </Text>
@@ -1855,19 +1885,22 @@ function BackupTab({ onClose }) {
 
       <SectionTitle icon="database-import" text="Import" />
       <Card>
-        <Text style={FONT.sub}>Paste the backup JSON from another device (or from your Downloads file) below.</Text>
-        <TextInput
-          value={importText}
-          onChangeText={t => { setImportText(t); setConfirmImport(false); }}
-          placeholder='{"app":"truck-empire-tycoon", ...}'
-          placeholderTextColor={C.faint}
-          multiline numberOfLines={4}
-          style={[cs.input, { height: 96, textAlignVertical: 'top', marginTop: 10 }]}
-        />
-        <Btn
-          title={confirmImport ? 'Tap again — this replaces your current game' : 'Import backup'}
-          kind={confirmImport ? 'danger' : 'blue'} icon="database-import"
-          disabled={!importText.trim()} onPress={doImport} style={{ marginTop: 10 }} />
+        <Text style={FONT.sub}>Pick the backup .json file (from Downloads, Drive, WhatsApp — anywhere on the phone). It's checked before anything is touched.</Text>
+        <Btn title={busy ? 'Working…' : 'Choose backup file'} kind="blue" icon="folder-open-outline"
+          disabled={busy} onPress={doPickFile} style={{ marginTop: 10 }} />
+        {pending && (
+          <View style={{ marginTop: 10, backgroundColor: C.blueSoft, borderRadius: RADIUS.md, padding: 10 }}>
+            <Row>
+              <Icon name="file-check-outline" size={16} color={C.blue} />
+              <Text style={[FONT.body, { fontWeight: '700', marginLeft: 6, flex: 1 }]} numberOfLines={1}>{pending.fileName}</Text>
+            </Row>
+            <Text style={[FONT.tiny, { marginTop: 2 }]}>
+              Valid backup · from {pending.meta.version}{pending.meta.savedAt ? ` · saved ${relTime(new Date(pending.meta.savedAt).getTime())}` : ''}
+              {pending.data.company?.name ? ` · company "${pending.data.company.name}"` : ''}
+            </Text>
+            <Btn title="Import — replaces the current game" kind="danger" icon="database-import" onPress={doImport} style={{ marginTop: 8 }} />
+          </View>
+        )}
         <Row style={{ marginTop: 10, backgroundColor: C.amberSoft, borderRadius: RADIUS.md, padding: 8 }}>
           <Icon name="shield-alert-outline" size={14} color={C.amber} />
           <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.text }]}>
