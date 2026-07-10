@@ -27,11 +27,18 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
 
   const hq = company ? cityById(company.hqCityId) : { lat: 22, lng: 79, name: 'HQ' };
 
+  const hubs = useGame(s => s.hubs || []);
+  const hubData = useCallback(() => hubs.filter(h => !h.hq).map(h => {
+    const c = cityById(h.cityId);
+    return c ? { lat: c.lat, lng: c.lng, name: h.name, hq: false } : null;
+  }).filter(Boolean), [hubs]);
+
   const initial = useMemo(() => ({
     hq: { lat: hq.lat, lng: hq.lng, name: hq.name },
     companyName: company?.name || 'Company',
     cities: CITY_DATA,
     stations: STATION_DATA,
+    hubs: hubData(),
   }), []);
 
   const html = useMemo(() => buildLeafletHtml(initial), [initial]);
@@ -92,6 +99,9 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
 
   // Only show city dots for countries the player has unlocked.
   useEffect(() => { if (ready) inject(`window.setVisibleCountries(${JSON.stringify(unlockedCountries)})`); }, [ready, unlockedCountries]);
+
+  // Keep garage markers in sync when hubs are bought/sold.
+  useEffect(() => { if (ready) inject(`window.setHubs(${JSON.stringify(hubData())})`); }, [ready, hubs.length]);
 
   useEffect(() => { if (ready) inject(`window.setPickMode(${!!pickingMode})`); }, [pickingMode, ready]);
   useEffect(() => { if (ready && focus) inject(`window.focusOn(${focus.lat},${focus.lng},${focus.scale ? 9 : 7})`); }, [focus, ready]);

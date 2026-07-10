@@ -3,7 +3,7 @@
 // real road network, trucks animate along real route polylines with heading
 // rotation. India only.
 import React, { useMemo, useRef, useState, useEffect, useCallback } from 'react';
-import { View, PanResponder, Text, Pressable, StyleSheet, Animated } from 'react-native';
+import { View, PanResponder, Text, Pressable, StyleSheet, AppState } from 'react-native';
 import Svg, { G, Polygon, Polyline, Circle, Path, Rect, Ellipse, Text as SvgText } from 'react-native-svg';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { INDIA_STATES } from '../data/indiaMap';
@@ -37,11 +37,20 @@ const STATE_POLYS = INDIA_STATES.map((s, i) => ({
   }).join(' ')),
 }));
 
+// Each road line carries its bounding box so off-screen segments can be
+// skipped cheaply every frame (viewport culling).
 const ROAD_LINES = ROAD_EDGES.map(e => {
   const a = ROAD_NODES[e.a], b = ROAD_NODES[e.b];
   if (!a || !b) return null;
   const pts = [a, ...(e.via || []).map(([lat, lng]) => ({ lat, lng })), b];
-  return pts.map(p => { const q = project(p.lat, p.lng); return `${q.x.toFixed(1)},${q.y.toFixed(1)}`; }).join(' ');
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  const str = pts.map(p => {
+    const q = project(p.lat, p.lng);
+    if (q.x < x0) x0 = q.x; if (q.x > x1) x1 = q.x;
+    if (q.y < y0) y0 = q.y; if (q.y > y1) y1 = q.y;
+    return `${q.x.toFixed(1)},${q.y.toFixed(1)}`;
+  }).join(' ');
+  return { pts: str, x0, y0, x1, y1 };
 }).filter(Boolean);
 
 const CITY_PTS = CITIES.map(c => ({ ...c, ...project(c.lat, c.lng) }));
@@ -67,10 +76,16 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
   const [, setFrame] = useState(0);
 
   // Throttled ~12fps rerender only while trucks are moving (smooth but light).
+  // Fully paused while the app is backgrounded so it never burns battery or
+  // heats the phone with the screen off.
   useEffect(() => {
     if (!deliveries.length) return;
-    const iv = setInterval(() => setFrame(f => (f + 1) % 100000), 80);
-    return () => clearInterval(iv);
+    let iv = null;
+    const start = () => { if (!iv) iv = setInterval(() => setFrame(f => (f + 1) % 100000), 80); };
+    const stop = () => { if (iv) { clearInterval(iv); iv = null; } };
+    start();
+    const sub = AppState.addEventListener('change', st2 => (st2 === 'active' ? start() : stop()));
+    return () => { stop(); sub.remove(); };
   }, [deliveries.length]);
 
   // focus camera on {lat,lng} when requested
@@ -202,10 +217,21 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
   const buyHub = useGame(s => s.buyHub);
 
   const cityVisible = c => (c.tier === 1) || (c.tier === 2 && view.scale > 2.2) || view.scale > 4.5;
-  // Partial (not full) zoom compensation — HQ/hub/truck icons, roads and city
-  // labels still shrink somewhat when zoomed out instead of staying pinned
-  // at a constant, oversized screen size at every zoom level.
+  // Partial (not full) zoom compensation — roads / labels / small dots still
+  // shrink somewhat when zoomed out instead of staying pinned at a constant
+  // screen size at every zoom level.
   const inv = 1 / Math.sqrt(view.scale);
+  // Marker scale for trucks / HQ / garages: behaves like a real world object
+  // (shrinks zooming out, grows zooming in) but with screen-size clamps so
+  // it never becomes a speck or fills the screen. mk is in world units.
+  const mk = Math.max(0.5, Math.min(1.7, view.scale / 2.6)) / view.scale;
+  // Viewport bounds (world coords, small margin) — anything outside is skipped
+  // entirely so off-screen geometry costs nothing per frame.
+  const vb = {
+    x0: view.x - 30, y0: view.y - 30,
+    x1: view.x + size.w / view.scale + 30, y1: view.y + size.h / view.scale + 30,
+  };
+  const inView = (x, y) => x >= vb.x0 && x <= vb.x1 && y >= vb.y0 && y <= vb.y1;
 
   // Static layer (land, highways, unlocked corridors, stations, cities, HQ,
   // hubs) — only recomputed when the camera or toggles change, NOT every truck
@@ -216,9 +242,11 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
         <Polygon key={`${i}-${j}`} points={pts}
           fill={s.alt ? C.mapLand : C.mapLandAlt} stroke={C.mapStroke} strokeWidth={0.8 * inv} />
       )))}
-      {view.scale > 1.4 && ROAD_LINES.map((pts, i) => (
-        <Polyline key={i} points={pts} fill="none" stroke={C.road}
-          strokeWidth={Math.min(1.6, 2.2 * inv)} strokeLinejoin="round" strokeLinecap="round" />
+      {view.scale > 1.4 && ROAD_LINES.map((l, i) => (
+        (l.x1 >= vb.x0 && l.x0 <= vb.x1 && l.y1 >= vb.y0 && l.y0 <= vb.y1) ? (
+          <Polyline key={i} points={l.pts} fill="none" stroke={C.road}
+            strokeWidth={Math.min(1.6, 2.2 * inv)} strokeLinejoin="round" strokeLinecap="round" />
+        ) : null
       ))}
       {/* Unlocked corridors — stay highlighted after you run them */}
       {corridors.map(c => (
@@ -226,10 +254,12 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
           strokeWidth={2 * inv} opacity={0.28} strokeLinecap="round" strokeLinejoin="round" />
       ))}
       {showStations && view.scale > 4 && STATION_PTS.map(s => (
-        <Circle key={s.id} cx={s.x} cy={s.y} r={2.6 * inv}
-          fill={s.type === 'ev' ? C.green : C.amber} stroke="#fff" strokeWidth={0.6 * inv} opacity={0.9} />
+        inView(s.x, s.y) ? (
+          <Circle key={s.id} cx={s.x} cy={s.y} r={2.6 * inv}
+            fill={s.type === 'ev' ? C.green : C.amber} stroke="#fff" strokeWidth={0.6 * inv} opacity={0.9} />
+        ) : null
       ))}
-      {showCities && CITY_PTS.filter(cityVisible).map(c => (
+      {showCities && CITY_PTS.filter(c => cityVisible(c) && inView(c.x, c.y)).map(c => (
         <G key={c.id}>
           <Circle cx={c.x} cy={c.y} r={(c.tier === 1 ? 5 : c.tier === 2 ? 3.4 : 2.4) / Math.sqrt(view.scale)}
             fill={pickingMode ? C.blue : '#8792A0'} stroke="#fff" strokeWidth={inv} />
@@ -242,7 +272,8 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
       {/* Purchased hubs (garages) — small pseudo-3D building */}
       {hubs.filter(h => !h.hq).map(h => {
         const c = cityById(h.cityId); if (!c) return null; const q = project(c.lat, c.lng);
-        return <G key={h.cityId} transform={`translate(${q.x},${q.y}) scale(${inv})`}>
+        if (!inView(q.x, q.y)) return null;
+        return <G key={h.cityId} transform={`translate(${q.x},${q.y}) scale(${mk * 1.4})`}>
           <Ellipse cx={1} cy={7} rx={9} ry={3} fill="rgba(11,15,20,0.18)" />
           {/* extruded body */}
           <Path d="M -7 6 L -7 -2 L 7 -2 L 7 6 Z" fill="#5C6470" />
@@ -253,8 +284,8 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
         </G>;
       })}
       {/* HQ — pseudo-3D headquarters tower with shadow */}
-      {hqP && (
-        <G transform={`translate(${hqP.x},${hqP.y}) scale(${inv})`}>
+      {hqP && inView(hqP.x, hqP.y) && (
+        <G transform={`translate(${hqP.x},${hqP.y}) scale(${mk * 1.6})`}>
           <Ellipse cx={1.5} cy={11} rx={13} ry={4} fill="rgba(11,15,20,0.20)" />
           {/* right side face (darker) */}
           <Path d="M 8 10 L 8 -5 L 12 -8 L 12 7 Z" fill="#1E4FB8" />
@@ -292,21 +323,22 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
             ))}
             {deliveries.flatMap(d => d.stops.map((s, i) => {
               const q = project(s.lat, s.lng);
+              if (!inView(q.x, q.y)) return null;
               return <Circle key={d.id + i} cx={q.x} cy={q.y} r={4 * inv} fill={C.amber} stroke="#fff" strokeWidth={1.2 * inv} />;
             }))}
-            {/* Trucks — shared per-model top-down artwork (same as the showroom) */}
-            {trucks.map(t => {
+            {/* Trucks — shared per-model top-down artwork (same as the showroom).
+                Night is computed once per frame, not once per truck. */}
+            {(() => { const night = isNightHour(useGame.getState().gameDay().hour); return trucks.map(t => {
               const p = truckPos(t);
               const q = project(p.lat, p.lng);
+              if (!inView(q.x, q.y)) return null;
               const model = modelById(t.modelId);
               const body = t.color || defaultBodyColor(model);
               const accent = t.status === 'delivering' ? C.green : t.status === 'building' ? C.amber : t.status === 'broken' ? C.red : '#9DB2D6';
               const bt = bodyTypeFor(model);
-              // Headlights on for trucks driving at night (in-game clock).
-              const night = isNightHour(useGame.getState().gameDay().hour);
               const lights = night && t.status === 'delivering' ? headlightFor(model) : null;
               // Marker footprint per silhouette; art canvas is 40 units wide.
-              const sz = (bt === 'semi' ? 2.1 : bt === 'rigid' ? 1.7 : bt === 'box' ? 1.45 : 1.2) * inv;
+              const sz = (bt === 'doubletrailer' ? 2.5 : bt === 'conventional' ? 2.3 : bt === 'semi' ? 2.1 : bt === 'rigid' ? 1.7 : bt === 'box' ? 1.45 : 1.2) * mk;
               const { bodyH } = truckShapes(bt, body, accent, { lights });
               const k = sz * 0.32; // art units -> map units
               // Damage/theft badge — small colored dot with a glyph, offset
@@ -323,7 +355,6 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
                 // Crossing the sea hop — swap the truck art for a ferry icon.
                 return (
                   <G key={t.id}>
-                    <Ellipse cx={q.x + 1.2 * sz} cy={q.y + 2 * sz} rx={6.4 * sz} ry={3.4 * sz} fill="rgba(11,15,20,0.20)" />
                     <G transform={`translate(${q.x}, ${q.y}) rotate(${p.heading + 180}) scale(${k}) translate(-20, -18)`}>
                       <FerryTopShape />
                     </G>
@@ -346,15 +377,13 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
               }
               return (
                 <G key={t.id}>
-                  {/* soft ground shadow (kept flat, not rotated) */}
-                  <Ellipse cx={q.x + 1.2 * sz} cy={q.y + 2 * sz} rx={5.6 * sz} ry={3.2 * sz} fill="rgba(11,15,20,0.20)" />
                   <G transform={`translate(${q.x}, ${q.y}) rotate(${p.heading + 180}) scale(${k}) translate(-20, ${-bodyH / 2})`}>
                     <TruckTopShapes type={bt} body={body} accent={accent} lights={lights} />
                   </G>
                   {incidentBadge}
                 </G>
               );
-            })}
+            }); })()}
           </G>
         </Svg>
       </Pressable>

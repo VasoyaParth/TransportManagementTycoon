@@ -139,7 +139,7 @@ export const EASTER_EGGS = [
   { id: 'not_a_bug', title: 'Not a Bug, a Feature', hint: 'The mascot has a sense of humour.', where: 'Tap the truck logo on the splash screen 10 times fast.' },
   { id: 'nice_try', title: 'Nice Try', hint: 'Reading the warning label a little too closely.', where: 'Tap the Danger Zone warning text in Settings → Gameplay 6 times fast (doesn’t actually reset anything).' },
 ];
-const EASTER_EGG_REWARD = { cash: 10000000, gold: 50 }; // ₹1 crore + 50 Gold, per egg, one-time
+const EASTER_EGG_REWARD = { cash: 1000000, gold: 15 }; // ₹10 lakhs + 15 Gold, per egg, one-time
 
 function randomContracts(dayNumber, count = CONTRACTS_PER_DAY) {
   const out = [];
@@ -417,8 +417,10 @@ export const useGame = create(
         // Push a located event so the map can highlight it (kept short, capped).
         const pushMapEvent = (kind, icon, color, lat, lng, label) => {
           if (lat == null || lng == null) return;
-          set({ mapEvents: [{ id: uid('ev'), kind, icon, color, lat, lng, label, ts: Date.now() },
-            ...(get().mapEvents || [])].slice(0, 6) });
+          set({
+            mapEvents: [{ id: uid('ev'), kind, icon, color, lat, lng, label, ts: Date.now() },
+            ...(get().mapEvents || [])].slice(0, 6)
+          });
         };
         const anyCity = () => {
           const h = (s.hubs || [])[Math.floor(Math.random() * Math.max(1, (s.hubs || []).length))];

@@ -2,7 +2,7 @@
 // toasts, modals, skeletons. Pure RN Animated (no extra native deps).
 import React, { useEffect, useRef, useState, createContext, useContext } from 'react';
 import {
-  View, Text, Pressable, Animated, Easing, StyleSheet, Modal as RNModal, ScrollView, StatusBar, Platform,
+  View, Text, Pressable, Animated, Easing, StyleSheet, Modal as RNModal, ScrollView, StatusBar, Platform, PanResponder,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { C, FONT, SHADOW, RADIUS } from './theme';
@@ -188,34 +188,63 @@ export function Sheet({ visible, onClose, title, children, height = '82%' }) {
         </View>
         <View style={{ flex: 1 }}>{children}</View>
       </Animated.View>
+      {/* Mirror the global toast stack inside the modal window so toasts stay
+          visible above open sheets (see toast store note below). */}
+      <ToastStack />
     </RNModal>
   );
 }
 
 // ---------- Toasts ----------
+// Toast state lives in a tiny module-level store (not just React context) so
+// the SAME stack can be rendered both at the app root and inside every open
+// Sheet's RN Modal window — a plain overlay can't sit above a Modal, so the
+// Sheet mirrors the stack and toasts stay visible while any modal is open.
 const ToastCtx = createContext(null);
 export function useToast() { return useContext(ToastCtx); }
 
-export function ToastProvider({ children }) {
-  const [toasts, setToasts] = useState([]);
-  const push = (msg, kind = 'info') => {
-    const id = Math.random().toString(36);
-    setToasts(t => [...t.slice(-2), { id, msg, kind }]);
-    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3200);
-  };
+const toastStore = { toasts: [], subs: new Set() };
+function toastNotify() { toastStore.subs.forEach(fn => fn(toastStore.toasts)); }
+export function pushToast(msg, kind = 'info') {
+  const id = Math.random().toString(36);
+  toastStore.toasts = [...toastStore.toasts.slice(-3), { id, msg, kind }];
+  toastNotify();
+  setTimeout(() => { toastStore.toasts = toastStore.toasts.filter(x => x.id !== id); toastNotify(); }, 3200);
+}
+function useToastList() {
+  const [list, setList] = useState(toastStore.toasts);
+  useEffect(() => { toastStore.subs.add(setList); return () => toastStore.subs.delete(setList); }, []);
+  return list;
+}
+
+// AWS-console style stack: newest on top, colored status rail, pinned to the
+// very top of the window (above the floating header). pointerEvents="none"
+// keeps the whole screen touchable.
+export function ToastStack() {
+  const toasts = useToastList();
+  if (!toasts.length) return null;
   return (
-    <ToastCtx.Provider value={push}>
+    <View pointerEvents="none" style={st.toastWrap}>
+      {[...toasts].reverse().map(t => <ToastItem key={t.id} {...t} />)}
+    </View>
+  );
+}
+
+export function ToastProvider({ children }) {
+  return (
+    <ToastCtx.Provider value={pushToast}>
       {children}
-      {/* Plain top overlay with pointerEvents="none": the ENTIRE screen stays
-          touchable while a toast/notification is visible — it can never trap a
-          tap. (A transparent Modal would sit above bottom sheets but intercepts
-          touches on Android, so we deliberately avoid it.) */}
-      <View pointerEvents="none" style={st.toastWrap}>
-        {toasts.map(t => <ToastItem key={t.id} {...t} />)}
-      </View>
+      <ToastStack />
     </ToastCtx.Provider>
   );
 }
+
+const TOAST_META = {
+  info: { icon: 'information', color: C.blue, title: 'Info' },
+  success: { icon: 'check-circle', color: C.green, title: 'Success' },
+  error: { icon: 'alert-circle', color: C.red, title: 'Error' },
+  warn: { icon: 'alert', color: C.amber, title: 'Warning' },
+};
 
 function ToastItem({ msg, kind }) {
   const anim = useRef(new Animated.Value(0)).current;
@@ -223,21 +252,68 @@ function ToastItem({ msg, kind }) {
     Animated.spring(anim, { toValue: 1, useNativeDriver: true, speed: 20, bounciness: 8 }).start();
     haptic(kind === 'error' ? 'error' : kind === 'warn' ? 'warn' : kind === 'success' ? 'success' : 'light');
   }, [anim, kind]);
-  const meta = {
-    info: { icon: 'information', color: C.blue },
-    success: { icon: 'check-circle', color: C.green },
-    error: { icon: 'alert-circle', color: C.red },
-    warn: { icon: 'alert', color: C.amber },
-  }[kind] || { icon: 'information', color: C.blue };
+  const meta = TOAST_META[kind] || TOAST_META.info;
   return (
-    <Animated.View style={[st.toast, SHADOW.pop, {
-      opacity: anim, transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [-20, 0] }) }],
-    }]}>
+    <Animated.View style={[st.toast, SHADOW.pop, { borderLeftColor: meta.color, borderLeftWidth: 4 },
+      { opacity: anim, transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [-16, 0] }) }] }]}>
       <Icon name={meta.icon} size={18} color={meta.color} style={{ marginRight: 8 }} />
-      <Text style={[FONT.body, { flex: 1, fontWeight: '600' }]} numberOfLines={2}>{msg}</Text>
+      <View style={{ flex: 1 }}>
+        <Text style={[FONT.tiny, { fontWeight: '800', color: meta.color, textTransform: 'uppercase', letterSpacing: 0.4 }]}>{meta.title}</Text>
+        <Text style={[FONT.body, { fontWeight: '600' }]} numberOfLines={2}>{msg}</Text>
+      </View>
     </Animated.View>
   );
 }
+
+// ---------- Slider ----------
+// Drag/tap slider with a tick per step: subtle haptic + click sound on every
+// value change. Replaces +/- steppers anywhere a range is picked (gold→cash,
+// cargo pricing, volume). Pure RN, no native slider dependency.
+export function GameSlider({ min = 0, max = 100, step = 1, value, onChange, minLabel, maxLabel, color = C.blue }) {
+  const [w, setW] = useState(1);
+  const stateRef = useRef({});
+  stateRef.current = { w, min, max, step, value, onChange };
+  const pan = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: e => handle(e.nativeEvent.locationX),
+    onPanResponderMove: e => handle(e.nativeEvent.locationX),
+  })).current;
+  const handle = (x) => {
+    const s = stateRef.current;
+    const f = Math.min(1, Math.max(0, x / (s.w || 1)));
+    const raw = s.min + f * (s.max - s.min);
+    const v = Math.min(s.max, Math.max(s.min, Math.round(raw / s.step) * s.step));
+    if (v !== s.value) { haptic('light'); play('tap', 0.25); s.onChange(v); }
+  };
+  const f = (Math.min(max, Math.max(min, value)) - min) / ((max - min) || 1);
+  return (
+    <View>
+      <View {...pan.panHandlers} onLayout={e => setW(e.nativeEvent.layout.width)}
+        style={{ height: 36, justifyContent: 'center' }} hitSlop={{ top: 6, bottom: 6 }}>
+        <View style={sl.track} />
+        <View style={[sl.fill, { width: `${f * 100}%`, backgroundColor: color }]} />
+        <View style={[sl.thumb, { left: `${f * 100}%`, borderColor: color }]} pointerEvents="none" />
+      </View>
+      {(minLabel != null || maxLabel != null) && (
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+          <Text style={FONT.tiny}>{minLabel}</Text>
+          <Text style={FONT.tiny}>{maxLabel}</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+const sl = StyleSheet.create({
+  track: { height: 6, borderRadius: 3, backgroundColor: C.border },
+  fill: { position: 'absolute', height: 6, borderRadius: 3 },
+  thumb: {
+    position: 'absolute', width: 22, height: 22, borderRadius: 11, marginLeft: -11,
+    backgroundColor: '#fff', borderWidth: 3, elevation: 2,
+    shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 3, shadowOffset: { width: 0, height: 1 },
+  },
+});
 
 // ---------- Stat card ----------
 export function Stat({ icon, label, value, color = C.text, sub }) {
@@ -285,14 +361,14 @@ const st = StyleSheet.create({
     borderTopLeftRadius: RADIUS.xl, borderTopRightRadius: RADIUS.xl, padding: 16, paddingBottom: 24,
   },
   sheetHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  // Below the floating header pill, at the very top. On Android SafeAreaView
-  // doesn't inset, so add the status-bar height manually.
+  // Very top of the window, above the floating header pill. On Android
+  // SafeAreaView doesn't inset, so add the status-bar height manually.
   toastWrap: {
     position: 'absolute', left: 16, right: 16,
-    top: 62 + (Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0),
+    top: 8 + (Platform.OS === 'android' ? (StatusBar.currentHeight || 0) : 0),
   },
   toast: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: C.bg, borderRadius: RADIUS.md,
-    borderWidth: 1, borderColor: C.border, paddingVertical: 10, paddingHorizontal: 12, marginTop: 8,
+    borderWidth: 1, borderColor: C.border, paddingVertical: 8, paddingHorizontal: 12, marginBottom: 8,
   },
 });

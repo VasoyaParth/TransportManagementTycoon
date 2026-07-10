@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, FlatList, TextInput, Pressable, StyleSheet } from 'react-native';
 import { C, FONT, RADIUS } from '../theme';
 import {
-  Card, Btn, IconBtn, Pill, statusMeta, Progress, Money, Stat, Row, Icon, useToast, relTime,
+  Card, Btn, IconBtn, Pill, statusMeta, Progress, Money, Stat, Row, Icon, useToast, relTime, GameSlider,
 } from '../components';
 import Svg from 'react-native-svg';
 import { useGame, modelById, cargoById, GAME_HOUR_MS } from '../../store/gameStore';
@@ -532,41 +532,56 @@ export function StaffTab({ onOpenDriver }) {
     return arr;
   }, [candidates, hireRole, hireSort]);
 
+  // Two screens like Fleet -> Buy Truck: default roster ("My Staff"), and a
+  // dedicated Hire screen you switch into with the header button.
+  const [screen, setScreen] = useState('mine'); // 'mine' | 'hire'
+
+  if (screen === 'mine') {
+    return (
+      <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
+        <Row style={{ justifyContent: 'space-between', marginBottom: 12 }}>
+          <Text style={FONT.h2}>My Staff</Text>
+          <Btn title="Hire Staff" icon="account-plus" small onPress={() => setScreen('hire')} />
+        </Row>
+        <Row style={{ marginBottom: 8 }}>
+          <Stat icon="account-group" label="Team" value={String(staff.length)} />
+          <View style={{ width: 8 }} />
+          <Stat icon="cash-clock" label="Salaries / mo" value={inrShort(counts.salary)} color={C.amber} />
+        </Row>
+        <FilterChips options={roleOpts} value={role} onChange={setRole} />
+        {staff.length === 0 ? (
+          <EmptyState icon="account-group-outline" title="No staff yet" sub="Hire drivers, mechanics and managers to grow your team."
+            action={<Btn title="Hire Staff" icon="account-plus" small onPress={() => setScreen('hire')} />} />
+        ) : roster.length === 0 ? (
+          <EmptyState icon="account-search-outline" title="None in this role" sub="Switch the filter or hire more staff." />
+        ) : (
+          <>
+            {shown.map(m => (
+              <StaffCard
+                key={m.id}
+                member={m}
+                trucks={trucks}
+                onAssign={(mem, t) => { assignDriver(mem.id, t.id); toast && toast(`${mem.name} assigned to ${modelById(t.modelId).name}`, 'success'); }}
+                onFire={mem => { fire(mem.id); toast && toast(`${mem.name} has been let go`, 'warn'); }}
+                onOpen={mem => onOpenDriver && onOpenDriver(mem)}
+              />
+            ))}
+            <LoadMore shown={shown.length} total={roster.length} onMore={() => setPage(p => p + 1)} />
+          </>
+        )}
+      </ScrollView>
+    );
+  }
+
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
-      <Row style={{ marginBottom: 8 }}>
-        <Stat icon="account-group" label="Team" value={String(staff.length)} />
-        <View style={{ width: 8 }} />
-        <Stat icon="cash-clock" label="Salaries / mo" value={inrShort(counts.salary)} color={C.amber} />
+      <Row style={{ justifyContent: 'space-between', marginBottom: 12 }}>
+        <Row>
+          <IconBtn name="arrow-left" onPress={() => setScreen('mine')} />
+          <Text style={[FONT.h2, { marginLeft: 6 }]}>Hire Staff</Text>
+        </Row>
+        <IconBtn name="refresh" onPress={() => { refreshCandidates(); toast && toast('New candidates available', 'info'); }} />
       </Row>
-
-      <SectionTitle icon="account-group" text="Roster" />
-      <FilterChips options={roleOpts} value={role} onChange={setRole} />
-      {staff.length === 0 ? (
-        <EmptyState icon="account-group-outline" title="No staff yet" sub="Hire from the candidates below to grow your team." />
-      ) : roster.length === 0 ? (
-        <EmptyState icon="account-search-outline" title="None in this role" sub="Switch the filter or hire more staff below." />
-      ) : (
-        <>
-          {shown.map(m => (
-            <StaffCard
-              key={m.id}
-              member={m}
-              trucks={trucks}
-              onAssign={(mem, t) => { assignDriver(mem.id, t.id); toast && toast(`${mem.name} assigned to ${modelById(t.modelId).name}`, 'success'); }}
-              onFire={mem => { fire(mem.id); toast && toast(`${mem.name} has been let go`, 'warn'); }}
-              onOpen={mem => onOpenDriver && onOpenDriver(mem)}
-            />
-          ))}
-          <LoadMore shown={shown.length} total={roster.length} onMore={() => setPage(p => p + 1)} />
-        </>
-      )}
-
-      <SectionTitle
-        icon="account-plus"
-        text="Hire Staff"
-        right={<IconBtn name="refresh" onPress={() => { refreshCandidates(); toast && toast('New candidates available', 'info'); }} />}
-      />
       <FilterChips options={hireRoleOpts} value={hireRole} onChange={setHireRole} />
       <FilterChips
         options={[
@@ -623,6 +638,7 @@ export function EconomyTab() {
   const history = useGame(s => s.history);
   const pricing = useGame(s => s.pricing);
   const savePricing = useGame(s => s.savePricing);
+  const [priceEdit, setPriceEdit] = useState(null); // cargo id whose slider is open
 
   const now = useNow(deliveries.length > 0);
   const salaryBurden = useMemo(() => staff.reduce((a, x) => a + x.salary, 0), [staff]);
@@ -702,32 +718,41 @@ export function EconomyTab() {
         {CARGO_TYPES.map((cg, i) => {
           const custom = pricing[cg.id] != null && pricing[cg.id] !== cg.rate;
           const v = pricing[cg.id] != null ? pricing[cg.id] : cg.rate;
-          const round1 = n => Math.round(n * 10) / 10;
           const MINR = 2, MAXR = 25;
+          const open = priceEdit === cg.id;
           return (
             <View key={cg.id} style={[{ paddingVertical: 10 }, i > 0 && st.divider]}>
-              <Row style={{ justifyContent: 'space-between' }}>
-                <Row style={{ flex: 1 }}>
-                  <Icon name={cg.icon} size={18} color={C.sub} />
-                  <View style={{ marginLeft: 8, flex: 1 }}>
-                    <Row>
-                      <Text style={[FONT.body, { fontWeight: '600' }]} numberOfLines={1}>{cg.name}</Text>
-                      {custom ? <View style={{ marginLeft: 6 }}><Pill text="Custom" icon="tune" color={C.green} bg={C.greenSoft} /></View> : null}
-                    </Row>
-                    <Text style={FONT.tiny}>Default ₹{cg.rate}{custom ? ` · reset available` : ''}</Text>
-                  </View>
+              {/* Row is read-only by default — tap to expand the slider editor,
+                  like the Staff hire screen switch. */}
+              <Pressable onPress={() => setPriceEdit(open ? null : cg.id)}>
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <Row style={{ flex: 1 }}>
+                    <Icon name={cg.icon} size={18} color={C.sub} />
+                    <View style={{ marginLeft: 8, flex: 1 }}>
+                      <Row>
+                        <Text style={[FONT.body, { fontWeight: '600' }]} numberOfLines={1}>{cg.name}</Text>
+                        {custom ? <View style={{ marginLeft: 6 }}><Pill text="Custom" icon="tune" color={C.green} bg={C.greenSoft} /></View> : null}
+                      </Row>
+                      <Text style={FONT.tiny}>Default ₹{cg.rate}</Text>
+                    </View>
+                  </Row>
+                  <Row style={{ alignItems: 'center' }}>
+                    <Text style={[FONT.mono, { fontWeight: '800', minWidth: 52, textAlign: 'right', color: custom ? C.green : C.text }]}>₹{v}</Text>
+                    <Icon name={open ? 'chevron-up' : 'chevron-down'} size={18} color={C.faint} style={{ marginLeft: 6 }} />
+                  </Row>
                 </Row>
-                <Row style={{ alignItems: 'center' }}>
-                  <IconBtn name="minus-circle-outline" color={v <= MINR ? C.faint : C.text}
-                    onPress={() => { if (v > MINR) savePricing({ [cg.id]: round1(v - 1) }); }} />
-                  <Text style={[FONT.mono, { fontWeight: '800', minWidth: 62, textAlign: 'center', color: custom ? C.green : C.text }]}>₹{v}</Text>
-                  <IconBtn name="plus-circle-outline" color={v >= MAXR ? C.faint : C.text}
-                    onPress={() => { if (v < MAXR) savePricing({ [cg.id]: round1(v + 1) }); }} />
-                  {custom ? (
-                    <IconBtn name="restore" color={C.sub} onPress={() => savePricing({ [cg.id]: cg.rate })} />
-                  ) : <View style={{ width: 34 }} />}
-                </Row>
-              </Row>
+              </Pressable>
+              {open && (
+                <View style={{ marginTop: 4 }}>
+                  <GameSlider min={MINR} max={MAXR} step={0.5} value={v} color={custom ? C.green : C.blue}
+                    onChange={nv => savePricing({ [cg.id]: nv })}
+                    minLabel={`₹${MINR}`} maxLabel={`₹${MAXR}`} />
+                  {custom && (
+                    <Btn title={`Reset to default ₹${cg.rate}`} kind="soft" small icon="restore"
+                      onPress={() => savePricing({ [cg.id]: cg.rate })} style={{ alignSelf: 'flex-start', marginTop: 4 }} />
+                  )}
+                </View>
+              )}
             </View>
           );
         })}
