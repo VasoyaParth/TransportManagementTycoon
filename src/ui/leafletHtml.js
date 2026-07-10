@@ -48,8 +48,7 @@ function shade(hex,pct){var h=(hex||'#3A5A8C').replace('#','');var n=parseInt(h,
 // darker) and a slight skew on the top faces for an isometric 2.5D read.
 function truck3d(color,accent,heading){
   var dark=shade(color,-0.28), roof=shade(color,0.18);
-  return '<div style="transform:perspective(150px) rotateX(34deg)">'
-   +'<div class="truck3d" style="transform:rotate('+((heading||0)+180)+'deg);width:40px;height:48px">'
+  return '<div class="truck3d" style="transform:rotate('+((heading||0)+180)+'deg);width:40px;height:48px">'
    +'<svg width="40" height="48" viewBox="0 0 40 48">'
    +'<ellipse cx="22" cy="42" rx="10" ry="3" fill="rgba(0,0,0,0.12)"/>'
    +'<rect x="9" y="5" width="24" height="30" rx="5" fill="'+dark+'"/>'
@@ -60,7 +59,7 @@ function truck3d(color,accent,heading){
    +'<rect x="13" y="32" width="14" height="7" rx="2" fill="#DCE7FA"/>'
    +'<rect x="4" y="13" width="4" height="9" rx="2" fill="#181B20"/><rect x="32" y="13" width="4" height="9" rx="2" fill="#181B20"/>'
    +'<rect x="4" y="29" width="4" height="8" rx="2" fill="#181B20"/><rect x="32" y="29" width="4" height="8" rx="2" fill="#181B20"/>'
-   +'</svg></div></div>';
+   +'</svg></div>';
 }
 // Big HQ office tower (same visual language as the offline map: blue tower,
 // windows, amber flag) — a real building icon, not a circle badge.
@@ -131,7 +130,9 @@ function boot(){
     DATA.cities.forEach(function(c){
       if(allowedCountries && allowedCountries.indexOf(c.country||'IN')<0) return;
       var disc = !!discovered[c.id];
-      if(!disc && !(c.tier===1 && z>=5 || c.tier===2 && z>=7 || z>=9)) return;
+      // While picking a destination every city must be tappable — show all
+      // dots; otherwise unexplored ones only fade in as you zoom.
+      if(!disc && !pickMode && !(c.tier===1 && z>=5 || c.tier===2 && z>=7 || z>=9)) return;
       var big = c.tier===1;
       var cls = 'city-dot'+(big?' big':'')+(disc?' disc':' undisc');
       var m=L.marker([c.lat,c.lng],{icon:L.divIcon({className:'',
@@ -166,17 +167,17 @@ function boot(){
     var html, w=40, h=48, anchorY=24;
     if(t.ferryOn && !t.ferryLoading && t.ferryArt){
       // Crossing the sea hop — swap the truck art for a ferry icon.
+      // No perspective wrapper: it distorted the art (wide rear / pinched
+      // front, changing with heading). Clean flat top-down rotation only.
       w=40; h=36; anchorY=18;
-      html='<div style="transform:perspective(170px) rotateX(30deg)">'
-        +'<div class="truck3d" style="transform:rotate('+((t.heading||0)+180)+'deg);width:'+w+'px;height:'+h+'px;transform-origin:'+(w/2)+'px '+anchorY+'px">'
-        +t.ferryArt+'</div></div>';
+      html='<div class="truck3d" style="transform:rotate('+((t.heading||0)+180)+'deg);width:'+w+'px;height:'+h+'px;transform-origin:'+(w/2)+'px '+anchorY+'px">'
+        +t.ferryArt+'</div>';
     } else if(t.art){
       // Detailed per-model artwork pre-rendered on the RN side (truckArt.js).
       w=t.artW||40; h=t.artH||48; anchorY=(t.bodyH||h)/2;
-      var loadStyle = t.ferryLoading ? 'opacity:.55;transform-origin:'+(w/2)+'px '+anchorY+'px;' : '';
-      html='<div style="transform:perspective(170px) rotateX(30deg)">'
-        +'<div class="truck3d" style="'+loadStyle+'transform:rotate('+((t.heading||0)+180)+'deg)'+(t.ferryLoading?' scale(0.8)':'')+';width:'+w+'px;height:'+h+'px;transform-origin:'+(w/2)+'px '+anchorY+'px">'
-        +t.art+'</div></div>';
+      var loadStyle = t.ferryLoading ? 'opacity:.55;' : '';
+      html='<div class="truck3d" style="'+loadStyle+'transform:rotate('+((t.heading||0)+180)+'deg)'+(t.ferryLoading?' scale(0.8)':'')+';width:'+w+'px;height:'+h+'px;transform-origin:'+(w/2)+'px '+anchorY+'px">'
+        +t.art+'</div>';
       if(t.ferryLoading){
         html='<div style="position:relative">'+html
           +'<div style="position:absolute;left:50%;top:50%;width:24px;height:24px;margin:-12px;border-radius:50%;background:rgba(37,99,235,.5);animation:pulseDot 1s ease-in-out infinite alternate"></div></div>';
@@ -235,7 +236,7 @@ function boot(){
     (s.corridors||[]).forEach(function(c){ liveC[c.id]=1; setCorridor(c); });
     Object.keys(corridorLines).forEach(function(id){ if(!liveC[id]){ map.removeLayer(corridorLines[id]); delete corridorLines[id]; }});
   };
-  window.setPickMode=function(on){ pickMode=on; map.getContainer().style.cursor=on?'crosshair':''; };
+  window.setPickMode=function(on){ pickMode=on; map.getContainer().style.cursor=on?'crosshair':''; plotCities(); };
   window.focusOn=function(lat,lng,z){ map.flyTo([lat,lng],z||9,{duration:1.0}); };
   window.centerHQ=function(){ map.flyTo([DATA.hq.lat,DATA.hq.lng],7,{duration:1.0}); };
   window.toggleCities=function(){ citiesOn=!citiesOn; if(citiesOn) cityLayer.addTo(map); else map.removeLayer(cityLayer); };

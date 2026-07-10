@@ -234,7 +234,8 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
 
   // Discovered cities are always visible; undiscovered ones appear faint and
   // only as you zoom in (tiered), or never when the city toggle is off.
-  const cityVisible = c => discovered.has(c.id)
+  // While picking a delivery destination, EVERY city shows so it can be tapped.
+  const cityVisible = c => pickingMode || discovered.has(c.id)
     || (showCities && ((c.tier === 1 && view.scale > 1.6) || (c.tier === 2 && view.scale > 3.2) || view.scale > 5.5));
   // Partial (not full) zoom compensation — roads / labels / small dots still
   // shrink somewhat when zoomed out instead of staying pinned at a constant
