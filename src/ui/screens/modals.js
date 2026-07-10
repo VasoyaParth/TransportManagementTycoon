@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Switch, Animated, Easing } from 'react-native';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
-import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap } from '../components';
+import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider } from '../components';
 import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, EASTER_EGGS } from '../../store/gameStore';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
 import { CITIES } from '../../data/cities';
@@ -443,16 +443,12 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
             })()}
             <Row style={{ marginTop: 12, justifyContent: 'space-between' }}>
               <Text style={FONT.sub}>Cargo weight{locked ? ' · fixed by contract' : ''}</Text>
-              {locked ? (
-                <Text style={[FONT.h3, { width: 90, textAlign: 'right' }]}>{clampTons} t</Text>
-              ) : (
-              <Row>
-                <IconBtn name="minus-circle-outline" onPress={() => setTons(Math.max(1, clampTons - 1))} />
-                <Text style={[FONT.h3, { width: 60, textAlign: 'center' }]}>{clampTons} t</Text>
-                <IconBtn name="plus-circle-outline" onPress={() => setTons(Math.min(maxTons, clampTons + 1))} />
-              </Row>
-              )}
+              <Text style={[FONT.h3, { width: 90, textAlign: 'right' }]}>{clampTons} t</Text>
             </Row>
+            {!locked && (
+              <GameSlider min={1} max={maxTons} step={1} value={clampTons} onChange={setTons}
+                minLabel="1 t" maxLabel={`${maxTons} t max`} />
+            )}
             {locked && contract.cargoTons > maxTons && (
               <Row style={{ marginTop: 6, backgroundColor: C.amberSoft, borderRadius: RADIUS.md, padding: 8 }}>
                 <Icon name="weight" size={14} color={C.amber} />
@@ -1057,17 +1053,13 @@ export function PowerupsModal({ visible, onClose, onOpenGames }) {
             </View>
           </Row>
         </Row>
-        <Row style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
-          <Row>
-            <IconBtn name="minus-circle-outline" color={xClamp <= 1 ? C.faint : C.text} onPress={() => setXGold(Math.max(1, xClamp - 1))} />
-            <View style={{ alignItems: 'center', width: 74 }}>
-              <Row><Icon name="gold" size={15} color={C.gold} /><Text style={[FONT.h3, { color: C.gold, marginLeft: 4 }]}>{xClamp}</Text></Row>
-              <Text style={FONT.tiny}>= {inr(xClamp * GOLD_TO_CASH)}</Text>
-            </View>
-            <IconBtn name="plus-circle-outline" color={xClamp >= gold ? C.faint : C.text} onPress={() => setXGold(Math.min(gold, xClamp + 1))} />
-          </Row>
-          <Btn title="Exchange" kind="green" small icon="cash-plus" disabled={gold < 1} onPress={exchange} />
+        <Row style={{ justifyContent: 'space-between', marginTop: 10 }}>
+          <Row><Icon name="gold" size={16} color={C.gold} /><Text style={[FONT.h3, { color: C.gold, marginLeft: 4 }]}>{xClamp}</Text></Row>
+          <Text style={[FONT.body, { fontWeight: '700', color: C.green }]}>= {inr(xClamp * GOLD_TO_CASH)}</Text>
         </Row>
+        <GameSlider min={1} max={Math.max(1, gold)} step={1} value={xClamp} color={C.gold}
+          onChange={setXGold} minLabel="1" maxLabel={`${Math.max(1, gold)} gold`} />
+        <Btn title="Exchange" kind="green" icon="cash-plus" disabled={gold < 1} onPress={exchange} style={{ marginTop: 8 }} />
       </Card>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
@@ -1610,18 +1602,18 @@ export function SettingsModal({ visible, onClose, initialTab }) {
             <SectionTitle icon="volume-high" text="Audio" />
             <Card>
               <ToggleRow label="Sound effects & music" value={settings.sound} onChange={v => saveSettings({ sound: v })} />
-              <Text style={[FONT.tiny, { marginTop: 12, marginBottom: 6 }]}>MUSIC VOLUME</Text>
-              <Row style={{ gap: 6, flexWrap: 'wrap' }}>
-                {[[0, 'Off'], [0.25, '25%'], [0.4, '50%'], [0.7, '75%'], [1, '100%']].map(([v, l]) => (
-                  <Chip key={l} label={l} active={Math.abs((settings.musicVolume ?? 0.4) - v) < 0.01} onPress={() => saveSettings({ musicVolume: v })} />
-                ))}
+              <Row style={{ justifyContent: 'space-between', marginTop: 12 }}>
+                <Text style={FONT.tiny}>MUSIC VOLUME</Text>
+                <Text style={[FONT.tiny, { fontWeight: '800', color: C.blue }]}>{Math.round((settings.musicVolume ?? 0.4) * 100)}%</Text>
               </Row>
-              <Text style={[FONT.tiny, { marginTop: 14, marginBottom: 6 }]}>SOUND EFFECTS VOLUME</Text>
-              <Row style={{ gap: 6, flexWrap: 'wrap' }}>
-                {[[0, 'Off'], [0.25, '25%'], [0.5, '50%'], [0.75, '75%'], [1, '100%']].map(([v, l]) => (
-                  <Chip key={l} label={l} active={Math.abs((settings.sfxVolume ?? 1) - v) < 0.01} onPress={() => saveSettings({ sfxVolume: v })} />
-                ))}
+              <GameSlider min={0} max={100} step={5} value={Math.round((settings.musicVolume ?? 0.4) * 100)}
+                onChange={v => saveSettings({ musicVolume: v / 100 })} minLabel="0%" maxLabel="100%" />
+              <Row style={{ justifyContent: 'space-between', marginTop: 10 }}>
+                <Text style={FONT.tiny}>SOUND EFFECTS VOLUME</Text>
+                <Text style={[FONT.tiny, { fontWeight: '800', color: C.blue }]}>{Math.round((settings.sfxVolume ?? 1) * 100)}%</Text>
               </Row>
+              <GameSlider min={0} max={100} step={5} value={Math.round((settings.sfxVolume ?? 1) * 100)}
+                onChange={v => saveSettings({ sfxVolume: v / 100 })} minLabel="0%" maxLabel="100%" />
             </Card>
             <SectionTitle icon="vibrate" text="Vibration" />
             <Card>

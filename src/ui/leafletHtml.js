@@ -12,12 +12,15 @@ export function buildLeafletHtml(initial) {
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <style>
   html,body,#map{margin:0;height:100%;width:100%;background:#EEF1F4;font-family:-apple-system,Roboto,sans-serif}
-  .hq-marker{width:40px;height:40px;border-radius:50%;background:#2563EB;border:3px solid #fff;
-    display:flex;align-items:center;justify-content:center;box-shadow:0 3px 10px rgba(0,0,0,.3)}
-  .hq-marker svg{width:22px;height:22px;fill:#fff}
+  .hq-marker{width:44px;height:48px;filter:drop-shadow(0 3px 5px rgba(0,0,0,.3))}
+  .hq-marker svg{width:44px;height:48px}
+  .hub-marker{width:30px;height:26px;filter:drop-shadow(0 2px 4px rgba(0,0,0,.25))}
+  .hub-marker svg{width:30px;height:26px}
   .truck3d{transition:transform .3s linear}
   .city-dot{width:8px;height:8px;border-radius:50%;background:#8792A0;border:1.5px solid #fff}
   .city-dot.big{width:12px;height:12px;background:#5C6470}
+  .city-dot.disc{background:#2563EB}
+  .city-dot.undisc{opacity:.4;background:#AEB7C2}
   .fuel-dot{width:7px;height:7px;border-radius:50%;background:#D97706;border:1px solid #fff}
   .fuel-dot.ev{background:#0E9F5B}
   .leaflet-popup-content{font-size:13px}
@@ -59,14 +62,36 @@ function truck3d(color,accent,heading){
    +'<rect x="4" y="29" width="4" height="8" rx="2" fill="#181B20"/><rect x="32" y="29" width="4" height="8" rx="2" fill="#181B20"/>'
    +'</svg></div></div>';
 }
-function bldgSvg(){return '<svg viewBox="0 0 24 24"><path d="M4 21V9l8-6 8 6v12h-5v-6h-6v6H4z"/></svg>';}
+// Big HQ office tower (same visual language as the offline map: blue tower,
+// windows, amber flag) — a real building icon, not a circle badge.
+function hqSvg(){return '<svg viewBox="0 0 44 48">'
+  +'<rect x="21" y="2" width="2" height="10" fill="#0B0F14"/>'
+  +'<path d="M23 2 L33 5.5 L23 9 Z" fill="#D97706"/>'
+  +'<path d="M30 44 L30 14 L38 9 L38 39 Z" fill="#1E4FB8"/>'
+  +'<path d="M6 14 L30 14 L38 9 L14 9 Z" fill="#5B8DF0"/>'
+  +'<rect x="6" y="14" width="24" height="30" fill="#2563EB"/>'
+  +'<rect x="9" y="18" width="5" height="5" fill="#DCE7FA"/><rect x="16" y="18" width="5" height="5" fill="#DCE7FA"/><rect x="23" y="18" width="5" height="5" fill="#DCE7FA"/>'
+  +'<rect x="9" y="26" width="5" height="5" fill="#DCE7FA"/><rect x="16" y="26" width="5" height="5" fill="#DCE7FA"/><rect x="23" y="26" width="5" height="5" fill="#DCE7FA"/>'
+  +'<rect x="9" y="34" width="5" height="5" fill="#DCE7FA"/><rect x="16" y="34" width="5" height="5" fill="#DCE7FA"/><rect x="23" y="34" width="5" height="5" fill="#DCE7FA"/>'
+  +'<rect x="14" y="40" width="8" height="4" fill="#DCE7FA"/>'
+  +'</svg>';}
+// Small garage building for purchased hubs.
+function hubSvg(){return '<svg viewBox="0 0 30 26">'
+  +'<path d="M25 24 L25 8 L29 5 L29 21 Z" fill="#464C56"/>'
+  +'<path d="M3 8 L25 8 L29 5 L7 5 Z" fill="#767E8A"/>'
+  +'<rect x="3" y="8" width="22" height="16" fill="#5C6470"/>'
+  +'<rect x="7" y="13" width="14" height="11" rx="1" fill="#E7E9EE"/>'
+  +'<rect x="7" y="16" width="14" height="1.4" fill="#B9BFC9"/><rect x="7" y="19.5" width="14" height="1.4" fill="#B9BFC9"/>'
+  +'</svg>';}
 
 function boot(){
   var DATA = ${data};
   var pickMode = false;
-  var INDIA=L.latLngBounds([6.0,67.5],[37.6,98.0]);
+  // Whole playable region (India + every unlockable country: Afghanistan to
+  // Malaysia/China) — the camera is free to roam anywhere the empire can go.
+  var REGION=L.latLngBounds([-9.0,55.0],[46.0,125.0]);
   var map = L.map('map',{center:[DATA.hq.lat,DATA.hq.lng],zoom:6,zoomControl:false,
-    attributionControl:false,minZoom:4,maxBounds:INDIA,maxBoundsViscosity:1.0});
+    attributionControl:false,minZoom:3,maxBounds:REGION,maxBoundsViscosity:0.7});
   // No on-screen zoom buttons — pinch-to-zoom keeps the map corners clean.
   var tiles = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
     {maxZoom:19,subdomains:'abcd'});
@@ -77,27 +102,49 @@ function boot(){
   var hqMarker=null, truckMarkers={}, routeLines={}, cityLayer=L.layerGroup().addTo(map),
       stationLayer=L.layerGroup(), citiesOn=true, stationsOn=false;
 
-  // HQ
+  // HQ — big building tower icon, anchored at its base.
   hqMarker = L.marker([DATA.hq.lat,DATA.hq.lng],{icon:L.divIcon({className:'',
-    html:'<div class="hq-marker">'+bldgSvg()+'</div>',iconSize:[40,40],iconAnchor:[20,20]}),zIndexOffset:1000})
+    html:'<div class="hq-marker">'+hqSvg()+'</div>',iconSize:[44,48],iconAnchor:[22,44]}),zIndexOffset:1000})
     .addTo(map).bindPopup('<b>'+DATA.companyName+'</b><br>HQ — '+DATA.hq.name);
 
-  // Cities — only show dots for unlocked countries (null = show all).
-  var allowedCountries = null;
+  // Purchased garages/hubs — distinct small garage buildings, live-updatable.
+  var hubLayer=L.layerGroup().addTo(map);
+  function plotHubs(hubs){
+    hubLayer.clearLayers();
+    (hubs||[]).forEach(function(h){
+      if(h.hq) return;
+      hubLayer.addLayer(L.marker([h.lat,h.lng],{icon:L.divIcon({className:'',
+        html:'<div class="hub-marker">'+hubSvg()+'</div>',iconSize:[30,26],iconAnchor:[15,24]}),zIndexOffset:900})
+        .bindPopup('<b>'+h.name+'</b><br>Garage — free refuel & fast-travel'));
+    });
+  }
+  plotHubs(DATA.hubs);
+  window.setHubs=function(hubs){ plotHubs(hubs); };
+
+  // Cities — only unlocked countries; discovered cities (routes driven,
+  // garages, HQ) render highlighted, the rest as faint "unexplored" dots that
+  // only appear once zoomed in (big perf win: hundreds fewer markers).
+  var allowedCountries = null, discovered = {};
   function plotCities(){
     cityLayer.clearLayers();
+    var z = map.getZoom();
     DATA.cities.forEach(function(c){
       if(allowedCountries && allowedCountries.indexOf(c.country||'IN')<0) return;
+      var disc = !!discovered[c.id];
+      if(!disc && !(c.tier===1 && z>=5 || c.tier===2 && z>=7 || z>=9)) return;
       var big = c.tier===1;
+      var cls = 'city-dot'+(big?' big':'')+(disc?' disc':' undisc');
       var m=L.marker([c.lat,c.lng],{icon:L.divIcon({className:'',
-        html:'<div class="city-dot'+(big?' big':'')+'"></div>',iconSize:[big?12:8,big?12:8],iconAnchor:[big?6:4,big?6:4]}),
-        zIndexOffset:100}).bindTooltip('<b>'+c.name+'</b><br><small>'+c.state+'</small>',{direction:'top'});
+        html:'<div class="'+cls+'"></div>',iconSize:[big?12:8,big?12:8],iconAnchor:[big?6:4,big?6:4]}),
+        zIndexOffset:disc?150:100}).bindTooltip('<b>'+c.name+'</b><br><small>'+c.state+'</small>',{direction:'top'});
       m.on('click',function(){ if(pickMode){ post({type:'pickCity',id:c.id}); } else { m.openTooltip(); } });
       cityLayer.addLayer(m);
     });
   }
   plotCities();
+  map.on('zoomend', plotCities);
   window.setVisibleCountries=function(arr){ allowedCountries = arr && arr.length ? arr : null; plotCities(); };
+  window.setDiscovered=function(ids){ discovered={}; (ids||[]).forEach(function(id){ discovered[id]=1; }); plotCities(); };
 
   function renderStations(){
     stationLayer.clearLayers();

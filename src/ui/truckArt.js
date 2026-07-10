@@ -45,10 +45,12 @@ export const TRUCK_ART_W = 40;
 
 // Headlight colours per propulsion: electric = white LEDs, diesel/hybrid = pale
 // yellow halogens. `bulb` paints the lamp, ray0/ray1 the outer/inner beam cone.
+// Frozen constants (not fresh objects per call) so memoized consumers keep
+// referential equality across animation frames.
+const LIGHTS_EV = { bulb: '#FFFFFF', ray0: 'rgba(255,255,255,0.26)', ray1: 'rgba(255,255,255,0.45)' };
+const LIGHTS_ICE = { bulb: '#FFE9A8', ray0: 'rgba(255,224,120,0.30)', ray1: 'rgba(255,224,120,0.50)' };
 export function headlightFor(model) {
-  return model && model.propulsion === 'electric'
-    ? { bulb: '#FFFFFF', ray0: 'rgba(255,255,255,0.26)', ray1: 'rgba(255,255,255,0.45)' }
-    : { bulb: '#FFE9A8', ray0: 'rgba(255,224,120,0.30)', ray1: 'rgba(255,224,120,0.50)' };
+  return model && model.propulsion === 'electric' ? LIGHTS_EV : LIGHTS_ICE;
 }
 
 // Night is 19:00–05:59 on the in-game clock.
@@ -58,7 +60,21 @@ export function isNightHour(hour) { return hour >= 19 || hour < 6; }
 // rendered both as react-native-svg elements and as an HTML SVG string.
 // opts.lights = headlightFor(model) result to switch the headlights on and add
 // cartoon torch-style beam cones in front of the truck (extends h by ~15).
+// Shape descriptors are pure functions of (type, body, accent, lights) — cache
+// them so the 12fps map animation doesn't rebuild ~40 primitives per truck per
+// frame. Key space is tiny (few silhouettes × few liveries), bounded anyway.
+const shapeCache = new Map();
 export function truckShapes(type, body, accent, opts = {}) {
+  const key = `${type}|${body}|${accent}|${opts.lights ? opts.lights.bulb : ''}`;
+  const hit = shapeCache.get(key);
+  if (hit) return hit;
+  const out = buildTruckShapes(type, body, accent, opts);
+  if (shapeCache.size > 300) shapeCache.clear();
+  shapeCache.set(key, out);
+  return out;
+}
+
+function buildTruckShapes(type, body, accent, opts = {}) {
   const dark = shade(body, -0.3);
   const darker = shade(body, -0.45);
   const roof = shade(body, 0.16);
@@ -68,19 +84,13 @@ export function truckShapes(type, body, accent, opts = {}) {
   const chrome = '#C9CFD8';
   const lamp = '#FFE9A8';
   const s = [];
-  // o.skew adds a slight skewX (deg) to top-face rects (roof/hood) so the
-  // extruded body reads as 2.5D isometric instead of flat top-down. Any main
-  // hull panel (passed o.stroke, i.e. trailer/cargo-box/cab silhouettes) also
-  // gets an auto right-edge dark side face + top-edge highlight strip so the
-  // flat rect reads as a raised, angled 3D box instead of a plan-view outline.
+  // Flat 2D mode (v1.7): one rect per panel, no skew transforms, no auto
+  // side-face/highlight extras — SVG element count per truck stays minimal so
+  // dozens of moving markers render smoothly on low-end phones. o.skew is
+  // accepted but ignored (kept so shape definitions stay untouched).
   const R = (x, y, w, h, rx, fill, o = {}) => {
-    s.push({ k: 'rect', x, y, w, h, rx, fill, ...o });
-    if (o.stroke) {
-      const sideW = Math.max(2.4, w * 0.24);
-      s.push({ k: 'rect', x: x + w - sideW, y, w: sideW, h, rx: rx * 0.6, fill: shade(fill, -0.24) });
-      const topH = Math.max(2.2, h * 0.15);
-      s.push({ k: 'rect', x, y, w: w - sideW * 0.55, h: topH, rx: rx * 0.6, fill: shade(fill, 0.15) });
-    }
+    const { skew, ...rest } = o;
+    s.push({ k: 'rect', x, y, w, h, rx, fill, ...rest });
   };
   const C_ = (cx, cy, r, fill) => s.push({ k: 'circle', cx, cy, r, fill });
   // Twin-tyre wheel with a hub cap line.
@@ -277,15 +287,14 @@ export function truckShapes(type, body, accent, opts = {}) {
 
 // React renderer (react-native-svg) — place inside an <Svg>/<G>. Origin is the
 // art's top-left; centre it yourself with translate(-20, -h/2).
-export function TruckTopShapes({ type, body, accent, lights }) {
-  const { w, bodyH, shapes } = truckShapes(type, body, accent, { lights });
+// React.memo + the shape cache above means a moving truck re-renders only its
+// parent transform per frame — the SVG subtree itself is completely stable.
+export const TruckTopShapes = React.memo(function TruckTopShapes({ type, body, accent, lights }) {
+  const { shapes } = truckShapes(type, body, accent, { lights });
   return (
     <G>
-      {/* Subtle ground shadow — kept light so it doesn't read as a dark blob under the truck. */}
-      <Ellipse cx={w / 2 + 2} cy={bodyH - 5} rx={w / 2 - 10} ry={3} fill="rgba(0,0,0,0.12)" />
       {shapes.map((p, i) => p.k === 'rect'
-        ? <Rect key={i} x={p.x} y={p.y} width={p.w} height={p.h} rx={p.rx} fill={p.fill} stroke={p.stroke} strokeWidth={p.sw}
-            transform={p.skew ? `skewX(${p.skew})` : undefined} />
+        ? <Rect key={i} x={p.x} y={p.y} width={p.w} height={p.h} rx={p.rx} fill={p.fill} stroke={p.stroke} strokeWidth={p.sw} />
         : p.k === 'circle'
           ? <Circle key={i} cx={p.cx} cy={p.cy} r={p.r} fill={p.fill} />
           : p.k === 'path'
@@ -293,7 +302,7 @@ export function TruckTopShapes({ type, body, accent, lights }) {
             : <Ellipse key={i} cx={p.cx} cy={p.cy} rx={p.rx} ry={p.ry} fill={p.fill} />)}
     </G>
   );
-}
+});
 
 // Simple top-down ferry boat — swapped in for the truck marker while a
 // delivery crosses a FERRY_EDGES sea hop (v1.5.0). Kept visually consistent
@@ -322,16 +331,15 @@ export function ferrySvgString() {
     + '</svg>';
 }
 
-// HTML SVG string for the Leaflet WebView marker (includes a ground shadow).
+// HTML SVG string for the Leaflet WebView marker.
 export function truckSvgString(type, body, accent, opts = {}) {
-  const { w, h, bodyH, shapes } = truckShapes(type, body, accent, opts);
+  const { w, h, shapes } = truckShapes(type, body, accent, opts);
   const els = shapes.map(p => p.k === 'rect'
-    ? `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="${p.rx}" fill="${p.fill}"${p.stroke ? ` stroke="${p.stroke}" stroke-width="${p.sw}"` : ''}${p.skew ? ` transform="skewX(${p.skew})"` : ''}/>`
+    ? `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="${p.rx}" fill="${p.fill}"${p.stroke ? ` stroke="${p.stroke}" stroke-width="${p.sw}"` : ''}/>`
     : p.k === 'circle'
       ? `<circle cx="${p.cx}" cy="${p.cy}" r="${p.r}" fill="${p.fill}"/>`
       : p.k === 'path'
         ? `<path d="${p.d}" fill="${p.fill}"/>`
         : `<ellipse cx="${p.cx}" cy="${p.cy}" rx="${p.rx}" ry="${p.ry}" fill="${p.fill}"/>`).join('');
-  const shadow = `<ellipse cx="${w / 2 + 2}" cy="${bodyH - 5}" rx="${w / 2 - 10}" ry="3" fill="rgba(0,0,0,0.12)"/>`;
-  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${shadow}${els}</svg>`;
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${els}</svg>`;
 }
