@@ -215,8 +215,27 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
   const hqP = hq ? project(hq.lat, hq.lng) : null;
   const hubs = useGame(s => s.hubs || []);
   const buyHub = useGame(s => s.buyHub);
+  const history = useGame(s => s.history);
 
-  const cityVisible = c => (c.tier === 1) || (c.tier === 2 && view.scale > 2.2) || view.scale > 4.5;
+  // "Discovered" cities — HQ, garages, anywhere a truck is parked, and both
+  // ends of every route ever driven (active, past, unlocked corridors). These
+  // stay highlighted; everything else renders as a faint undiscovered dot and
+  // only at closer zooms, which also cuts hundreds of dots per frame.
+  const discovered = useMemo(() => {
+    const d = new Set();
+    if (company) d.add(company.hqCityId);
+    hubs.forEach(h => d.add(h.cityId));
+    trucks.forEach(t => t.cityId && d.add(t.cityId));
+    deliveries.forEach(x => { d.add(x.fromCityId); d.add(x.toCityId); });
+    (history || []).forEach(x => { d.add(x.fromCityId); d.add(x.toCityId); });
+    corridors.forEach(x => { d.add(x.fromCityId); d.add(x.toCityId); });
+    return d;
+  }, [company, hubs, trucks, deliveries, history, corridors]);
+
+  // Discovered cities are always visible; undiscovered ones appear faint and
+  // only as you zoom in (tiered), or never when the city toggle is off.
+  const cityVisible = c => discovered.has(c.id)
+    || (showCities && ((c.tier === 1 && view.scale > 1.6) || (c.tier === 2 && view.scale > 3.2) || view.scale > 5.5));
   // Partial (not full) zoom compensation — roads / labels / small dots still
   // shrink somewhat when zoomed out instead of staying pinned at a constant
   // screen size at every zoom level.
@@ -259,16 +278,19 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
             fill={s.type === 'ev' ? C.green : C.amber} stroke="#fff" strokeWidth={0.6 * inv} opacity={0.9} />
         ) : null
       ))}
-      {showCities && CITY_PTS.filter(c => cityVisible(c) && inView(c.x, c.y)).map(c => (
-        <G key={c.id}>
-          <Circle cx={c.x} cy={c.y} r={(c.tier === 1 ? 5 : c.tier === 2 ? 3.4 : 2.4) / Math.sqrt(view.scale)}
-            fill={pickingMode ? C.blue : '#8792A0'} stroke="#fff" strokeWidth={inv} />
-          {(c.tier === 1 || view.scale > 3.4) && (
-            <SvgText x={c.x + 6 * inv} y={c.y + 3 * inv}
-              fontSize={Math.max(3.2, 11 * inv)} fill={C.sub} fontWeight="600">{c.name}</SvgText>
-          )}
-        </G>
-      ))}
+      {CITY_PTS.filter(c => cityVisible(c) && inView(c.x, c.y)).map(c => {
+        const disc = discovered.has(c.id);
+        return (
+          <G key={c.id} opacity={disc ? 1 : 0.45}>
+            <Circle cx={c.x} cy={c.y} r={((c.tier === 1 ? 5 : c.tier === 2 ? 3.4 : 2.4) * (disc ? 1.15 : 0.8)) / Math.sqrt(view.scale)}
+              fill={pickingMode ? C.blue : disc ? C.blue : '#AEB7C2'} stroke="#fff" strokeWidth={inv} />
+            {(disc ? (c.tier === 1 || view.scale > 2.2) : view.scale > 4.2) && (
+              <SvgText x={c.x + 6 * inv} y={c.y + 3 * inv}
+                fontSize={Math.max(3.2, 11 * inv)} fill={disc ? C.text : C.faint} fontWeight={disc ? '700' : '600'}>{c.name}</SvgText>
+            )}
+          </G>
+        );
+      })}
       {/* Purchased hubs (garages) — small pseudo-3D building */}
       {hubs.filter(h => !h.hq).map(h => {
         const c = cityById(h.cityId); if (!c) return null; const q = project(c.lat, c.lng);
@@ -303,7 +325,7 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
         </G>
       )}
     </G>
-  ), [view, showCities, showStations, pickingMode, corridors, hubs, hqP && hqP.x]);
+  ), [view, showCities, showStations, pickingMode, corridors, hubs, discovered, hqP && hqP.x]);
 
   return (
     <View style={{ flex: 1, backgroundColor: C.mapWater }}

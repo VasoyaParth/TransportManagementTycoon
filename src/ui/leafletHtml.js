@@ -19,6 +19,8 @@ export function buildLeafletHtml(initial) {
   .truck3d{transition:transform .3s linear}
   .city-dot{width:8px;height:8px;border-radius:50%;background:#8792A0;border:1.5px solid #fff}
   .city-dot.big{width:12px;height:12px;background:#5C6470}
+  .city-dot.disc{background:#2563EB}
+  .city-dot.undisc{opacity:.4;background:#AEB7C2}
   .fuel-dot{width:7px;height:7px;border-radius:50%;background:#D97706;border:1px solid #fff}
   .fuel-dot.ev{background:#0E9F5B}
   .leaflet-popup-content{font-size:13px}
@@ -119,22 +121,30 @@ function boot(){
   plotHubs(DATA.hubs);
   window.setHubs=function(hubs){ plotHubs(hubs); };
 
-  // Cities — only show dots for unlocked countries (null = show all).
-  var allowedCountries = null;
+  // Cities — only unlocked countries; discovered cities (routes driven,
+  // garages, HQ) render highlighted, the rest as faint "unexplored" dots that
+  // only appear once zoomed in (big perf win: hundreds fewer markers).
+  var allowedCountries = null, discovered = {};
   function plotCities(){
     cityLayer.clearLayers();
+    var z = map.getZoom();
     DATA.cities.forEach(function(c){
       if(allowedCountries && allowedCountries.indexOf(c.country||'IN')<0) return;
+      var disc = !!discovered[c.id];
+      if(!disc && !(c.tier===1 && z>=5 || c.tier===2 && z>=7 || z>=9)) return;
       var big = c.tier===1;
+      var cls = 'city-dot'+(big?' big':'')+(disc?' disc':' undisc');
       var m=L.marker([c.lat,c.lng],{icon:L.divIcon({className:'',
-        html:'<div class="city-dot'+(big?' big':'')+'"></div>',iconSize:[big?12:8,big?12:8],iconAnchor:[big?6:4,big?6:4]}),
-        zIndexOffset:100}).bindTooltip('<b>'+c.name+'</b><br><small>'+c.state+'</small>',{direction:'top'});
+        html:'<div class="'+cls+'"></div>',iconSize:[big?12:8,big?12:8],iconAnchor:[big?6:4,big?6:4]}),
+        zIndexOffset:disc?150:100}).bindTooltip('<b>'+c.name+'</b><br><small>'+c.state+'</small>',{direction:'top'});
       m.on('click',function(){ if(pickMode){ post({type:'pickCity',id:c.id}); } else { m.openTooltip(); } });
       cityLayer.addLayer(m);
     });
   }
   plotCities();
+  map.on('zoomend', plotCities);
   window.setVisibleCountries=function(arr){ allowedCountries = arr && arr.length ? arr : null; plotCities(); };
+  window.setDiscovered=function(ids){ discovered={}; (ids||[]).forEach(function(id){ discovered[id]=1; }); plotCities(); };
 
   function renderStations(){
     stationLayer.clearLayers();

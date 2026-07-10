@@ -103,6 +103,22 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
   // Keep garage markers in sync when hubs are bought/sold.
   useEffect(() => { if (ready) inject(`window.setHubs(${JSON.stringify(hubData())})`); }, [ready, hubs.length]);
 
+  // Discovered cities (HQ, garages, truck locations, every route driven) —
+  // highlighted on the map; the rest render as faint unexplored dots.
+  const history = useGame(s => s.history);
+  const corridors = useGame(s => s.corridors || []);
+  useEffect(() => {
+    if (!ready) return;
+    const d = new Set();
+    if (company) d.add(company.hqCityId);
+    hubs.forEach(h => d.add(h.cityId));
+    trucks.forEach(t => t.cityId && d.add(t.cityId));
+    deliveries.forEach(x => { d.add(x.fromCityId); d.add(x.toCityId); });
+    (history || []).forEach(x => { d.add(x.fromCityId); d.add(x.toCityId); });
+    corridors.forEach(x => { d.add(x.fromCityId); d.add(x.toCityId); });
+    inject(`window.setDiscovered(${JSON.stringify([...d])})`);
+  }, [ready, hubs.length, trucks.length, deliveries.length, history?.length, corridors.length]);
+
   useEffect(() => { if (ready) inject(`window.setPickMode(${!!pickingMode})`); }, [pickingMode, ready]);
   useEffect(() => { if (ready && focus) inject(`window.focusOn(${focus.lat},${focus.lng},${focus.scale ? 9 : 7})`); }, [focus, ready]);
 
