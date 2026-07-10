@@ -14,9 +14,9 @@ import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
 import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, TRUCK_COLORS, TRUCK_LOGOS } from '../../data/trucks';
 import { inr, inrShort } from '../../engine/economy';
 import { APP_VERSION, checkForUpdate, fmtMB, cmpVer } from '../../net/updates';
-import { useDownloadState, startDownload, installDownloaded, cancelDownload } from '../../net/downloadManager';
 import { COUNTRIES, COUNTRY_BY_CODE } from '../../data/expansion';
 import { TruckTopShapes, truckShapes, bodyTypeFor, defaultBodyColor } from '../truckArt';
+import { BrandEmblem } from '../BrandLogo';
 
 // Same top-down truck artwork as the map, framed for list/detail cards.
 function TruckArtBadge({ model, color, size = 56, bg }) {
@@ -1869,8 +1869,7 @@ function SkeletonList({ rows = 4, lines = 2 }) {
 function AboutTab({ onReplayTutorial }) {
   const toast = useToast();
   const [state, setState] = useState({ status: 'idle', data: null, err: null }); // idle|checking|done|error
-  // Live download state comes from the background manager (survives tab switches).
-  const download = useDownloadState();
+  const [allHistory, setAllHistory] = useState(false);
   const tapVersionEgg = useEasterEggTap('version_detective', 6);
 
   const check = async () => {
@@ -1889,17 +1888,11 @@ function AboutTab({ onReplayTutorial }) {
   const latest = state.data?.latest;
   const hasUpdate = state.data?.hasUpdate;
 
-  const beginDownload = () => { if (latest?.apkUrl) startDownload(latest.apkUrl, latest.version); };
-  const doInstall = async () => { const r = await installDownloaded(); if (!r.ok) toast(r.err || 'Could not open installer', 'error'); else toast('Opening installer…', 'info'); };
-  // This tab's download UI reflects the manager only for the version we're viewing.
-  const dl = (download.status !== 'idle' && (!latest || download.version === latest.version)) ? download : null;
-  const pct = dl ? dl.pct : 0;
-
   return (
     <>
-      {/* App identity */}
+      {/* App identity — the real brand emblem, same as splash + launcher icon */}
       <Card style={{ alignItems: 'center', padding: 22 }}>
-        <View style={[cs.heroIcon, { backgroundColor: C.blueSoft }]}><Icon name="truck-fast" size={34} color={C.blue} /></View>
+        <BrandEmblem size={84} />
         <Text style={[FONT.h2, { marginTop: 10 }]}>Truck Empire Tycoon</Text>
         <Row style={{ marginTop: 6 }}>
           <Pressable onPress={tapVersionEgg}><Pill text={`Installed ${APP_VERSION}`} icon="cellphone-check" color={C.sub} bg={C.bgSoft} /></Pressable>
@@ -1935,44 +1928,17 @@ function AboutTab({ onReplayTutorial }) {
           <Btn title="Check" small kind="soft" icon="refresh" disabled={state.status === 'checking'} onPress={check} />
         </Row>
 
-        {/* Download / install flow — backed by the background download manager,
-            so progress continues if you leave this screen and resumes here.
-            "Via browser" is the always-available fallback: opens the release
-            APK link in the default browser, which downloads and prompts the
-            system installer itself. */}
-        {dl && dl.status === 'error' && (
-          <Row style={{ marginTop: 10, backgroundColor: C.redSoft, borderRadius: RADIUS.md, padding: 8 }}>
-            <Icon name="alert-circle" size={14} color={C.red} />
-            <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.red }]}>In-app download failed{dl.error ? `: ${dl.error}` : ''}. Try again or use the browser button below.</Text>
-          </Row>
-        )}
-        {hasUpdate && (!dl || dl.status === 'error') && (
+        {/* Updates download in the browser: one tap opens the release APK,
+            Android's own download manager fetches it and hands it straight
+            to the package installer — the most reliable path on every device. */}
+        {hasUpdate && (
           <>
-            <Btn title={`Download & Install ${latest.version}`} kind="green" icon="download" style={{ marginTop: 12 }} onPress={beginDownload} />
-            <Btn title="Download via browser" kind="soft" icon="open-in-new" style={{ marginTop: 8 }}
+            <Btn title={`Download ${latest.version} via browser`} kind="green" icon="open-in-new" style={{ marginTop: 12 }}
               onPress={() => { if (latest?.apkUrl) Linking.openURL(latest.apkUrl).catch(() => toast('Could not open the browser', 'error')); }} />
+            <Text style={[FONT.tiny, { marginTop: 6 }]}>
+              The APK opens in your browser and downloads there. Tap it when finished and confirm the install.
+            </Text>
           </>
-        )}
-        {dl && dl.status !== 'error' && (
-          <View style={{ marginTop: 12 }}>
-            <Progress pct={pct} color={C.green} />
-            <Row style={{ justifyContent: 'space-between', marginTop: 6 }}>
-              <Text style={FONT.tiny}>
-                {dl.status === 'done' ? 'Downloaded — ready to install'
-                  : `${fmtMB(dl.loaded)}${dl.total ? ` / ${fmtMB(dl.total)}` : ''} downloaded`}
-              </Text>
-              <Text style={[FONT.tiny, { fontWeight: '700', color: C.green }]}>{pct}%</Text>
-            </Row>
-            {dl.status === 'downloading' && <Btn title="Cancel" kind="ghost" small style={{ marginTop: 6 }} onPress={cancelDownload} />}
-            {dl.status === 'done' && (
-              <>
-                <Btn title="Install now" kind="green" icon="cellphone-arrow-down" style={{ marginTop: 8 }} onPress={doInstall} />
-                <Text style={[FONT.tiny, { marginTop: 6 }]}>
-                  Tap “Install now”. If Android asks, allow “Install unknown apps” for Truck Empire, then confirm the install.
-                </Text>
-              </>
-            )}
-          </View>
         )}
         {latest?.notes ? (
           <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 10 }}>
@@ -1992,7 +1958,7 @@ function AboutTab({ onReplayTutorial }) {
         <>
           <Text style={cs.section}>Version History</Text>
           <Card>
-            {state.data.releases.slice(0, 12).map((r, i) => {
+            {state.data.releases.slice(0, allHistory ? 15 : 3).map((r, i) => {
               const isCurrent = cmpVer(r.version, APP_VERSION) === 0;
               return (
                 <Row key={r.version} style={[{ justifyContent: 'space-between', paddingVertical: 9 }, i > 0 && { borderTopWidth: 1, borderTopColor: C.border }]}>
@@ -2008,6 +1974,15 @@ function AboutTab({ onReplayTutorial }) {
                 </Row>
               );
             })}
+            {state.data.releases.length > 3 && (
+              <Pressable onPress={() => setAllHistory(v => !v)}
+                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingTop: 10, borderTopWidth: 1, borderTopColor: C.border }}>
+                <Icon name={allHistory ? 'chevron-up' : 'chevron-down'} size={16} color={C.blue} />
+                <Text style={{ color: C.blue, fontWeight: '700', marginLeft: 4 }}>
+                  {allHistory ? 'Show less' : `Show older versions (${Math.min(15, state.data.releases.length) - 3} more)`}
+                </Text>
+              </Pressable>
+            )}
           </Card>
         </>
       ) : null}

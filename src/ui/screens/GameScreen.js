@@ -1,7 +1,7 @@
 // Main game view: header (company, clock, money), full-screen India map,
 // bottom navigation into dashboard tabs, and all modal flows.
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, Pressable, useWindowDimensions, AppState } from 'react-native';
+import { View, Text, StyleSheet, Pressable, useWindowDimensions, AppState, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native';
 import { C, FONT, SHADOW, RADIUS } from '../theme';
 import { IconBtn, Icon, Money, Sheet, useToast, Row } from '../components';
@@ -17,7 +17,6 @@ import { haptic } from '../../engine/haptics';
 import Tutorial from './Tutorial';
 import FleetSidebar from './FleetSidebar';
 import { checkForUpdate } from '../../net/updates';
-import { useDownloadState, startDownload, installDownloaded } from '../../net/downloadManager';
 
 const TABS = [
   { id: 'fleet', icon: 'truck', label: 'Fleet' },
@@ -46,8 +45,8 @@ export default function GameScreen() {
   const [clock, setClock] = useState({ day: 1, hour: 8 });
   const lastToastN = useRef(null);
 
-  // ---- In-app update: check once on load, surface a prompt + background pill ----
-  const dl = useDownloadState();
+  // ---- Update prompt: check once on load; the download itself happens in the
+  // browser (one tap on the pill), which hands the APK to Android's installer.
   const [update, setUpdate] = useState(null); // latest release when newer than installed
   const [updateDismissed, setUpdateDismissed] = useState(false);
   useEffect(() => {
@@ -55,7 +54,7 @@ export default function GameScreen() {
     checkForUpdate().then(r => { if (alive && r.hasUpdate && r.latest) setUpdate(r.latest); }).catch(() => {});
     return () => { alive = false; };
   }, []);
-  const beginUpdate = () => { if (update?.apkUrl) { startDownload(update.apkUrl, update.version); haptic('light'); } };
+  const beginUpdate = () => { if (update?.apkUrl) { haptic('light'); Linking.openURL(update.apkUrl).catch(() => {}); } };
 
   // ---- Game loop: 1s tick — finish builds/deliveries, day events ----
   // Fully frozen while the app is backgrounded (home button / screen off):
@@ -187,21 +186,8 @@ export default function GameScreen() {
             <Text style={[FONT.tiny, { color: C.sub }]} numberOfLines={1}>{hq?.name}, {hq?.state}</Text>
           </View>
         </Pressable>
-        {/* Update pill under the profile: new-version prompt → live download % →
-            Install. The download runs in the background manager, so this keeps
-            showing progress no matter which screen/drawer you're on. */}
-        {dl.status === 'downloading' ? (
-          <Pressable style={[st.updatePill, { borderColor: C.blue }]} onPress={() => setModal({ kind: 'settings', tab: 'about' })}>
-            <Icon name="progress-download" size={14} color={C.blue} />
-            <Text style={[FONT.tiny, { fontWeight: '800', marginLeft: 5, color: C.blue }]}>Updating {dl.pct}%</Text>
-          </Pressable>
-        ) : dl.status === 'done' ? (
-          <Pressable style={[st.updatePill, { borderColor: C.green, backgroundColor: '#EAF7EF' }]}
-            onPress={async () => { haptic('light'); await installDownloaded(); }}>
-            <Icon name="cellphone-arrow-down" size={14} color={C.green} />
-            <Text style={[FONT.tiny, { fontWeight: '800', marginLeft: 5, color: C.green }]}>Install update</Text>
-          </Pressable>
-        ) : (update && !updateDismissed) ? (
+        {/* Update pill under the profile: tap → APK opens in the browser. */}
+        {(update && !updateDismissed) ? (
           <Pressable style={[st.updatePill, { borderColor: C.green }]} onPress={beginUpdate}>
             <Icon name="rocket-launch" size={14} color={C.green} />
             <Text style={[FONT.tiny, { fontWeight: '800', marginLeft: 5, color: C.text }]}>New {update.version} · Update</Text>

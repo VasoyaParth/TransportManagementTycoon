@@ -3,6 +3,7 @@ import React, { useEffect, useRef } from 'react';
 import { View, Text, Pressable, Animated, Easing, StyleSheet, SafeAreaView } from 'react-native';
 import { C, FONT, SHADOW, RADIUS } from '../theme';
 import { Btn, Icon, Row, useEasterEggTap } from '../components';
+import { BrandEmblem, BrandWordmark } from '../BrandLogo';
 
 export default function Splash({ onNew, onContinue, hasSave }) {
   const fade = useRef(new Animated.Value(0)).current;
@@ -28,11 +29,10 @@ export default function Splash({ onNew, onContinue, hasSave }) {
     <SafeAreaView style={st.safe}>
       <View style={st.center}>
         <Animated.View style={{ alignItems: 'center', opacity: fade, transform: [{ translateY: slide }] }}>
-          <Pressable style={[st.iconCircle, SHADOW.pop]} onPress={tapLogoEgg}>
-            <Icon name="truck-fast" size={64} color="#fff" />
+          <Pressable style={[st.emblemWrap, SHADOW.pop]} onPress={tapLogoEgg}>
+            <BrandEmblem size={136} />
           </Pressable>
-          <Text style={st.title}>Truck Empire</Text>
-          <Text style={st.titleAccent}>Tycoon</Text>
+          <BrandWordmark scale={1.15} />
           <Text style={st.tagline}>Build your empire. Rule the roads.{'\n'}Conquer every highway.</Text>
         </Animated.View>
 
@@ -60,12 +60,7 @@ export default function Splash({ onNew, onContinue, hasSave }) {
 const st = StyleSheet.create({
   safe: { flex: 1, backgroundColor: C.bg },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
-  iconCircle: {
-    width: 128, height: 128, borderRadius: 64, backgroundColor: C.text,
-    alignItems: 'center', justifyContent: 'center', marginBottom: 28,
-  },
-  title: { fontSize: 34, fontWeight: '800', color: C.text, letterSpacing: -0.8 },
-  titleAccent: { fontSize: 34, fontWeight: '800', color: C.blue, letterSpacing: -0.8, marginTop: -4 },
-  tagline: { ...FONT.sub, textAlign: 'center', marginTop: 14, lineHeight: 19 },
+  emblemWrap: { borderRadius: 34, marginBottom: 22 },
+  tagline: { ...FONT.sub, textAlign: 'center', marginTop: 16, lineHeight: 19 },
   footer: { justifyContent: 'center', paddingBottom: 24 },
 });

@@ -1,8 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Truck Empire Tycoon brand mark: gold long-haul rig over a highway stripe.
+     Matches src/ui/BrandLogo.js (the in-app emblem) so the launcher icon and
+     the splash logo are the same identity. Drawn inside the adaptive-icon
+     safe zone (66dp circle centred in 108dp). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
-    android:viewportWidth="108" android:viewportHeight="108">
-  <group android:scaleX="3.0" android:scaleY="3.0" android:translateX="18" android:translateY="18">
-    <path android:fillColor="#FFFFFF"
-      android:pathData="M18,18.5A1.5,1.5 0 0,1 16.5,17A1.5,1.5 0 0,1 18,15.5A1.5,1.5 0 0,1 19.5,17A1.5,1.5 0 0,1 18,18.5M19.5,9.5L21.46,12H17V9.5M6,18.5A1.5,1.5 0 0,1 4.5,17A1.5,1.5 0 0,1 6,15.5A1.5,1.5 0 0,1 7.5,17A1.5,1.5 0 0,1 6,18.5M20,8H17V4H3C1.89,4 1,4.89 1,6V17H3A3,3 0 0,0 6,20A3,3 0 0,0 9,17H15A3,3 0 0,0 18,20A3,3 0 0,0 21,17H23V12L20,8Z"/>
+    android:viewportWidth="120" android:viewportHeight="120">
+  <group android:scaleX="0.62" android:scaleY="0.62" android:pivotX="60" android:pivotY="60">
+    <!-- rising sun -->
+    <path android:fillColor="#E9B949" android:fillAlpha="0.32"
+      android:pathData="M73,40 a11,11 0 1,0 22,0 a11,11 0 1,0 -22,0 Z"/>
+    <path android:fillColor="#E9B949" android:fillAlpha="0.55"
+      android:pathData="M77,40 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0 Z"/>
+    <!-- speed swashes -->
+    <path android:fillColor="#E9B949" android:fillAlpha="0.55"
+      android:pathData="M14,56 h11 a1.7,1.7 0 0 1 0,3.4 h-11 a1.7,1.7 0 0 1 0,-3.4 Z"/>
+    <path android:fillColor="#E9B949" android:fillAlpha="0.8"
+      android:pathData="M10,64 h15 a1.7,1.7 0 0 1 0,3.4 h-15 a1.7,1.7 0 0 1 0,-3.4 Z"/>
+    <!-- trailer -->
+    <path android:fillColor="#E9B949"
+      android:pathData="M31,50 h34 a3,3 0 0 1 3,3 v20 a3,3 0 0 1 -3,3 h-34 a3,3 0 0 1 -3,-3 v-20 a3,3 0 0 1 3,-3 Z"/>
+    <path android:fillColor="#F7D57C"
+      android:pathData="M31,50 h34 a2.5,2.5 0 0 1 2.5,2.5 v0 a2.5,2.5 0 0 1 -2.5,2.5 h-34 a2.5,2.5 0 0 1 -2.5,-2.5 v0 a2.5,2.5 0 0 1 2.5,-2.5 Z"/>
+    <path android:fillColor="#C9932A" android:fillAlpha="0.7" android:pathData="M45,56 h2 v17 h-2 Z"/>
+    <!-- exhaust stack + cab -->
+    <path android:fillColor="#C9932A" android:pathData="M68,47 h3.4 a1.6,1.6 0 0 1 1.6,1.6 v5.8 a1.6,1.6 0 0 1 -1.6,1.6 h-3.4 Z"/>
+    <path android:fillColor="#E9B949" android:pathData="M70,76 L70,55 L84,55 L94,66 L94,76 Z"/>
+    <path android:fillColor="#1A2C44" android:pathData="M73,58.5 L82.5,58.5 L89,66 L73,66 Z"/>
+    <!-- wheels -->
+    <path android:fillColor="#0B1421" android:strokeColor="#E9B949" android:strokeWidth="2.2"
+      android:pathData="M28.6,78 a6.4,6.4 0 1,0 12.8,0 a6.4,6.4 0 1,0 -12.8,0 Z"/>
+    <path android:fillColor="#0B1421" android:strokeColor="#E9B949" android:strokeWidth="2.2"
+      android:pathData="M42.6,78 a6.4,6.4 0 1,0 12.8,0 a6.4,6.4 0 1,0 -12.8,0 Z"/>
+    <path android:fillColor="#0B1421" android:strokeColor="#E9B949" android:strokeWidth="2.2"
+      android:pathData="M77.6,78 a6.4,6.4 0 1,0 12.8,0 a6.4,6.4 0 1,0 -12.8,0 Z"/>
+    <path android:fillColor="#E9B949" android:pathData="M33.1,78 a1.9,1.9 0 1,0 3.8,0 a1.9,1.9 0 1,0 -3.8,0 Z"/>
+    <path android:fillColor="#E9B949" android:pathData="M47.1,78 a1.9,1.9 0 1,0 3.8,0 a1.9,1.9 0 1,0 -3.8,0 Z"/>
+    <path android:fillColor="#E9B949" android:pathData="M82.1,78 a1.9,1.9 0 1,0 3.8,0 a1.9,1.9 0 1,0 -3.8,0 Z"/>
+    <!-- highway stripe + dashes -->
+    <path android:fillColor="#E9B949"
+      android:pathData="M18.2,90 h83.6 a2.2,2.2 0 0 1 0,4.4 h-83.6 a2.2,2.2 0 0 1 0,-4.4 Z"/>
+    <path android:fillColor="#E9B949" android:fillAlpha="0.45" android:pathData="M26,98 h14 a1.3,1.3 0 0 1 0,2.6 h-14 a1.3,1.3 0 0 1 0,-2.6 Z"/>
+    <path android:fillColor="#E9B949" android:fillAlpha="0.45" android:pathData="M52,98 h14 a1.3,1.3 0 0 1 0,2.6 h-14 a1.3,1.3 0 0 1 0,-2.6 Z"/>
+    <path android:fillColor="#E9B949" android:fillAlpha="0.45" android:pathData="M78,98 h14 a1.3,1.3 0 0 1 0,2.6 h-14 a1.3,1.3 0 0 1 0,-2.6 Z"/>
   </group>
 </vector>
