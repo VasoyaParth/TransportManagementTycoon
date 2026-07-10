@@ -10,6 +10,8 @@ import Svg from 'react-native-svg';
 import {
   useGame, modelById, cargoById, GAME_HOUR_MS, staffMood,
   ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, EASTER_EGGS,
+  LOAN_PRODUCTS, creditScoreOf, DRIVER_PERKS, driverLevel, driverXpForLevel,
+  companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, WEEKLY_JACKPOT,
 } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { CAMPAIGNS, CARGO_TYPES } from '../../data/trucks';
@@ -411,6 +413,11 @@ function StaffCard({ member, trucks, onAssign, onFire, onOpen, onPromote }) {
                   <Pill text={mood.label} icon={mood.icon} color={mood.color} bg={mood.color + '22'} />
                 </View>
               ); })()}
+              {member.role === 'driver' ? (
+                <View style={{ marginLeft: 6 }}>
+                  <Pill text={`Lv ${driverLevel(member.xp)}`} icon="star" color={C.gold} bg={C.amberSoft} />
+                </View>
+              ) : null}
               {(member.promoBoostUntil || 0) > Date.now() ? (
                 <View style={{ marginLeft: 6 }}>
                   <Pill text="2× promo boost" icon="rocket-launch" color={C.gold} bg={C.amberSoft} />
@@ -438,6 +445,27 @@ function StaffCard({ member, trucks, onAssign, onFire, onOpen, onPromote }) {
         </Row>
         <Progress pct={member.skill} color={C.blue} />
       </View>
+      {/* Driver XP & perks (v2.4.0): level from career km, perks apply live. */}
+      {member.role === 'driver' ? (() => {
+        const lv = driverLevel(member.xp);
+        const nextAt = driverXpForLevel(lv + 1);
+        const curAt = driverXpForLevel(lv);
+        const perks = DRIVER_PERKS.filter(pk => pk.level <= lv);
+        return (
+          <View style={{ marginTop: 10 }}>
+            <Row style={{ justifyContent: 'space-between', marginBottom: 4 }}>
+              <Text style={FONT.tiny}>DRIVER LEVEL {lv}{lv >= 10 ? ' — MAX' : ''}</Text>
+              {lv < 10 ? <Text style={[FONT.tiny, { color: C.gold }]}>{(member.xp || 0) - curAt}/{nextAt - curAt} XP</Text> : null}
+            </Row>
+            <Progress pct={lv >= 10 ? 100 : (((member.xp || 0) - curAt) / (nextAt - curAt)) * 100} color={C.gold} height={4} />
+            {perks.length > 0 && (
+              <Row style={{ marginTop: 6, flexWrap: 'wrap', gap: 4 }}>
+                {perks.map(pk => <Pill key={pk.id} text={pk.name} icon={pk.icon} color={C.blue} bg={C.blueSoft} />)}
+              </Row>
+            )}
+          </View>
+        );
+      })() : null}
       {/* Manual promotion: junior → senior → expert. Salary lands in the next
           level's min–max band and the promo buzz doubles output for 3 days. */}
       {(() => {
@@ -765,6 +793,131 @@ function LedgerSheet({ visible, onClose }) {
   );
 }
 
+// Truck Empire Bank — credit score, loan products gated by score, active
+// loans with EMI progress and early settlement. Premium dark banking look.
+function BankSheet({ visible, onClose }) {
+  const toast = useToast();
+  const balance = useGame(s => s.balance);
+  const loans = useGame(s => s.loans || []);
+  const credit = useGame(s => s.credit);
+  const takeLoan = useGame(s => s.takeLoan);
+  const prepayLoan = useGame(s => s.prepayLoan);
+  const [confirm, setConfirm] = useState(null);
+  useEffect(() => { if (!visible) setConfirm(null); }, [visible]);
+  const score = creditScoreOf(credit);
+  const scorePct = ((score - 300) / 600) * 100;
+  const scoreColor = score >= 720 ? C.green : score >= 600 ? C.amber : C.red;
+  const scoreLabel = score >= 780 ? 'Excellent' : score >= 720 ? 'Very Good' : score >= 650 ? 'Good' : score >= 600 ? 'Fair' : 'Poor';
+
+  return (
+    <Sheet visible={visible} onClose={onClose} title="Truck Empire Bank" height="88%">
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+        {/* Credit score */}
+        <Card style={{ marginBottom: 12, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <View>
+              <Text style={[FONT.tiny, { color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 1 }]}>Credit Score</Text>
+              <Row style={{ alignItems: 'flex-end', marginTop: 2 }}>
+                <Text style={[FONT.h1, { color: '#F8FAFC' }]}>{score}</Text>
+                <Text style={[FONT.tiny, { color: scoreColor, fontWeight: '800', marginLeft: 8, marginBottom: 5 }]}>{scoreLabel}</Text>
+              </Row>
+            </View>
+            <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: '#1E293B', alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="bank" size={24} color="#5B8DF0" />
+            </View>
+          </Row>
+          <View style={{ height: 8, borderRadius: 4, backgroundColor: '#1E293B', marginTop: 12, overflow: 'hidden' }}>
+            <View style={{ width: `${scorePct}%`, height: 8, backgroundColor: scoreColor, borderRadius: 4 }} />
+          </View>
+          <Row style={{ justifyContent: 'space-between', marginTop: 4 }}>
+            <Text style={[FONT.tiny, { color: '#64748B' }]}>300</Text>
+            <Text style={[FONT.tiny, { color: '#64748B' }]}>{(credit?.paid || 0)} EMIs paid · {(credit?.missed || 0)} missed</Text>
+            <Text style={[FONT.tiny, { color: '#64748B' }]}>900</Text>
+          </Row>
+        </Card>
+
+        {/* Active loans */}
+        {loans.length > 0 && <SectionTitle icon="file-clock-outline" text="Active Loans" />}
+        {loans.map(ln => {
+          const p = LOAN_PRODUCTS.find(x => x.id === ln.productId);
+          const done = ln.paidMonths / ln.months;
+          const settle = Math.round(ln.remaining * 0.98);
+          return (
+            <Card key={ln.id} style={{ marginBottom: 10 }}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Row style={{ flex: 1 }}>
+                  <Icon name={p?.icon || 'bank'} size={20} color={C.blue} />
+                  <View style={{ marginLeft: 8, flex: 1 }}>
+                    <Text style={[FONT.body, { fontWeight: '800' }]}>{ln.name}</Text>
+                    <Text style={FONT.tiny}>EMI {inrShort(ln.emi)} / 30 days · {ln.paidMonths}/{ln.months} paid</Text>
+                  </View>
+                </Row>
+                <Text style={[FONT.mono, { fontWeight: '800', color: C.red }]}>{inrShort(ln.remaining)}</Text>
+              </Row>
+              <Progress pct={done * 100} color={C.green} style={{ marginTop: 10 }} />
+              <Btn title={confirm === ln.id ? `Confirm — pay ${inrShort(settle)}` : `Settle early · ${inrShort(settle)} (2% off)`}
+                kind={balance >= settle ? 'soft' : 'ghost'} small icon="bank-check" style={{ marginTop: 10 }}
+                disabled={balance < settle}
+                onPress={() => {
+                  if (confirm === ln.id) { const r = prepayLoan(ln.id); toast(r.ok ? 'Loan settled — credit score up!' : r.err, r.ok ? 'success' : 'error'); setConfirm(null); }
+                  else setConfirm(ln.id);
+                }} />
+            </Card>
+          );
+        })}
+
+        {/* Products */}
+        <SectionTitle icon="cash-plus" text="Loan Products" />
+        {LOAN_PRODUCTS.map(p => {
+          const active = loans.some(l => l.productId === p.id);
+          const eligible = score >= p.minScore && loans.length < 2 && !active;
+          const totalDue = Math.round(p.amount * (1 + p.apr));
+          return (
+            <Card key={p.id} style={{ marginBottom: 10, opacity: active ? 0.65 : 1 }}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Row style={{ flex: 1 }}>
+                  <View style={[st.iconCircle, { backgroundColor: C.blueSoft }]}>
+                    <Icon name={p.icon} size={20} color={C.blue} />
+                  </View>
+                  <View style={{ marginLeft: 10, flex: 1 }}>
+                    <Text style={FONT.h3}>{p.name}</Text>
+                    <Text style={FONT.tiny} numberOfLines={2}>{p.blurb}</Text>
+                  </View>
+                </Row>
+                <Text style={[FONT.h3, { color: C.green }]}>{inrShort(p.amount)}</Text>
+              </Row>
+              <Row style={{ marginTop: 10, backgroundColor: C.bgSoft, borderRadius: RADIUS.md, paddingVertical: 8, justifyContent: 'space-around' }}>
+                <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800' }]}>{Math.round(p.apr * 100)}%</Text><Text style={FONT.tiny}>interest</Text></View>
+                <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800' }]}>{p.months}</Text><Text style={FONT.tiny}>months</Text></View>
+                <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800' }]}>{inrShort(Math.round(totalDue / p.months))}</Text><Text style={FONT.tiny}>EMI / 30d</Text></View>
+                <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800', color: score >= p.minScore ? C.green : C.red }]}>{p.minScore || '—'}</Text><Text style={FONT.tiny}>min score</Text></View>
+              </Row>
+              <Btn
+                title={active ? 'Already running' : loans.length >= 2 && !active ? 'Loan limit reached (2)'
+                  : score < p.minScore ? `Score too low (need ${p.minScore})`
+                    : confirm === p.id ? `Confirm — borrow ${inrShort(p.amount)}` : `Apply · repay ${inrShort(totalDue)} total`}
+                kind={eligible ? 'primary' : 'soft'} small={false} icon="bank-plus" disabled={!eligible}
+                style={{ marginTop: 10 }}
+                onPress={() => {
+                  if (confirm === p.id) { const r = takeLoan(p.id); toast(r.ok ? `${p.name} approved — ${inrShort(p.amount)} credited!` : r.err, r.ok ? 'success' : 'error'); setConfirm(null); }
+                  else setConfirm(p.id);
+                }} />
+            </Card>
+          );
+        })}
+        <Card style={{ backgroundColor: C.amberSoft, marginTop: 4 }}>
+          <Row>
+            <Icon name="alert-circle-outline" size={14} color={C.amber} />
+            <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.text }]}>
+              EMIs are auto-deducted every 30 game days with your monthly costs. A missed EMI adds 5% penalty interest and hurts your credit score.
+            </Text>
+          </Row>
+        </Card>
+      </ScrollView>
+    </Sheet>
+  );
+}
+
 export function EconomyTab() {
   const balance = useGame(s => s.balance);
   const gold = useGame(s => s.gold);
@@ -779,7 +932,11 @@ export function EconomyTab() {
   const savePricing = useGame(s => s.savePricing);
   const [priceEdit, setPriceEdit] = useState(null); // cargo id whose slider is open
   const [ledgerOpen, setLedgerOpen] = useState(false);
+  const [bankOpen, setBankOpen] = useState(false);
+  const fuelToday = useGame(s => s.fuelToday);
+  const loans = useGame(s => s.loans || []);
   const tapDistanceEgg = useEasterEggTap('long_hauler', 10);
+  const fuel = fuelToday();
 
   const now = useNow(deliveries.length > 0);
   const salaryBurden = useMemo(() => staff.reduce((a, x) => a + x.salary, 0), [staff]);
@@ -839,8 +996,16 @@ export function EconomyTab() {
           <Text style={[FONT.tiny, { color: '#4ADE80', fontWeight: '700' }]}>IN {inrShort(flow.income)}</Text>
           <Text style={[FONT.tiny, { color: '#F87171', fontWeight: '700' }]}>OUT {inrShort(flow.expense)}</Text>
         </Row>
-        <Btn title="Open Company Ledger" icon="notebook-outline" kind="soft" small
-          style={{ marginTop: 12, backgroundColor: '#1E293B' }} onPress={() => setLedgerOpen(true)} />
+        <Row style={{ marginTop: 12, gap: 8 }}>
+          <View style={{ flex: 1 }}>
+            <Btn title="Company Ledger" icon="notebook-outline" kind="soft" small
+              style={{ backgroundColor: '#1E293B' }} onPress={() => setLedgerOpen(true)} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Btn title={loans.length ? `Bank (${loans.length})` : 'Bank & Loans'} icon="bank" kind="soft" small
+              style={{ backgroundColor: '#1E293B' }} onPress={() => setBankOpen(true)} />
+          </View>
+        </Row>
       </Card>
 
       <Row style={{ marginBottom: 8 }}>
@@ -856,6 +1021,40 @@ export function EconomyTab() {
           <Stat icon="map-marker-distance" label="Distance" value={`${Math.round(stats.km + liveKm).toLocaleString('en-IN')} km`} />
         </Pressable>
       </Row>
+
+      {/* ---- Daily fuel market ---- */}
+      <SectionTitle icon="gas-station" text="Fuel Market" right={
+        <Pill text={fuel.factor <= 0.95 ? 'CHEAP — fill up!' : fuel.factor >= 1.12 ? 'SPIKE' : 'Normal'}
+          color={fuel.factor <= 0.95 ? C.green : fuel.factor >= 1.12 ? C.red : C.sub}
+          bg={fuel.factor <= 0.95 ? C.greenSoft : fuel.factor >= 1.12 ? C.redSoft : C.bgSoft} />
+      } />
+      <Card style={{ marginBottom: 14 }}>
+        <Row style={{ justifyContent: 'space-between' }}>
+          <View>
+            <Text style={FONT.tiny}>TODAY'S DIESEL</Text>
+            <Row style={{ alignItems: 'flex-end' }}>
+              <Text style={[FONT.h2, { color: fuel.factor >= 1.12 ? C.red : fuel.factor <= 0.95 ? C.green : C.text }]}>₹{fuel.price}/L</Text>
+              <Text style={[FONT.tiny, { marginLeft: 6, marginBottom: 3 }]}>base ₹{fuel.base}</Text>
+            </Row>
+          </View>
+          <Text style={[FONT.h3, { color: fuel.factor > 1 ? C.red : C.green }]}>
+            {fuel.factor > 1 ? '+' : ''}{Math.round((fuel.factor - 1) * 100)}%
+          </Text>
+        </Row>
+        {/* 7-day price bars — today is the last (highlighted) bar */}
+        <Row style={{ alignItems: 'flex-end', height: 46, marginTop: 10, gap: 4 }}>
+          {fuel.history.map((f, i) => (
+            <View key={i} style={{
+              flex: 1, borderRadius: 3,
+              height: 8 + ((f - 0.85) / 0.4) * 38,
+              backgroundColor: i === fuel.history.length - 1 ? (f >= 1.12 ? C.red : f <= 0.95 ? C.green : C.blue) : C.border,
+            }} />
+          ))}
+        </Row>
+        <Text style={[FONT.tiny, { marginTop: 6, textAlign: 'center' }]}>
+          Last 7 days · the market moves every game day and hits every delivery's fuel bill
+        </Text>
+      </Card>
 
       {/* ---- Business insights ---- */}
       <SectionTitle icon="lightbulb-on-outline" text="Business Insights" />
@@ -979,6 +1178,7 @@ export function EconomyTab() {
       </Card>
 
       <LedgerSheet visible={ledgerOpen} onClose={() => setLedgerOpen(false)} />
+      <BankSheet visible={bankOpen} onClose={() => setBankOpen(false)} />
     </ScrollView>
   );
 }
@@ -1086,6 +1286,16 @@ export function RewardsTab({ onOpenGames }) {
   const found = state.easterEggs?.found || [];
   const tapStreakEgg = useEasterEggTap('streak_freak', 11);
   const [showAll, setShowAll] = useState(false);
+  const weeklyProgress = useGame(s => s.weeklyProgress);
+  const claimWeekly = useGame(s => s.claimWeekly);
+  const weekly = useGame(s => s.weekly);
+  const toast = useToast();
+  const xp = companyXP(state);
+  const level = companyLevelOf(xp);
+  const nextXp = companyXpForLevel(level + 1);
+  const curXp = companyXpForLevel(level);
+  const weeklyList = weeklyProgress();
+  const sweepDone = weekly && weekly.claimed.length === (weekly.challenges || []).length && weekly.challenges.length > 0;
 
   const streak = login.streak || 0;
   const todayBonus = Math.min(Math.max(streak, 1), STREAK_MAX) * 2;
@@ -1140,6 +1350,59 @@ export function RewardsTab({ onOpenGames }) {
         <Text style={[FONT.tiny, { color: '#64748B', marginTop: 8, textAlign: 'center' }]}>
           Best streak: {Math.max(login.bestStreak || 0, streak)} days · miss a day and the flame resets
         </Text>
+      </Card>
+
+      {/* ---- Company level ---- */}
+      <Card style={{ marginBottom: 12 }}>
+        <Row style={{ justifyContent: 'space-between' }}>
+          <Row style={{ flex: 1 }}>
+            <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: C.blueSoft, alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="medal" size={24} color={C.blue} />
+            </View>
+            <View style={{ marginLeft: 10, flex: 1 }}>
+              <Text style={FONT.h3}>Level {level} · {companyTitleOf(level)}</Text>
+              <Text style={FONT.tiny}>{(xp - curXp).toLocaleString('en-IN')} / {(nextXp - curXp).toLocaleString('en-IN')} XP to "{companyTitleOf(level + 1)}"</Text>
+            </View>
+          </Row>
+          <Pill text={`+${(level + 1) * 10}G next`} color={C.gold} bg={C.amberSoft} icon="gold" />
+        </Row>
+        <Progress pct={((xp - curXp) / Math.max(1, nextXp - curXp)) * 100} color={C.blue} style={{ marginTop: 10 }} />
+        <Text style={[FONT.tiny, { marginTop: 6 }]}>Everything earns XP — revenue, deliveries, km, garages, trucks. Each level pays a one-time gold reward.</Text>
+      </Card>
+
+      {/* ---- Weekly challenges ---- */}
+      <SectionTitle icon="calendar-week" text={`Weekly Challenges${weekly ? ` — ${weekly.claimed.length}/${weekly.challenges.length}` : ''}`}
+        right={sweepDone ? <Pill text="SWEPT!" icon="trophy-award" color={C.gold} bg={C.amberSoft} /> : null} />
+      <Card style={{ marginBottom: 12 }}>
+        {weeklyList.length === 0 ? (
+          <Text style={FONT.sub}>This week's challenges unlock on your next delivery day.</Text>
+        ) : weeklyList.map((ch, i) => {
+          const done = ch.progress >= ch.target;
+          return (
+            <View key={ch.key} style={[{ paddingVertical: 10 }, i > 0 && st.divider]}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Row style={{ flex: 1, marginRight: 8 }}>
+                  <Icon name={ch.icon} size={18} color={ch.claimed ? C.green : done ? C.gold : C.sub} />
+                  <View style={{ marginLeft: 8, flex: 1 }}>
+                    <Text style={[FONT.body, { fontWeight: '700' }]} numberOfLines={1}>{ch.label}</Text>
+                    <Text style={FONT.tiny}>{Math.min(ch.progress, ch.target).toLocaleString('en-IN')} / {ch.target.toLocaleString('en-IN')} · pays +{ch.gold}G + {inrShort(ch.cash)}</Text>
+                  </View>
+                </Row>
+                {ch.claimed
+                  ? <Pill text="Claimed" icon="check-circle" color={C.green} bg={C.greenSoft} />
+                  : <Btn title={done ? 'Claim!' : '—'} kind={done ? 'green' : 'soft'} small disabled={!done}
+                      onPress={() => { const r = claimWeekly(ch.key); toast(r.ok ? (r.sweep ? 'CLEAN SWEEP! Jackpot paid!' : 'Reward claimed!') : r.err, r.ok ? 'success' : 'error'); }} />}
+              </Row>
+              <Progress pct={Math.min(100, (ch.progress / ch.target) * 100)} color={ch.claimed ? C.green : C.blue} style={{ marginTop: 8 }} height={4} />
+            </View>
+          );
+        })}
+        <Row style={{ marginTop: 8, backgroundColor: C.amberSoft, borderRadius: RADIUS.md, padding: 10 }}>
+          <Icon name="trophy-award" size={16} color={C.gold} />
+          <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.text }]}>
+            Clean sweep bonus: finish all 3 this week for an extra +{WEEKLY_JACKPOT.gold} Gold + {inrShort(WEEKLY_JACKPOT.cash)}!
+          </Text>
+        </Row>
       </Card>
 
       {/* ---- Free gold quick actions ---- */}
