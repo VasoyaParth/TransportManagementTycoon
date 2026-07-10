@@ -86,9 +86,9 @@ function hubSvg(){return '<svg viewBox="0 0 30 26">'
 function boot(){
   var DATA = ${data};
   var pickMode = false;
-  // Whole playable region (India + every unlockable country: Afghanistan to
-  // Malaysia/China) — the camera is free to roam anywhere the empire can go.
-  var REGION=L.latLngBounds([-9.0,55.0],[46.0,125.0]);
+  // Whole playable region (India + every unlockable country: UAE and Iran in
+  // the west, Russia in the north, Malaysia/China in the east).
+  var REGION=L.latLngBounds([-9.0,30.0],[72.0,145.0]);
   var map = L.map('map',{center:[DATA.hq.lat,DATA.hq.lng],zoom:6,zoomControl:false,
     attributionControl:false,minZoom:3,maxBounds:REGION,maxBoundsViscosity:0.7});
   // No on-screen zoom buttons — pinch-to-zoom keeps the map corners clean.
@@ -110,8 +110,11 @@ function boot(){
       html:'<div class="hq-marker" style="transform:scale('+k+');transform-origin:22px 44px">'+hqSvg()+'</div>',
       iconSize:[44,48],iconAnchor:[22,44]});
     if(hqMarker){ hqMarker.setIcon(icon); }
-    else hqMarker=L.marker([DATA.hq.lat,DATA.hq.lng],{icon:icon,zIndexOffset:1000})
-      .addTo(map).bindPopup('<b>'+DATA.companyName+'</b><br>HQ — '+DATA.hq.name);
+    else {
+      hqMarker=L.marker([DATA.hq.lat,DATA.hq.lng],{icon:icon,zIndexOffset:1000}).addTo(map)
+        .bindTooltip('<b>'+DATA.companyName+'</b><br><small>HQ — tap for details</small>',{direction:'top'});
+      hqMarker.on('click',function(){ post({type:'hqTap'}); });
+    }
   }
   plotHQ();
 
@@ -123,10 +126,12 @@ function boot(){
     var k=zf();
     (lastHubs||[]).forEach(function(h){
       if(h.hq) return;
-      hubLayer.addLayer(L.marker([h.lat,h.lng],{icon:L.divIcon({className:'',
+      var hm=L.marker([h.lat,h.lng],{icon:L.divIcon({className:'',
         html:'<div class="hub-marker" style="transform:scale('+k+');transform-origin:15px 24px">'+hubSvg()+'</div>',
         iconSize:[30,26],iconAnchor:[15,24]}),zIndexOffset:900})
-        .bindPopup('<b>'+h.name+'</b><br>Garage — free refuel & fast-travel'));
+        .bindTooltip('<b>'+h.name+'</b><br><small>Garage — tap for details</small>',{direction:'top'});
+      hm.on('click',function(){ post({type:'hubTap',cityId:h.cityId}); });
+      hubLayer.addLayer(hm);
     });
   }
   plotHubs(DATA.hubs);
@@ -231,12 +236,17 @@ function boot(){
       html=truck3d(color,accent,t.heading);
     }
     if(t.incidentType){
-      // Damage/theft badge — small colored dot, offset to the corner.
+      // Incident badge — every scenario gets its own colour + glyph so the
+      // player can read the problem at a glance: accident !, tyre burst !,
+      // theft/checkpost ₹ (money hit), heavy weather/rain/snow ☂.
       var badgeColor = {accident:'#DC3D43',flat:'#D97706',theft:'#7D3C98',checkpost:'#2563EB',weather:'#0E7C86'}[t.incidentType]||'#DC3D43';
+      var badgeGlyph = {accident:'!',flat:'!',theft:'\\u20B9',checkpost:'\\u20B9',weather:'\\u2602'}[t.incidentType]||'!';
       html='<div style="position:relative">'+html
-        +'<div style="position:absolute;right:2px;top:0;width:15px;height:15px;border-radius:50%;'
+        +'<div style="position:absolute;right:2px;top:0;width:16px;height:16px;border-radius:50%;'
         +'background:'+badgeColor+';border:1.5px solid #fff;color:#fff;font-size:10px;font-weight:700;'
-        +'line-height:15px;text-align:center">'+(t.incidentType==='accident'?'!':'$')+'</div></div>';
+        +'line-height:16px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.4)">'+badgeGlyph+'</div>'
+        +'<div style="position:absolute;right:-2px;top:-4px;width:24px;height:24px;border-radius:50%;'
+        +'background:'+badgeColor+';opacity:.35;animation:pulseDot 1s ease-in-out infinite alternate"></div></div>';
     }
     html='<div style="transform:scale('+zf()+');transform-origin:'+(w/2)+'px '+anchorY+'px">'+html+'</div>';
     var icon=L.divIcon({className:'',html:html,iconSize:[w,h],iconAnchor:[w/2,anchorY]});

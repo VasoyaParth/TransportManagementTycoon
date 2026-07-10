@@ -8,10 +8,10 @@ import { IconBtn, Icon, Money, Sheet, useToast, Row, useEasterEggTap } from '../
 import MapContainer from '../MapContainer';
 import { useGame, modelById, GAME_HOUR_MS } from '../../store/gameStore';
 import { cityById } from '../../engine/routing';
-import { FleetTab, RoutesTab, StaffTab, EconomyTab, MarketingTab, CollabTab } from './tabs';
+import { FleetTab, RoutesTab, StaffTab, EconomyTab, MarketingTab, RewardsTab } from './tabs';
 import {
   NewDeliveryModal, TruckDetailModal, BuyTruckModal, ContractsModal,
-  PowerupsModal, NotificationsModal, SettingsModal, HubsModal, DriverDetailModal, CountriesModal, MiniGamesModal,
+  PowerupsModal, NotificationsModal, SettingsModal, HubsModal, DriverDetailModal, CountriesModal, MiniGamesModal, HubInfoModal,
 } from './modals';
 import { haptic } from '../../engine/haptics';
 import Tutorial from './Tutorial';
@@ -23,7 +23,7 @@ const TABS = [
   { id: 'staff', icon: 'account-group', label: 'Staff' },
   { id: 'economy', icon: 'chart-areaspline', label: 'Economy' },
   { id: 'marketing', icon: 'bullhorn', label: 'Marketing' },
-  { id: 'collab', icon: 'handshake', label: 'Partners' },
+  { id: 'rewards', icon: 'gift-outline', label: 'Rewards' },
 ];
 
 export default function GameScreen() {
@@ -51,6 +51,7 @@ export default function GameScreen() {
   const lastToastN = useRef(null);
   const tapMoneyEgg = useEasterEggTap('money_gazer', 6);
   const tapEconomyEgg = useEasterEggTap('number_cruncher', 7);
+  const tapGhostEgg = useEasterEggTap('ghost_rider', 9);
 
   // ---- Update prompt: check once on load; the download itself happens in the
   // browser (one tap on the pill), which hands the APK to Android's installer.
@@ -145,6 +146,7 @@ export default function GameScreen() {
           onCancelPick={() => setPicking(null)}
           focus={focus}
           onTruckTap={(t) => setModal({ kind: 'truck', truckId: t.id })}
+          onHubTap={(cityId) => { haptic('light'); setModal({ kind: 'hubinfo', cityId }); }}
         />
         {/* Night tint overlay — follows the player's real local time */}
         {phase.tint > 0 && (
@@ -161,7 +163,7 @@ export default function GameScreen() {
               </Pressable>
             </Row>
             <Row style={{ alignItems: 'center', marginTop: 2 }}>
-              <Icon name={phase.icon} size={10} color={phase.color} />
+              <Pressable onPress={tapGhostEgg} hitSlop={6}><Icon name={phase.icon} size={10} color={phase.color} /></Pressable>
               <Text style={[FONT.tiny, { fontWeight: '800', marginLeft: 3 }]}>Day {clock.day}</Text>
               <Text style={[FONT.tiny, { color: C.faint, marginHorizontal: 3 }]}>·</Text>
               <Text style={[FONT.tiny, { color: C.sub }]}>{realClock}</Text>
@@ -228,7 +230,7 @@ export default function GameScreen() {
         {tab === 'staff' && <StaffTab onOpenDriver={(mem) => setModal({ kind: 'driver', staffId: mem.id })} />}
         {tab === 'economy' && <EconomyTab />}
         {tab === 'marketing' && <MarketingTab />}
-        {tab === 'collab' && <CollabTab />}
+        {tab === 'rewards' && <RewardsTab onOpenGames={() => { setTab(null); setModal({ kind: 'games' }); }} />}
       </Sheet>
 
       {/* ---- Modals (lazy — each mounts on first open, see mountedModals) ---- */}
@@ -257,6 +259,11 @@ export default function GameScreen() {
       {mounted('powerups') && <PowerupsModal visible={modal?.kind === 'powerups'} onClose={() => setModal(null)} onOpenGames={() => setModal({ kind: 'games' })} />}
       {mounted('notifications') && <NotificationsModal visible={modal?.kind === 'notifications'} onClose={() => setModal(null)} />}
       {mounted('hubs') && <HubsModal visible={modal?.kind === 'hubs'} onClose={() => setModal(null)} onShowOnMap={(f) => { setModal(null); setFocus(f); }} />}
+      {mounted('hubinfo') && <HubInfoModal
+        visible={modal?.kind === 'hubinfo'} onClose={() => setModal(null)} cityId={modal?.cityId}
+        onNewDelivery={(tid) => openNewDelivery(tid)}
+        onOpenTruck={(tid) => setModal({ kind: 'truck', truckId: tid })}
+      />}
       {mounted('settings') && <SettingsModal visible={modal?.kind === 'settings'} onClose={() => setModal(null)} initialTab={modal?.tab} />}
 
       {/* First-time guided tour */}

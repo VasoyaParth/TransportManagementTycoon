@@ -731,3 +731,11 @@ ROAD_EDGES.push(
 import { INTL_NODES, INTL_EDGES } from './expansion';
 Object.assign(ROAD_NODES, INTL_NODES);
 ROAD_EDGES.push(...INTL_EDGES);
+
+// --- v2.3.0 "Every Corner": merge the per-city locality zones into the road
+// graph (zone <-> parent-city edges). Existing nodes are never overwritten. ---
+import { LOCALITY_NODES, LOCALITY_EDGES } from './cities';
+for (const id in LOCALITY_NODES) {
+  if (!ROAD_NODES[id]) ROAD_NODES[id] = { lat: LOCALITY_NODES[id].lat, lng: LOCALITY_NODES[id].lng };
+}
+ROAD_EDGES.push(...LOCALITY_EDGES);
