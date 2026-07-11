@@ -4472,7 +4472,7 @@ export function CountriesModal({ visible, onClose }) {
   );
 }
 
-// Fires once, the moment an existing save first crosses into v4.0.0 — the
+// Fires once, the moment an existing save first crosses into v5.5.5 — the
 // final grand release. Pure celebration screen, no game logic.
 export function FinaleModal({ visible, onClose }) {
   const company = useGame(s => s.company);
@@ -4486,7 +4486,7 @@ export function FinaleModal({ visible, onClose }) {
         </View>
         <Text style={[FONT.h1, { textAlign: 'center' }]}>Congratulations, {company?.name}!</Text>
         <Text style={[FONT.body, { textAlign: 'center', marginTop: 10, color: C.sub, lineHeight: 20 }]}>
-          Truck Empire Tycoon just hit its final grand release — v4.0.0. The Stock Market is open, the roads are yours, and this
+          Truck Empire Tycoon just hit its final grand release — v5.5.5. The Stock Market is open, the roads are yours, and this
           send-off is for every kilometre you've driven to get here.
         </Text>
         <Card style={{ marginTop: 18, width: '100%', backgroundColor: '#0F172A', borderColor: '#1E293B' }}>

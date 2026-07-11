@@ -1108,6 +1108,7 @@ function CollateralPicker({ amount, trucks, hubs, pledgedT, pledgedH, selTrucks,
 function BankSheet({ visible, onClose }) {
   const toast = useToast();
   const balance = useGame(s => s.balance);
+  const gold = useGame(s => s.gold);
   const loans = useGame(s => s.loans || []);
   const credit = useGame(s => s.credit);
   const trucks = useGame(s => s.trucks);
@@ -1118,6 +1119,8 @@ function BankSheet({ visible, onClose }) {
   const takeCustomLoan = useGame(s => s.takeCustomLoan);
   const prepayLoan = useGame(s => s.prepayLoan);
   const payLoanPartial = useGame(s => s.payLoanPartial);
+  const donateMoney = useGame(s => s.donateMoney);
+  const donateGold = useGame(s => s.donateGold);
   const [confirm, setConfirm] = useState(null);
   const [view, setView] = useState('overview'); // 'overview' | 'borrow'
   const [customAmt, setCustomAmt] = useState(500000); // slider default — exactly the ₹5L example
@@ -1233,6 +1236,43 @@ function BankSheet({ visible, onClose }) {
                 <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.text }]}>
                   Tips: EMIs auto-deduct every {LOAN_EMI_INTERVAL_DAYS} game days. Repay any amount anytime to shrink what's owed. Miss {MISSED_STREAK_FOR_REPO} EMIs in a row and the bank seizes a pledged truck or garage — keep an eye on the reminder notifications.
                 </Text>
+              </Row>
+            </Card>
+
+            {/* Charity Drive — a deliberate cash/gold sink for players who've
+                piled up more than they'll ever spend. No reward, on purpose —
+                the point is just to get rid of the excess. */}
+            <Card style={{ marginBottom: 12 }}>
+              <Row>
+                <Icon name="hand-heart" size={18} color={C.red} />
+                <Text style={[FONT.body, { fontWeight: '800', marginLeft: 8 }]}>Charity Drive</Text>
+              </Row>
+              <Text style={[FONT.tiny, { marginTop: 2 }]}>Got more cash or gold than you'll ever spend? Donate it away — no reward, just a clean account.</Text>
+              <Text style={[FONT.tiny, { marginTop: 10, fontWeight: '700' }]}>Cash — {inrShort(balance)} available</Text>
+              <Row style={{ gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                {[0.1, 0.25, 0.5, 1].map(frac => {
+                  const amt = Math.round(balance * frac);
+                  if (amt <= 0) return null;
+                  return (
+                    <Pressable key={frac} onPress={() => { const r = donateMoney(amt); toast(r.ok ? `Donated ${inrShort(amt)}` : r.err, r.ok ? 'success' : 'error'); }}
+                      style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: RADIUS.sm, backgroundColor: C.bgSoft, borderWidth: 1, borderColor: C.border }}>
+                      <Text style={[FONT.tiny, { fontWeight: '700' }]}>{frac === 1 ? `All (${inrShort(amt)})` : `${Math.round(frac * 100)}% (${inrShort(amt)})`}</Text>
+                    </Pressable>
+                  );
+                })}
+              </Row>
+              <Text style={[FONT.tiny, { marginTop: 12, fontWeight: '700' }]}>Gold — {gold} available</Text>
+              <Row style={{ gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                {[0.25, 0.5, 1].map(frac => {
+                  const amt = Math.round(gold * frac);
+                  if (amt <= 0) return null;
+                  return (
+                    <Pressable key={frac} onPress={() => { const r = donateGold(amt); toast(r.ok ? `Donated ${amt} Gold` : r.err, r.ok ? 'success' : 'error'); }}
+                      style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: RADIUS.sm, backgroundColor: C.bgSoft, borderWidth: 1, borderColor: C.border }}>
+                      <Text style={[FONT.tiny, { fontWeight: '700' }]}>{frac === 1 ? `All (${amt})` : `${Math.round(frac * 100)}% (${amt})`}</Text>
+                    </Pressable>
+                  );
+                })}
               </Row>
             </Card>
 

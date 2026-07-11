@@ -917,7 +917,7 @@ export const useGame = create(
         };
         set({
           phase: 'game',
-          updateGiftVersion: '3.0.0', // fresh companies skip only the old "two horizons" gift — the v4.0.0 Grand Finale (settings.finaleSeen) is NOT stamped here, so every new company still gets that celebration once
+          updateGiftVersion: '3.0.0', // fresh companies skip only the old "two horizons" gift — the v5.5.5 Grand Finale (settings.finaleSeen) is NOT stamped here, so every new company still gets that celebration once
           company: { name, ceo, logo, avatar, hqCityId, code, createdAt: Date.now() },
           balance: startCapital - model.price,
           gold: 100,
@@ -1067,7 +1067,7 @@ export const useGame = create(
             'UPDATE 3.0.0 IS HERE — the biggest one ever! 17 new countries across two horizons: Thailand to the Philippines & Indonesia in the east, Saudi Arabia to Kenya & Ethiopia in the west. Welcome gift: +₹2.5 Crore + 300 Gold. Thank you for building your empire with us!');
           play('coin', 1);
         }
-        // ---- v4.0.0 Grand Finale gift: the Stock Market goes live, and
+        // ---- v5.5.5 Grand Finale gift: the Stock Market goes live, and
         // this is the final major content release. Deliberately on its OWN
         // flag (settings.finaleSeen) instead of chaining onto
         // updateGiftVersion — every company (brand new or returning) gets
@@ -1079,9 +1079,9 @@ export const useGame = create(
             settings: { ...gcur.settings, finaleSeen: true },
             gold: gcur.gold + 500, balance: gcur.balance + 50000000,
           });
-          get().logLedger('bonus', 'party-popper', 'v4.0.0 Grand Finale gift — Stock Market is live!', 50000000);
+          get().logLedger('bonus', 'party-popper', 'v5.5.5 Grand Finale gift — Stock Market is live!', 50000000);
           get().notify('system', 'party-popper',
-            'CONGRATULATIONS — TRUCK EMPIRE TYCOON v4.0.0 IS HERE! The Stock Market has opened: 1,500 companies to trade, a live ticker, candlestick charts, and your own IPO to launch once you\'ve earned it. This is our final grand release — thank you for building this empire with us. +₹5 Crore + 500 Gold to celebrate!');
+            'CONGRATULATIONS — TRUCK EMPIRE TYCOON v5.5.5 IS HERE! The Stock Market has opened: 1,500+ companies to trade, a live ticker, candlestick charts, and your own IPO to launch once you\'ve earned it. This is our final grand release — thank you for building this empire with us. +₹5 Crore + 500 Gold to celebrate!');
           play('coin', 1);
         }
         // ---- v2.4.0 daily/periodic systems ----
@@ -2434,6 +2434,31 @@ export const useGame = create(
         get().logLedger('loan', 'bank-check', `Loan settled early · ${ln.name}`, -cost);
         get().notify('system', 'bank-check', `${ln.name} settled early for ${inr(cost)} (2% rebate). Credit score up!`);
         return { ok: true, cost };
+      },
+
+      // ---------- charity drive (a deliberate cash/gold sink) ----------
+      // Some players just accumulate more money/gold than they'll ever
+      // spend — this is a no-benefit way to get rid of the excess. On
+      // purpose: no reward, no reputation bump, nothing bought. Just gone.
+      donateMoney(amount) {
+        const s = get();
+        const amt = Math.round(amount);
+        if (!amt || amt <= 0) return { ok: false, err: 'Enter an amount to donate' };
+        if (amt > s.balance) return { ok: false, err: `You only have ${inr(s.balance)}` };
+        set({ balance: s.balance - amt });
+        get().logLedger('donation', 'hand-heart', 'Charity donation', -amt);
+        get().notify('system', 'hand-heart', `Donated ${inr(amt)} to charity — no strings attached.`);
+        return { ok: true };
+      },
+      donateGold(amount) {
+        const s = get();
+        const amt = Math.round(amount);
+        if (!amt || amt <= 0) return { ok: false, err: 'Enter an amount to donate' };
+        if (amt > s.gold) return { ok: false, err: `You only have ${s.gold} Gold` };
+        set({ gold: s.gold - amt });
+        get().logLedger('donation', 'hand-heart', 'Gold donated to charity', 0);
+        get().notify('system', 'hand-heart', `Donated ${amt} Gold to charity.`);
+        return { ok: true };
       },
 
       // ---------- stock market ----------
