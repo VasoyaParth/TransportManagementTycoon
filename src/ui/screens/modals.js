@@ -2946,24 +2946,25 @@ function AboutTab({ onReplayTutorial }) {
         </>
       ) : null}
 
-      {/* Developers — every card is IDENTICAL height/layout (fixed badge size,
-          two-line title slot) regardless of name/title length, so the row
-          always lines up perfectly instead of drifting with text wrap. */}
+      {/* Developers — simple vertical list, one row per person. Full name and
+          title get all the horizontal space they need instead of being
+          squeezed into a cramped 3-up card grid. */}
       <Text style={cs.section}>Developed By</Text>
-      <Row style={{ gap: 10, alignItems: 'stretch' }}>
+      <Card style={{ padding: 0 }}>
         {DEVELOPERS.map((dev, i) => {
           const tapEgg = i === 0 ? tapMakerEgg : dev.eggId === 'hello_claude' ? tapClaudeEgg : null;
           return (
-            <Card key={dev.name} style={{ flex: 1, padding: 0 }}>
-              <Pressable onPress={() => { if (tapEgg) tapEgg(); }} style={{ alignItems: 'center', padding: 14, minHeight: 138, justifyContent: 'center' }}>
-                <View style={[cs.heroIcon, { width: 52, height: 52, backgroundColor: dev.bg }]}><Icon name={dev.icon} size={28} color={dev.color} /></View>
-                <Text style={[FONT.body, { fontWeight: '800', marginTop: 8, textAlign: 'center' }]} numberOfLines={1}>{dev.name}</Text>
-                <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 2 }]} numberOfLines={2}>{dev.title}</Text>
-              </Pressable>
-            </Card>
+            <Pressable key={dev.name} onPress={() => { if (tapEgg) tapEgg(); }}
+              style={[{ flexDirection: 'row', alignItems: 'center', padding: 14 }, i > 0 && { borderTopWidth: 1, borderTopColor: C.border }]}>
+              <View style={[cs.heroIcon, { width: 44, height: 44, backgroundColor: dev.bg }]}><Icon name={dev.icon} size={22} color={dev.color} /></View>
+              <View style={{ marginLeft: 12, flex: 1 }}>
+                <Text style={[FONT.body, { fontWeight: '800' }]} numberOfLines={1}>{dev.name}</Text>
+                <Text style={FONT.tiny} numberOfLines={1}>{dev.title}</Text>
+              </View>
+            </Pressable>
           );
         })}
-      </Row>
+      </Card>
 
       {/* Credits */}
       <Text style={cs.section}>Credits & Open Source</Text>
