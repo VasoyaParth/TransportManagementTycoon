@@ -1,0 +1,6 @@
+<resources>
+    <!-- Native launch background — matches the JS splash screen's deep navy
+         so the app opens straight into brand colour instead of a gray flash
+         while the JS bundle loads. -->
+    <color name="splash_bg">#0F1D30</color>
+</resources>

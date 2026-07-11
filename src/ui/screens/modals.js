@@ -932,6 +932,8 @@ export function BuyTruckModal({ visible, onClose }) {
   const buyTruck = useGame(s => s.buyTruck);
   const [tier, setTier] = useState(0);
   const [sort, setSort] = useState('default');
+  const [page, setPage] = useState(1); // showroom loads 10 trucks at a time
+  useEffect(() => { setPage(1); }, [tier, sort]);
   const tapWindowShopperEgg = useEasterEggTap('window_shopper', 8);
   const SORTS = [
     ['default', 'Default'],
@@ -970,8 +972,12 @@ export function BuyTruckModal({ visible, onClose }) {
         </Row>
       </ScrollView>
       <FlatList
-        data={list} keyExtractor={m => m.id} showsVerticalScrollIndicator={false}
+        data={list.slice(0, page * 10)} keyExtractor={m => m.id} showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 30 }}
+        ListFooterComponent={page * 10 < list.length ? (
+          <Btn title={`Show more trucks (${list.length - page * 10})`} kind="soft" icon="chevron-down"
+            onPress={() => setPage(pg => pg + 1)} style={{ marginTop: 4 }} />
+        ) : null}
         renderItem={({ item: m }) => {
           const pm = propMeta[m.propulsion];
           const afford = balance >= m.price;

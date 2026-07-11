@@ -403,28 +403,24 @@ function StaffCard({ member, trucks, onAssign, onFire, onOpen, onPromote }) {
           </View>
           <View style={{ marginLeft: 10, flex: 1 }}>
             <Text style={FONT.h3} numberOfLines={1}>{member.name}</Text>
-            <Row style={{ marginTop: 3, flexWrap: 'wrap' }}>
+            {/* Wrapping pill row — uniform gap in BOTH directions so pills
+                never overlap when they spill onto a second line. */}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 5, marginTop: 5 }}>
               <Pill
                 text={`${level ? level.name : member.level} ${role ? role.name : member.role}`}
                 icon={role ? role.icon : 'account'}
               />
               {/* Mood — tired after a trip, energetic when rested, busy when fixing */}
               {(() => { const mood = staffMood(member, { trucks, deliveries }); return (
-                <View style={{ marginLeft: 6 }}>
-                  <Pill text={mood.label} icon={mood.icon} color={mood.color} bg={mood.color + '22'} />
-                </View>
+                <Pill text={mood.label} icon={mood.icon} color={mood.color} bg={mood.color + '22'} />
               ); })()}
               {member.role === 'driver' ? (
-                <View style={{ marginLeft: 6 }}>
-                  <Pill text={`Lv ${driverLevel(member.xp)}`} icon="star" color={C.gold} bg={C.amberSoft} />
-                </View>
+                <Pill text={`Lv ${driverLevel(member.xp)}`} icon="star" color={C.gold} bg={C.amberSoft} />
               ) : null}
               {(member.promoBoostUntil || 0) > Date.now() ? (
-                <View style={{ marginLeft: 6 }}>
-                  <Pill text="2× promo boost" icon="rocket-launch" color={C.gold} bg={C.amberSoft} />
-                </View>
+                <Pill text="2× promo" icon="rocket-launch" color={C.gold} bg={C.amberSoft} />
               ) : null}
-            </Row>
+            </View>
           </View>
         </Pressable>
         <IconBtn

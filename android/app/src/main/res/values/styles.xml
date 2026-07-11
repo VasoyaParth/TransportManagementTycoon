@@ -4,6 +4,10 @@
     <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
         <!-- Customize your theme here. -->
         <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
+        <!-- Kill the gray launch flash: paint the native window in the splash
+             navy (with the status bar to match) until React renders. -->
+        <item name="android:windowBackground">@drawable/launch_screen</item>
+        <item name="android:statusBarColor">@color/splash_bg</item>
     </style>
 
 </resources>

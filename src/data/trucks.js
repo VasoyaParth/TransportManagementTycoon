@@ -370,6 +370,43 @@ export const TRUCK_MODELS = [
     desc: 'Diesel-electric hybrid tractor cutting fuel bills on the regional grind.',
     speed: 88, cargo: 14, tank: 260, eff: 5.5, range: 1430, maint: 8, price: 4600000, build: 1500,
   },
+  // ---- v3.0.1 showroom additions ----
+  {
+    id: 'tata-ultra-t16', name: 'Tata Ultra T.16', brand: 'Tata Motors',
+    tier: 2, propulsion: 'diesel', rating: 4.4, icon: 'truck',
+    desc: 'Slim-cab city-to-city workhorse with a walk-through cabin.',
+    speed: 85, cargo: 9, tank: 120, eff: 6.5, range: 780, maint: 6, price: 2600000, build: 700,
+  },
+  {
+    id: 'eicher-pro-8055', name: 'Eicher Pro 8055', brand: 'Eicher',
+    tier: 3, propulsion: 'diesel', rating: 4.5, icon: 'truck-trailer', shape: 'semi',
+    desc: 'Long-haul tractor with a fuel-coaching dashboard drivers swear by.',
+    speed: 88, cargo: 26, tank: 365, eff: 3.6, range: 1310, maint: 9, price: 6200000, build: 2000,
+  },
+  {
+    id: 'bharatbenz-5528', name: 'BharatBenz 5528C', brand: 'BharatBenz',
+    tier: 3, propulsion: 'diesel', rating: 4.6, icon: 'truck-trailer', shape: 'conventional',
+    desc: 'German-blood hood truck built for punishing mining corridors.',
+    speed: 82, cargo: 28, tank: 400, eff: 3.4, range: 1360, maint: 10, price: 7400000, build: 2300,
+  },
+  {
+    id: 'scania-r500', name: 'Scania R500', brand: 'Scania',
+    tier: 3, propulsion: 'diesel', rating: 4.9, icon: 'truck-trailer', shape: 'semi',
+    desc: 'The king of the highway — imported muscle with limo comfort.',
+    speed: 95, cargo: 30, tank: 450, eff: 3.2, range: 1440, maint: 12, price: 12500000, build: 3200,
+  },
+  {
+    id: 'volvo-fh16-roadtrain', name: 'Volvo FH16 Road Train', brand: 'Volvo',
+    tier: 3, propulsion: 'diesel', rating: 5.0, icon: 'truck-trailer', shape: 'doubletrailer',
+    desc: 'B-double monster — two full trailers behind 750 imported horses.',
+    speed: 85, cargo: 42, tank: 600, eff: 2.6, range: 1560, maint: 14, price: 16500000, build: 3800,
+  },
+  {
+    id: 'tata-ace-ev', name: 'Tata Ace EV', brand: 'Tata Motors',
+    tier: 1, propulsion: 'electric', rating: 4.3, icon: 'truck-delivery',
+    desc: 'The Chhota Haathi goes electric — silent, cheap last-mile runs.',
+    speed: 60, cargo: 1, battery: 22, range: 154, maint: 2, price: 850000, build: 300,
+  },
 ];
 
 // Truck livery colours for customization (id + hex + display name).

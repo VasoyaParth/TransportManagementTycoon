@@ -247,6 +247,8 @@ function buildTruckShapes(type, body, accent, opts = {}) {
     R(11.8, 54, 16.4, 0.9, 0, dark);
     R(11.6, 38.5, 16.8, 2, 1, accent);
     wheel(8.6, 63.5, 5); wheel(28.7, 63.5, 5);                // trailer-1 kingpin tandem
+    R(17, 64.4, 6, 8.2, 1, darker);                           // kingpin drawbar — visibly couples trailer 1 to the tractor (was a floating gap)
+    C_(20, 66.2, 1.4, chrome);                                // coupling pin
     R(14.5, 71.9, 11, 4.2, 1, darker);                        // fifth-wheel plate
     C_(20, 74, 1.7, chrome);                                  // kingpin
     wheel(8.6, 74, 5); wheel(28.7, 74, 5);                    // tractor drive axle

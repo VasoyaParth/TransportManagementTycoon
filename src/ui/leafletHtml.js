@@ -168,8 +168,12 @@ function boot(){
   function plotCities(){
     cityLayer.clearLayers();
     var z = map.getZoom();
+    // PERF: only cities inside the padded viewport become DOM markers — with
+    // 5,000+ locations, plotting the whole world on every zoom melted phones.
+    var vb = map.getBounds().pad(0.3);
     DATA.cities.forEach(function(c){
       if(allowedCountries && allowedCountries.indexOf(c.country||'IN')<0) return;
+      if(!vb.contains([c.lat,c.lng])) return;
       var disc = !!discovered[c.id];
       // While picking a destination every city must be tappable — show all
       // dots; otherwise unexplored ones only fade in as you zoom.
@@ -186,8 +190,10 @@ function boot(){
   plotCities();
   map.on('zoomend', function(){
     plotCities(); plotHQ(); plotHubs();
-    lastTrucks.forEach(setTruck); // re-render at the new zoom scale factor
+    truckIconCache={}; // zoom factor changed — icons must rebuild once
+    lastTrucks.forEach(setTruck);
   });
+  map.on('moveend', function(){ plotCities(); }); // viewport culling follows the pan
   window.setVisibleCountries=function(arr){ allowedCountries = arr && arr.length ? arr : null; plotCities(); };
   window.setDiscovered=function(ids){ discovered={}; (ids||[]).forEach(function(id){ discovered[id]=1; }); plotCities(); };
 
@@ -209,26 +215,32 @@ function boot(){
   // you zoom in, instead of a fixed 40px that dwarfs the whole country view.
   function zf(){ var z=map.getZoom(); return Math.max(0.35, Math.min(1.25, (z-3)/4)); }
   var lastTrucks=[];
+  // PERF caches: per-truck art (RN only resends it when it changes) and the
+  // last rendered icon HTML (identical HTML -> skip the expensive setIcon /
+  // DOM rebuild; parked trucks then cost nothing per tick).
+  var truckArtCache={}, truckIconCache={};
   function setTruck(t){
+    if(t.art) truckArtCache[t.id]=t.art;
+    var tArt = truckArtCache[t.id];
     var accent = t.status==='delivering'?'#0E9F5B':t.status==='building'?'#D97706':t.status==='broken'?'#DC3D43':'#9DB2D6';
     var color = t.color || '#3A5A8C';
     var html, w=40, h=48, anchorY=24;
-    if((t.ferryOn || t.ferryLoading) && t.ferryArt){
+    if((t.ferryOn || t.ferryLoading) && DATA.ferryArt){
       // On (or boarding/leaving) the ferry: always the big RO-RO steamer with
       // the truck on deck — never a truck on water, never a blurred truck.
       // While docked (paperwork + roll-on/off) a pulsing ring marks the port.
       w=48; h=72; anchorY=36;
       html='<div class="truck3d" style="transform:rotate('+((t.heading||0)+180)+'deg);width:'+w+'px;height:'+h+'px;transform-origin:'+(w/2)+'px '+anchorY+'px">'
-        +t.ferryArt+'</div>';
+        +DATA.ferryArt+'</div>';
       if(t.ferryLoading){
         html='<div style="position:relative">'+html
           +'<div style="position:absolute;left:50%;top:50%;width:30px;height:30px;margin:-15px;border-radius:50%;background:rgba(37,99,235,.45);animation:pulseDot 1s ease-in-out infinite alternate"></div></div>';
       }
-    } else if(t.art){
+    } else if(tArt){
       // Detailed per-model artwork pre-rendered on the RN side (truckArt.js).
       w=t.artW||40; h=t.artH||48; anchorY=(t.bodyH||h)/2;
       html='<div class="truck3d" style="transform:rotate('+((t.heading||0)+180)+'deg);width:'+w+'px;height:'+h+'px;transform-origin:'+(w/2)+'px '+anchorY+'px">'
-        +t.art+'</div>';
+        +tArt+'</div>';
       if(t.phase==='loading'||t.phase==='unloading'){
         html='<div style="position:relative">'+html
           +'<div style="position:absolute;left:50%;top:50%;width:26px;height:26px;margin:-13px;border-radius:50%;background:rgba(217,119,6,.4);animation:pulseDot 1s ease-in-out infinite alternate"></div></div>';
@@ -250,9 +262,17 @@ function boot(){
         +'background:'+badgeColor+';opacity:.35;animation:pulseDot 1s ease-in-out infinite alternate"></div></div>';
     }
     html='<div style="transform:scale('+zf()+');transform-origin:'+(w/2)+'px '+anchorY+'px">'+html+'</div>';
-    var icon=L.divIcon({className:'',html:html,iconSize:[w,h],iconAnchor:[w/2,anchorY]});
-    if(truckMarkers[t.id]){ truckMarkers[t.id].setIcon(icon); truckMarkers[t.id].setLatLng([t.lat,t.lng]); }
+    if(truckMarkers[t.id]){
+      // Skip the DOM rebuild entirely when nothing visual changed.
+      if(truckIconCache[t.id]!==html){
+        truckIconCache[t.id]=html;
+        truckMarkers[t.id].setIcon(L.divIcon({className:'',html:html,iconSize:[w,h],iconAnchor:[w/2,anchorY]}));
+      }
+      truckMarkers[t.id].setLatLng([t.lat,t.lng]);
+    }
     else{
+      truckIconCache[t.id]=html;
+      var icon=L.divIcon({className:'',html:html,iconSize:[w,h],iconAnchor:[w/2,anchorY]});
       var m=L.marker([t.lat,t.lng],{icon:icon,zIndexOffset:500}).addTo(map)
         .bindPopup('<b>'+t.name+'</b><br>'+t.statusLabel+'<br>Fuel '+t.fuelPct+'%');
       m.on('click',function(){ post({type:'truckTap',id:t.id}); });
