@@ -1,7 +1,7 @@
 // Main game view: header (company, clock, money), full-screen India map,
 // bottom navigation into dashboard tabs, and all modal flows.
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, Pressable, useWindowDimensions, AppState, Linking, Animated, Easing } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ScrollView, useWindowDimensions, AppState, Linking, Animated, Easing } from 'react-native';
 import { SafeAreaView } from 'react-native';
 import { C, FONT, RADIUS } from '../theme';
 import { IconBtn, Icon, Money, Sheet, useToast, Row, useEasterEggTap } from '../components';
@@ -40,20 +40,25 @@ export default function GameScreen() {
   const settings = useGame(s => s.settings);
   const [tab, setTab] = useState(null);
   const [modal, setModal] = useState(null); // {kind, ...props}
-  // The v4.0.0 Grand Finale gift (cash + gold) is granted by dailyTick,
-  // which atomically flips settings.finaleSeen true in the same set() call
-  // — this effect just reacts to that flip to show the celebration screen,
-  // exactly once per save, ever (finaleSeen is persisted).
+  // The Grand Finale gift (cash + gold) is granted once by dailyTick, which
+  // flips settings.finaleSeen true. Showing the CELEBRATION SCREEN is a
+  // separate one-time event from granting the gift — a ref alone isn't
+  // enough (it resets every app launch, so if finaleSeen was already true
+  // from a previous session, the modal would pop again on every open).
+  // settings.finaleModalShown is the dedicated, persisted "already shown"
+  // flag that actually prevents the repeat.
   const finaleSeen = useGame(s => s.settings.finaleSeen);
-  const finaleShown = useRef(false);
+  const finaleModalShown = useGame(s => s.settings.finaleModalShown);
+  const finaleTriggered = useRef(false);
   useEffect(() => {
     try {
-      if (finaleSeen && !finaleShown.current) {
-        finaleShown.current = true;
+      if (finaleSeen && !finaleModalShown && !finaleTriggered.current) {
+        finaleTriggered.current = true;
         setModal({ kind: 'finale' });
+        useGame.getState().saveSettings({ finaleModalShown: true });
       }
     } catch (e) { /* never block the game on a celebration screen */ }
-  }, [finaleSeen]);
+  }, [finaleSeen, finaleModalShown]);
   // Lazy modal mounting: every modal used to render (hidden) on first paint,
   // which made app start-up do the work of ten sheets. Instead a modal only
   // mounts once its kind has been opened, then stays mounted so the Sheet's
@@ -230,24 +235,30 @@ export default function GameScreen() {
           <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'hubs' }); }}>
             <Icon name="garage" size={19} color={C.text} />
           </Pressable>
-          {/* Folding drawer: expands smoothly above the toggle */}
+          {/* Folding drawer: expands smoothly above the toggle. Capped at a
+              fixed 3-button height (not 4) so it never grows again as more
+              tools get added — anything past 3 scrolls inside that fixed
+              box instead of pushing further down into the map's own
+              controls / bottom nav. This is the "automatic space" fix. */}
           <Animated.View style={{
             overflow: 'hidden',
-            height: drawerAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 4 * 48] }),
+            height: drawerAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 3 * 48] }),
             opacity: drawerAnim,
           }}>
-            <Pressable style={[st.actionBtn, { marginBottom: 8 }]} onPress={() => { haptic('light'); setModal({ kind: 'contracts' }); }}>
-              <Icon name="file-document-outline" size={19} color={C.text} />
-            </Pressable>
-            <Pressable style={[st.actionBtn, { marginBottom: 8 }]} onPress={() => { haptic('light'); setModal({ kind: 'countries' }); }}>
-              <Icon name="earth" size={19} color={C.blue} />
-            </Pressable>
-            <Pressable style={[st.actionBtn, { marginBottom: 8 }]} onPress={() => { haptic('light'); setModal({ kind: 'stocks' }); }}>
-              <Icon name="finance" size={19} color={C.green} />
-            </Pressable>
-            <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'powerups' }); }}>
-              <Icon name="star-four-points" size={19} color={C.gold} />
-            </Pressable>
+            <ScrollView showsVerticalScrollIndicator={false} style={{ height: 3 * 48 }}>
+              <Pressable style={[st.actionBtn, { marginBottom: 8 }]} onPress={() => { haptic('light'); setModal({ kind: 'contracts' }); }}>
+                <Icon name="file-document-outline" size={19} color={C.text} />
+              </Pressable>
+              <Pressable style={[st.actionBtn, { marginBottom: 8 }]} onPress={() => { haptic('light'); setModal({ kind: 'countries' }); }}>
+                <Icon name="earth" size={19} color={C.blue} />
+              </Pressable>
+              <Pressable style={[st.actionBtn, { marginBottom: 8 }]} onPress={() => { haptic('light'); setModal({ kind: 'stocks' }); }}>
+                <Icon name="finance" size={19} color={C.green} />
+              </Pressable>
+              <Pressable style={[st.actionBtn, { marginBottom: 8 }]} onPress={() => { haptic('light'); setModal({ kind: 'powerups' }); }}>
+                <Icon name="star-four-points" size={19} color={C.gold} />
+              </Pressable>
+            </ScrollView>
           </Animated.View>
           <Pressable style={[st.actionBtn, drawerOpen && { backgroundColor: C.blueSoft, borderColor: C.blue }]} onPress={toggleDrawer}>
             <Icon name={drawerOpen ? 'chevron-up' : 'dots-horizontal'} size={19} color={drawerOpen ? C.blue : C.text} />
