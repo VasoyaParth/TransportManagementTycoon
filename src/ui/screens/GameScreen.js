@@ -40,18 +40,20 @@ export default function GameScreen() {
   const settings = useGame(s => s.settings);
   const [tab, setTab] = useState(null);
   const [modal, setModal] = useState(null); // {kind, ...props}
-  const updateGiftVersion = useGame(s => s.updateGiftVersion);
+  // The v4.0.0 Grand Finale gift (cash + gold) is granted by dailyTick,
+  // which atomically flips settings.finaleSeen true in the same set() call
+  // — this effect just reacts to that flip to show the celebration screen,
+  // exactly once per save, ever (finaleSeen is persisted).
   const finaleSeen = useGame(s => s.settings.finaleSeen);
   const finaleShown = useRef(false);
   useEffect(() => {
     try {
-      if (updateGiftVersion === '4.0.0' && !finaleSeen && !finaleShown.current) {
+      if (finaleSeen && !finaleShown.current) {
         finaleShown.current = true;
         setModal({ kind: 'finale' });
-        saveSettings({ finaleSeen: true });
       }
     } catch (e) { /* never block the game on a celebration screen */ }
-  }, [updateGiftVersion, finaleSeen]);
+  }, [finaleSeen]);
   // Lazy modal mounting: every modal used to render (hidden) on first paint,
   // which made app start-up do the work of ten sheets. Instead a modal only
   // mounts once its kind has been opened, then stays mounted so the Sheet's

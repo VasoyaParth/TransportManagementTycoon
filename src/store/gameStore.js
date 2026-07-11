@@ -15,6 +15,7 @@ import {
   liveJitterPct, liveStockPrice, isMarketOpen, fakeTradeFor,
 } from '../data/stocks';
 import { computeRoute, planFuelStops, cityById } from '../engine/routing';
+import { cmpVer } from '../net/updates';
 import { deliveryEconomics, tripDurationSec, inr, REAL_SEC_PER_GAME_HOUR, ECON } from '../engine/economy';
 import { play, setSoundEnabled, setMusicVolume, setSfxVolume } from '../engine/sound';
 import { setHapticsEnabled, setHapticsIntensity } from '../engine/haptics';
@@ -924,7 +925,7 @@ export const useGame = create(
         };
         set({
           phase: 'game',
-          updateGiftVersion: '4.0.0', // fresh companies skip the update gifts
+          updateGiftVersion: '3.0.0', // fresh companies skip only the old "two horizons" gift — the v4.0.0 Grand Finale (settings.finaleSeen) is NOT stamped here, so every new company still gets that celebration once
           company: { name, ceo, logo, avatar, hqCityId, code, createdAt: Date.now() },
           balance: startCapital - model.price,
           gold: 100,
@@ -1058,7 +1059,13 @@ export const useGame = create(
         // ---- v3.0.0 update welcome gift: one-time mega bonus for existing
         // players when they first open the Two Horizons update. New companies
         // never see it (createCompany stamps the version at birth).
-        if ((s.updateGiftVersion || '') !== '3.0.0') {
+        // IMPORTANT: this must be a "reached or passed" check (cmpVer < 0),
+        // NOT an exact-string check — an exact "!== '3.0.0'" stays true
+        // forever once the flag moves on to a later version, so this block
+        // and the one below would fight each other every single tick,
+        // flip-flopping the flag back and forth and re-granting both gifts
+        // forever. (This is exactly what happened before — sorry!)
+        if (cmpVer(s.updateGiftVersion || '0.0.0', '3.0.0') < 0) {
           // Fresh get() — the login-streak block above may have just granted
           // gold; using the stale snapshot would silently clobber it.
           const gcur = get();
@@ -1069,13 +1076,17 @@ export const useGame = create(
           play('coin', 1);
         }
         // ---- v4.0.0 Grand Finale gift: the Stock Market goes live, and
-        // this is the final major content release — existing players get a
-        // proper send-off (cash, gold, a big congratulatory notice, and the
-        // in-game finale celebration screen keyed off this same flag).
-        // New companies skip it — createCompany stamps the version at birth.
-        if ((s.updateGiftVersion || '') !== '4.0.0') {
+        // this is the final major content release. Deliberately on its OWN
+        // flag (settings.finaleSeen) instead of chaining onto
+        // updateGiftVersion — every company (brand new or returning) gets
+        // this celebration exactly once, since it's the send-off moment,
+        // not a "you missed an old update" backfill.
+        if (!s.settings?.finaleSeen) {
           const gcur = get();
-          set({ updateGiftVersion: '4.0.0', gold: gcur.gold + 500, balance: gcur.balance + 50000000 });
+          set({
+            settings: { ...gcur.settings, finaleSeen: true },
+            gold: gcur.gold + 500, balance: gcur.balance + 50000000,
+          });
           get().logLedger('bonus', 'party-popper', 'v4.0.0 Grand Finale gift — Stock Market is live!', 50000000);
           get().notify('system', 'party-popper',
             'CONGRATULATIONS — TRUCK EMPIRE TYCOON v4.0.0 IS HERE! The Stock Market has opened: 1,500 companies to trade, a live ticker, candlestick charts, and your own IPO to launch once you\'ve earned it. This is our final grand release — thank you for building this empire with us. +₹5 Crore + 500 Gold to celebrate!');
