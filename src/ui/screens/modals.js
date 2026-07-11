@@ -10,7 +10,7 @@ import { buildQrFrames, createQrReceiver } from '../../net/qrBackup';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
@@ -2181,7 +2181,7 @@ function QrExportPanel({ snapshot }) {
         <Btn title={playing ? 'Pause' : 'Play'} kind={playing ? 'soft' : 'blue'} small icon={playing ? 'pause' : 'play'} onPress={() => setPlaying(p => !p)} />
         <Btn title="▶" kind="soft" small onPress={() => { setPlaying(false); setIdx(i => (i + 1) % built.totalFrames); }} />
       </Row>
-      <Text style={[FONT.tiny, { color: C.faint, marginTop: 8 }]}>{inrShort(built.rawBytes)}B compressed (~{Math.round(JSON.stringify(snapshot).length / 1024)}KB save)</Text>
+      <Text style={[FONT.tiny, { color: C.faint, marginTop: 8 }]}>{built.rawBytes.toLocaleString()}B compressed (~{Math.round(JSON.stringify(snapshot).length / 1024)}KB save)</Text>
     </View>
   );
 }
@@ -3975,6 +3975,11 @@ const cs = StyleSheet.create({
   chip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1, borderColor: C.border, backgroundColor: '#fff', flexShrink: 0 },
   truckCard: { width: 120, padding: 10, borderRadius: RADIUS.md, borderWidth: 1, borderColor: C.border, marginRight: 8, backgroundColor: '#fff' },
   heroIcon: { width: 64, height: 64, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  badgeDot: {
+    position: 'absolute', bottom: -2, right: -2, width: 18, height: 18, borderRadius: 9,
+    backgroundColor: C.blue, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: C.bg,
+  },
   resRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border },
   pickerBox: { marginTop: 10, backgroundColor: C.bgSoft, borderRadius: RADIUS.md, borderWidth: 1, borderColor: C.border, padding: 10 },
   suggChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1, borderColor: C.border, backgroundColor: C.bgSoft, alignItems: 'center' },

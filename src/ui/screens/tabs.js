@@ -14,6 +14,8 @@ import {
   CUSTOM_LOAN_MIN, customLoanMax, customLoanTerms,
   companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, WEEKLY_JACKPOT,
   STREAK_REWARDS, streakRewardFor,
+  pledgedTruckIds, pledgedHubCityIds, collateralTotalValue, COLLATERAL_COVERAGE, MISSED_STREAK_FOR_REPO,
+  LOAN_EMI_INTERVAL_DAYS,
 } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { CAMPAIGNS, CARGO_TYPES } from '../../data/trucks';
@@ -124,6 +126,7 @@ const FLEET_PAGE = 8;
 export function FleetTab({ onTruckPress, onBuyTruck }) {
   const trucks = useGame(s => s.trucks);
   const deliveries = useGame(s => s.deliveries);
+  const pledged = useGame(pledgedTruckIds);
   const hasLive = trucks.some(t => t.status === 'delivering' || t.status === 'building');
   const now = useNow(hasLive);
   const [filter, setFilter] = useState('all');
@@ -174,8 +177,15 @@ export function FleetTab({ onTruckPress, onBuyTruck }) {
       <Card style={{ marginBottom: 10 }} onPress={() => onTruckPress && onTruckPress(t)}>
         <Row style={{ justifyContent: 'space-between' }}>
           <Row style={{ flex: 1 }}>
-            <View style={[st.iconCircle, { backgroundColor: meta.bg }]}>
-              <FleetTruckArt model={model} color={t.color} />
+            <View style={{ position: 'relative' }}>
+              <View style={[st.iconCircle, { backgroundColor: meta.bg }]}>
+                <FleetTruckArt model={model} color={t.color} />
+              </View>
+              {pledged.has(t.id) && (
+                <View style={st.badgeDot}>
+                  <Icon name="bank" size={10} color="#fff" />
+                </View>
+              )}
             </View>
             <View style={{ marginLeft: 10, flex: 1 }}>
               <Text style={FONT.h3} numberOfLines={1}>{model.name}</Text>
@@ -1018,17 +1028,102 @@ function LedgerSheet({ visible, onClose }) {
 
 // Truck Empire Bank — credit score, loan products gated by score, active
 // loans with EMI progress and early settlement. Premium dark banking look.
+// Quick-amount repay row — no free-text keyboard needed, just fast presets
+// plus a "Max" button, so partial repayment stays impossible to fat-finger.
+function RepayQuickAmounts({ remaining, balance, onPick }) {
+  const presets = [Math.round(remaining * 0.25), Math.round(remaining * 0.5), Math.round(remaining * 0.75)]
+    .filter((v, i, arr) => v > 0 && v < remaining && arr.indexOf(v) === i);
+  return (
+    <Row style={{ gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+      {presets.map(v => (
+        <Pressable key={v} disabled={balance < v} onPress={() => onPick(v)}
+          style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: RADIUS.sm, backgroundColor: C.bgSoft, borderWidth: 1, borderColor: C.border, opacity: balance < v ? 0.4 : 1 }}>
+          <Text style={[FONT.tiny, { fontWeight: '700' }]}>{inrShort(v)}</Text>
+        </Pressable>
+      ))}
+      <Pressable disabled={balance <= 0} onPress={() => onPick(Math.min(remaining, balance))}
+        style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: RADIUS.sm, backgroundColor: C.greenSoft, borderWidth: 1, borderColor: C.green, opacity: balance <= 0 ? 0.4 : 1 }}>
+        <Text style={[FONT.tiny, { fontWeight: '700', color: C.green }]}>Max ({inrShort(Math.min(remaining, balance))})</Text>
+      </Pressable>
+    </Row>
+  );
+}
+
+// Collateral picker — trucks + non-HQ garages the player can pledge, with a
+// live running total vs the 70% coverage bar so overshooting/undershooting
+// the requirement is obvious before they tap Apply.
+function CollateralPicker({ amount, trucks, hubs, pledgedT, pledgedH, selTrucks, selHubs, onToggleTruck, onToggleHub }) {
+  const required = Math.ceil((amount || 0) * COLLATERAL_COVERAGE);
+  const pledgeable = { truckIds: [...selTrucks], hubCityIds: [...selHubs] };
+  const s = useGame(x => x);
+  const value = collateralTotalValue(s, pledgeable);
+  const met = value >= required && required > 0;
+  const availTrucks = trucks.filter(t => !pledgedT.has(t.id));
+  const availHubs = hubs.filter(h => !h.hq && !pledgedH.has(h.cityId));
+
+  return (
+    <Card style={{ marginBottom: 10 }}>
+      <Text style={[FONT.body, { fontWeight: '800' }]}>Pledge Collateral</Text>
+      <Text style={[FONT.tiny, { marginTop: 2 }]}>Trucks & garages stay in service — pledged assets just carry a small bank badge and get repossessed if this loan defaults.</Text>
+      <Row style={{ justifyContent: 'space-between', marginTop: 10 }}>
+        <Text style={FONT.tiny}>Pledged value</Text>
+        <Text style={[FONT.tiny, { fontWeight: '800', color: met ? C.green : C.red }]}>{inrShort(value)} / {inrShort(required)} needed</Text>
+      </Row>
+      <View style={{ height: 6, borderRadius: 3, backgroundColor: C.bgSoft, marginTop: 4, overflow: 'hidden' }}>
+        <View style={{ width: `${Math.min(100, required ? (value / required) * 100 : 0)}%`, height: 6, backgroundColor: met ? C.green : C.amber }} />
+      </View>
+      <View style={[st.pickerBox, { marginTop: 10 }]}>
+        {availTrucks.length === 0 && availHubs.length === 0 ? (
+          <Text style={[FONT.tiny, { padding: 8 }]}>No free (unpledged) trucks or garages to offer as collateral.</Text>
+        ) : null}
+        {availTrucks.map(t => {
+          const model = modelById(t.modelId);
+          const val = collateralTotalValue(s, { truckIds: [t.id], hubCityIds: [] });
+          const on = selTrucks.includes(t.id);
+          return (
+            <Pressable key={t.id} style={st.pickerRow} onPress={() => onToggleTruck(t.id)}>
+              <Icon name={on ? 'checkbox-marked' : 'checkbox-blank-outline'} size={18} color={on ? C.blue : C.faint} />
+              <Text style={[FONT.tiny, { marginLeft: 8, flex: 1 }]} numberOfLines={1}>{t.customName || model.name}</Text>
+              <Text style={[FONT.tiny, { color: C.faint }]}>{inrShort(val)}</Text>
+            </Pressable>
+          );
+        })}
+        {availHubs.map(h => {
+          const val = collateralTotalValue(s, { truckIds: [], hubCityIds: [h.cityId] });
+          const on = selHubs.includes(h.cityId);
+          return (
+            <Pressable key={h.cityId} style={st.pickerRow} onPress={() => onToggleHub(h.cityId)}>
+              <Icon name={on ? 'checkbox-marked' : 'checkbox-blank-outline'} size={18} color={on ? C.blue : C.faint} />
+              <Text style={[FONT.tiny, { marginLeft: 8, flex: 1 }]} numberOfLines={1}>{h.name}</Text>
+              <Text style={[FONT.tiny, { color: C.faint }]}>{inrShort(val)}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+    </Card>
+  );
+}
+
 function BankSheet({ visible, onClose }) {
   const toast = useToast();
   const balance = useGame(s => s.balance);
   const loans = useGame(s => s.loans || []);
   const credit = useGame(s => s.credit);
+  const trucks = useGame(s => s.trucks);
+  const hubs = useGame(s => s.hubs || []);
+  const pledgedT = useGame(pledgedTruckIds);
+  const pledgedH = useGame(pledgedHubCityIds);
   const takeLoan = useGame(s => s.takeLoan);
   const takeCustomLoan = useGame(s => s.takeCustomLoan);
   const prepayLoan = useGame(s => s.prepayLoan);
+  const payLoanPartial = useGame(s => s.payLoanPartial);
   const [confirm, setConfirm] = useState(null);
+  const [view, setView] = useState('overview'); // 'overview' | 'borrow'
   const [customAmt, setCustomAmt] = useState(500000); // slider default — exactly the ₹5L example
-  useEffect(() => { if (!visible) setConfirm(null); }, [visible]);
+  const [selTrucks, setSelTrucks] = useState([]);
+  const [selHubs, setSelHubs] = useState([]);
+  const [repayAmt, setRepayAmt] = useState({}); // loanId -> picked amount
+  useEffect(() => { if (!visible) { setConfirm(null); setView('overview'); setSelTrucks([]); setSelHubs([]); } }, [visible]);
   const score = creditScoreOf(credit);
   const scorePct = ((score - 300) / 600) * 100;
   const scoreColor = score >= 720 ? C.green : score >= 600 ? C.amber : C.red;
@@ -1037,6 +1132,11 @@ function BankSheet({ visible, onClose }) {
   const customClamped = Math.min(Math.max(CUSTOM_LOAN_MIN, customAmt), customMax);
   const customTerms = customLoanTerms(customClamped, score);
   const canCustom = loans.length < 2;
+
+  const toggleTruck = id => setSelTrucks(a => a.includes(id) ? a.filter(x => x !== id) : [...a, id]);
+  const toggleHub = id => setSelHubs(a => a.includes(id) ? a.filter(x => x !== id) : [...a, id]);
+  const collateral = { truckIds: selTrucks, hubCityIds: selHubs };
+  const resetPicker = () => { setSelTrucks([]); setSelHubs([]); setConfirm(null); };
 
   return (
     <Sheet visible={visible} onClose={onClose} title="Truck Empire Bank" height="88%">
@@ -1065,109 +1165,164 @@ function BankSheet({ visible, onClose }) {
           </Row>
         </Card>
 
-        {/* Active loans */}
-        {loans.length > 0 && <SectionTitle icon="file-clock-outline" text="Active Loans" />}
-        {loans.map(ln => {
-          const p = LOAN_PRODUCTS.find(x => x.id === ln.productId);
-          const done = ln.paidMonths / ln.months;
-          const settle = Math.round(ln.remaining * 0.98);
-          return (
-            <Card key={ln.id} style={{ marginBottom: 10 }}>
-              <Row style={{ justifyContent: 'space-between' }}>
-                <Row style={{ flex: 1 }}>
-                  <Icon name={p?.icon || 'bank'} size={20} color={C.blue} />
-                  <View style={{ marginLeft: 8, flex: 1 }}>
-                    <Text style={[FONT.body, { fontWeight: '800' }]}>{ln.name}</Text>
-                    <Text style={FONT.tiny}>EMI {inrShort(ln.emi)} / 30 days · {ln.paidMonths}/{ln.months} paid</Text>
-                  </View>
-                </Row>
-                <Text style={[FONT.mono, { fontWeight: '800', color: C.red }]}>{inrShort(ln.remaining)}</Text>
+        {view === 'overview' ? (
+          <>
+            {loans.length > 0 ? <SectionTitle icon="file-clock-outline" text="Active Loans" /> : null}
+            {loans.map(ln => {
+              const p = LOAN_PRODUCTS.find(x => x.id === ln.productId);
+              const done = ln.paidMonths / ln.months;
+              const settle = Math.round(ln.remaining * 0.98);
+              const pledgeCount = (ln.collateral?.truckIds?.length || 0) + (ln.collateral?.hubCityIds?.length || 0);
+              const picked = repayAmt[ln.id] || 0;
+              return (
+                <Card key={ln.id} style={{ marginBottom: 10 }}>
+                  <Row style={{ justifyContent: 'space-between' }}>
+                    <Row style={{ flex: 1 }}>
+                      <Icon name={p?.icon || 'bank'} size={20} color={C.blue} />
+                      <View style={{ marginLeft: 8, flex: 1 }}>
+                        <Text style={[FONT.body, { fontWeight: '800' }]}>{ln.name}</Text>
+                        <Text style={FONT.tiny}>EMI {inrShort(ln.emi)} / {LOAN_EMI_INTERVAL_DAYS} days · {ln.paidMonths}/{ln.months} paid</Text>
+                      </View>
+                    </Row>
+                    <Text style={[FONT.mono, { fontWeight: '800', color: C.red }]}>{inrShort(ln.remaining)}</Text>
+                  </Row>
+                  <Progress pct={done * 100} color={C.green} style={{ marginTop: 10 }} />
+                  {ln.missedStreak > 0 ? (
+                    <Row style={{ marginTop: 8, backgroundColor: C.redSoft || C.amberSoft, borderRadius: RADIUS.sm, padding: 6 }}>
+                      <Icon name="alert" size={14} color={C.red} />
+                      <Text style={[FONT.tiny, { marginLeft: 6, color: C.red, flex: 1 }]}>
+                        {ln.missedStreak} missed EMI{ln.missedStreak > 1 ? 's' : ''} in a row — {MISSED_STREAK_FOR_REPO - ln.missedStreak <= 0 ? 'pledged assets at risk NOW' : `${MISSED_STREAK_FOR_REPO - ln.missedStreak} more miss and a pledged asset gets repossessed`}.
+                      </Text>
+                    </Row>
+                  ) : null}
+                  {pledgeCount > 0 ? (
+                    <Text style={[FONT.tiny, { marginTop: 6, color: C.faint }]}>{pledgeCount} asset{pledgeCount > 1 ? 's' : ''} pledged as collateral on this loan.</Text>
+                  ) : null}
+                  <Text style={[FONT.tiny, { marginTop: 10 }]}>Repay any amount now:</Text>
+                  <RepayQuickAmounts remaining={ln.remaining} balance={balance} onPick={v => setRepayAmt(a => ({ ...a, [ln.id]: v }))} />
+                  <Row style={{ gap: 8, marginTop: 10 }}>
+                    <View style={{ flex: 1 }}>
+                      <Btn title={picked ? `Pay ${inrShort(picked)} now` : 'Pick an amount above'} kind={picked ? 'primary' : 'ghost'} small icon="cash-check"
+                        disabled={!picked || balance < picked}
+                        onPress={() => {
+                          const r = payLoanPartial(ln.id, picked);
+                          toast(r.ok ? `Paid ${inrShort(picked)} toward ${ln.name}` : r.err, r.ok ? 'success' : 'error');
+                          if (r.ok) setRepayAmt(a => ({ ...a, [ln.id]: 0 }));
+                        }} />
+                    </View>
+                  </Row>
+                  <Btn title={confirm === ln.id ? `Confirm — pay ${inrShort(settle)}` : `Settle in full · ${inrShort(settle)} (2% off)`}
+                    kind={balance >= settle ? 'soft' : 'ghost'} small icon="bank-check" style={{ marginTop: 8 }}
+                    disabled={balance < settle}
+                    onPress={() => {
+                      if (confirm === ln.id) { const r = prepayLoan(ln.id); toast(r.ok ? 'Loan settled — credit score up!' : r.err, r.ok ? 'success' : 'error'); setConfirm(null); }
+                      else setConfirm(ln.id);
+                    }} />
+                </Card>
+              );
+            })}
+
+            {loans.length === 0 ? (
+              <EmptyState icon="bank-outline" title="No active loans" sub="Borrow against your trucks or garages when you need a cash injection." />
+            ) : null}
+
+            <Card style={{ backgroundColor: C.amberSoft, marginTop: 4, marginBottom: 12 }}>
+              <Row>
+                <Icon name="lightbulb-on-outline" size={14} color={C.amber} />
+                <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.text }]}>
+                  Tips: EMIs auto-deduct every {LOAN_EMI_INTERVAL_DAYS} game days. Repay any amount anytime to shrink what's owed. Miss {MISSED_STREAK_FOR_REPO} EMIs in a row and the bank seizes a pledged truck or garage — keep an eye on the reminder notifications.
+                </Text>
               </Row>
-              <Progress pct={done * 100} color={C.green} style={{ marginTop: 10 }} />
-              <Btn title={confirm === ln.id ? `Confirm — pay ${inrShort(settle)}` : `Settle early · ${inrShort(settle)} (2% off)`}
-                kind={balance >= settle ? 'soft' : 'ghost'} small icon="bank-check" style={{ marginTop: 10 }}
-                disabled={balance < settle}
-                onPress={() => {
-                  if (confirm === ln.id) { const r = prepayLoan(ln.id); toast(r.ok ? 'Loan settled — credit score up!' : r.err, r.ok ? 'success' : 'error'); setConfirm(null); }
-                  else setConfirm(ln.id);
-                }} />
             </Card>
-          );
-        })}
 
-        {/* Custom Loan — pick ANY amount on a slider instead of only the
-            fixed catalog tiers. Terms recompute live as you drag. */}
-        <SectionTitle icon="tune-variant" text="Custom Loan" />
-        <Card style={{ marginBottom: 10 }}>
-          <Row style={{ justifyContent: 'space-between' }}>
-            <Text style={FONT.sub}>Borrow exactly what you need</Text>
-            <Text style={[FONT.h3, { color: C.green }]}>{inr(customClamped)}</Text>
-          </Row>
-          <GameSlider min={CUSTOM_LOAN_MIN} max={customMax} step={50000} value={customClamped} color={C.green}
-            onChange={setCustomAmt} minLabel={inrShort(CUSTOM_LOAN_MIN)} maxLabel={inrShort(customMax)} />
-          <Text style={[FONT.tiny, { marginTop: 4 }]}>Max scales with your credit score ({score}) — better score, bigger ceiling.</Text>
-          <Row style={{ marginTop: 10, backgroundColor: C.bgSoft, borderRadius: RADIUS.md, paddingVertical: 8, justifyContent: 'space-around' }}>
-            <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800' }]}>{Math.round(customTerms.apr * 100)}%</Text><Text style={FONT.tiny}>interest</Text></View>
-            <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800' }]}>{customTerms.months}</Text><Text style={FONT.tiny}>months</Text></View>
-            <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800' }]}>{inrShort(customTerms.emi)}</Text><Text style={FONT.tiny}>EMI / 30d</Text></View>
-            <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800' }]}>{inrShort(customTerms.totalDue)}</Text><Text style={FONT.tiny}>total repay</Text></View>
-          </Row>
-          <Btn
-            title={!canCustom ? 'Loan limit reached (2)' : confirm === 'custom' ? `Confirm — borrow ${inr(customClamped)}` : `Apply · repay ${inrShort(customTerms.totalDue)} total`}
-            kind={canCustom ? 'green' : 'soft'} disabled={!canCustom} style={{ marginTop: 10 }}
-            onPress={() => {
-              if (confirm === 'custom') { const r = takeCustomLoan(customClamped); toast(r.ok ? `Custom loan approved — ${inr(customClamped)} credited!` : r.err, r.ok ? 'success' : 'error'); setConfirm(null); }
-              else setConfirm('custom');
-            }} />
-        </Card>
+            <Btn title="Borrow Loan" icon="bank-plus" kind="green" onPress={() => setView('borrow')} />
+          </>
+        ) : (
+          <>
+            <Pressable onPress={() => { setView('overview'); resetPicker(); }} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+              <Icon name="chevron-left" size={18} color={C.blue} />
+              <Text style={[FONT.body, { color: C.blue, fontWeight: '700', marginLeft: 2 }]}>Back</Text>
+            </Pressable>
 
-        {/* Products */}
-        <SectionTitle icon="cash-plus" text="Loan Products" />
-        {LOAN_PRODUCTS.map(p => {
-          const active = loans.some(l => l.productId === p.id);
-          const eligible = score >= p.minScore && loans.length < 2 && !active;
-          const totalDue = Math.round(p.amount * (1 + p.apr));
-          return (
-            <Card key={p.id} style={{ marginBottom: 10, opacity: active ? 0.65 : 1 }}>
+            {/* Custom Loan — pick ANY amount on a slider instead of only the
+                fixed catalog tiers. Terms recompute live as you drag. */}
+            <SectionTitle icon="tune-variant" text="Custom Loan" />
+            <Card style={{ marginBottom: 10 }}>
               <Row style={{ justifyContent: 'space-between' }}>
-                <Row style={{ flex: 1 }}>
-                  <View style={[st.iconCircle, { backgroundColor: C.blueSoft }]}>
-                    <Icon name={p.icon} size={20} color={C.blue} />
-                  </View>
-                  <View style={{ marginLeft: 10, flex: 1 }}>
-                    <Text style={FONT.h3}>{p.name}</Text>
-                    <Text style={FONT.tiny} numberOfLines={2}>{p.blurb}</Text>
-                  </View>
-                </Row>
-                <Text style={[FONT.h3, { color: C.green }]}>{inrShort(p.amount)}</Text>
+                <Text style={FONT.sub}>Borrow exactly what you need</Text>
+                <Text style={[FONT.h3, { color: C.green }]}>{inr(customClamped)}</Text>
               </Row>
+              <GameSlider min={CUSTOM_LOAN_MIN} max={customMax} step={50000} value={customClamped} color={C.green}
+                onChange={setCustomAmt} minLabel={inrShort(CUSTOM_LOAN_MIN)} maxLabel={inrShort(customMax)} />
+              <Text style={[FONT.tiny, { marginTop: 4 }]}>Max scales with your credit score ({score}) — better score, bigger ceiling.</Text>
               <Row style={{ marginTop: 10, backgroundColor: C.bgSoft, borderRadius: RADIUS.md, paddingVertical: 8, justifyContent: 'space-around' }}>
-                <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800' }]}>{Math.round(p.apr * 100)}%</Text><Text style={FONT.tiny}>interest</Text></View>
-                <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800' }]}>{p.months}</Text><Text style={FONT.tiny}>months</Text></View>
-                <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800' }]}>{inrShort(Math.round(totalDue / p.months))}</Text><Text style={FONT.tiny}>EMI / 30d</Text></View>
-                <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800', color: score >= p.minScore ? C.green : C.red }]}>{p.minScore || '—'}</Text><Text style={FONT.tiny}>min score</Text></View>
+                <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800' }]}>{Math.round(customTerms.apr * 100)}%</Text><Text style={FONT.tiny}>interest</Text></View>
+                <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800' }]}>{customTerms.months}</Text><Text style={FONT.tiny}>months</Text></View>
+                <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800' }]}>{inrShort(customTerms.emi)}</Text><Text style={FONT.tiny}>EMI / {LOAN_EMI_INTERVAL_DAYS}d</Text></View>
+                <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800' }]}>{inrShort(customTerms.totalDue)}</Text><Text style={FONT.tiny}>total repay</Text></View>
               </Row>
-              <Btn
-                title={active ? 'Already running' : loans.length >= 2 && !active ? 'Loan limit reached (2)'
-                  : score < p.minScore ? `Score too low (need ${p.minScore})`
-                    : confirm === p.id ? `Confirm — borrow ${inrShort(p.amount)}` : `Apply · repay ${inrShort(totalDue)} total`}
-                kind={eligible ? 'primary' : 'soft'} small={false} icon="bank-plus" disabled={!eligible}
-                style={{ marginTop: 10 }}
-                onPress={() => {
-                  if (confirm === p.id) { const r = takeLoan(p.id); toast(r.ok ? `${p.name} approved — ${inrShort(p.amount)} credited!` : r.err, r.ok ? 'success' : 'error'); setConfirm(null); }
-                  else setConfirm(p.id);
-                }} />
             </Card>
-          );
-        })}
-        <Card style={{ backgroundColor: C.amberSoft, marginTop: 4 }}>
-          <Row>
-            <Icon name="alert-circle-outline" size={14} color={C.amber} />
-            <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.text }]}>
-              EMIs are auto-deducted every 30 game days with your monthly costs. A missed EMI adds 5% penalty interest and hurts your credit score.
-            </Text>
-          </Row>
-        </Card>
+            <CollateralPicker amount={customClamped} trucks={trucks} hubs={hubs} pledgedT={pledgedT} pledgedH={pledgedH}
+              selTrucks={selTrucks} selHubs={selHubs} onToggleTruck={toggleTruck} onToggleHub={toggleHub} />
+            <Btn
+              title={!canCustom ? 'Loan limit reached (2)' : confirm === 'custom' ? `Confirm — borrow ${inr(customClamped)}` : `Apply · repay ${inrShort(customTerms.totalDue)} total`}
+              kind={canCustom ? 'green' : 'soft'} disabled={!canCustom} style={{ marginTop: 10, marginBottom: 16 }}
+              onPress={() => {
+                if (confirm === 'custom') {
+                  const r = takeCustomLoan(customClamped, collateral);
+                  toast(r.ok ? `Custom loan approved — ${inr(customClamped)} credited!` : r.err, r.ok ? 'success' : 'error');
+                  if (r.ok) { setConfirm(null); setSelTrucks([]); setSelHubs([]); setView('overview'); } else setConfirm(null);
+                } else setConfirm('custom');
+              }} />
+
+            {/* Products */}
+            <SectionTitle icon="cash-plus" text="Loan Products" />
+            {LOAN_PRODUCTS.map(p => {
+              const active = loans.some(l => l.productId === p.id);
+              const eligible = score >= p.minScore && loans.length < 2 && !active;
+              const totalDue = Math.round(p.amount * (1 + p.apr));
+              return (
+                <Card key={p.id} style={{ marginBottom: 10, opacity: active ? 0.65 : 1 }}>
+                  <Row style={{ justifyContent: 'space-between' }}>
+                    <Row style={{ flex: 1 }}>
+                      <View style={[st.iconCircle, { backgroundColor: C.blueSoft }]}>
+                        <Icon name={p.icon} size={20} color={C.blue} />
+                      </View>
+                      <View style={{ marginLeft: 10, flex: 1 }}>
+                        <Text style={FONT.h3}>{p.name}</Text>
+                        <Text style={FONT.tiny} numberOfLines={2}>{p.blurb}</Text>
+                      </View>
+                    </Row>
+                    <Text style={[FONT.h3, { color: C.green }]}>{inrShort(p.amount)}</Text>
+                  </Row>
+                  <Row style={{ marginTop: 10, backgroundColor: C.bgSoft, borderRadius: RADIUS.md, paddingVertical: 8, justifyContent: 'space-around' }}>
+                    <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800' }]}>{Math.round(p.apr * 100)}%</Text><Text style={FONT.tiny}>interest</Text></View>
+                    <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800' }]}>{p.months}</Text><Text style={FONT.tiny}>months</Text></View>
+                    <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800' }]}>{inrShort(Math.round(totalDue / p.months))}</Text><Text style={FONT.tiny}>EMI / {LOAN_EMI_INTERVAL_DAYS}d</Text></View>
+                    <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800', color: score >= p.minScore ? C.green : C.red }]}>{p.minScore || '—'}</Text><Text style={FONT.tiny}>min score</Text></View>
+                  </Row>
+                  {confirm === p.id ? (
+                    <CollateralPicker amount={p.amount} trucks={trucks} hubs={hubs} pledgedT={pledgedT} pledgedH={pledgedH}
+                      selTrucks={selTrucks} selHubs={selHubs} onToggleTruck={toggleTruck} onToggleHub={toggleHub} />
+                  ) : null}
+                  <Btn
+                    title={active ? 'Already running' : loans.length >= 2 && !active ? 'Loan limit reached (2)'
+                      : score < p.minScore ? `Score too low (need ${p.minScore})`
+                        : confirm === p.id ? `Confirm — borrow ${inrShort(p.amount)}` : `Apply · repay ${inrShort(totalDue)} total`}
+                    kind={eligible ? 'primary' : 'soft'} small={false} icon="bank-plus" disabled={!eligible}
+                    style={{ marginTop: 10 }}
+                    onPress={() => {
+                      if (confirm === p.id) {
+                        const r = takeLoan(p.id, collateral);
+                        toast(r.ok ? `${p.name} approved — ${inrShort(p.amount)} credited!` : r.err, r.ok ? 'success' : 'error');
+                        if (r.ok) { setConfirm(null); setSelTrucks([]); setSelHubs([]); setView('overview'); } else setConfirm(null);
+                      } else { setConfirm(p.id); setSelTrucks([]); setSelHubs([]); }
+                    }} />
+                </Card>
+              );
+            })}
+          </>
+        )}
       </ScrollView>
     </Sheet>
   );
@@ -1808,6 +1963,14 @@ const st = StyleSheet.create({
   iconCircle: {
     width: 42, height: 42, borderRadius: 21,
     alignItems: 'center', justifyContent: 'center',
+  },
+  // Small "pledged to bank" badge — same corner-circle treatment as an
+  // on-road incident badge, distinct icon/color so it never gets confused
+  // with one.
+  badgeDot: {
+    position: 'absolute', bottom: -2, right: -2, width: 18, height: 18, borderRadius: 9,
+    backgroundColor: C.blue, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: C.bg,
   },
   pickerBox: {
     marginTop: 10, backgroundColor: C.bgSoft, borderRadius: RADIUS.md,
