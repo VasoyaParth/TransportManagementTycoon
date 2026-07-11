@@ -280,8 +280,19 @@ const FLAVOR_CARGO = {
 // ============================ v2.4.0 systems ============================
 // ---------- Bank & Loans ----------
 // Flat-interest EMI loans: total due = principal × (1 + apr), split over
-// `months` monthly EMIs charged with the other monthly costs. Credit score
-// moves with on-time vs missed EMIs and gates the bigger products.
+// `months` EMI installments, charged every LOAN_EMI_INTERVAL_DAYS game days
+// (v3.9.0: every 2 days, not once a month — a loan is a live, closely-watched
+// thing, not a background chore). Credit score moves with on-time vs missed
+// EMIs and gates the bigger products.
+export const LOAN_EMI_INTERVAL_DAYS = 2;
+// Every loan is secured against real collateral — trucks and/or garages
+// pledged at loan time, worth at least COLLATERAL_COVERAGE of the amount
+// borrowed. Miss enough EMIs in a row and the bank seizes the cheapest
+// pledged asset still standing to claw back what's owed — a truck or garage
+// pledged to the bank shows a small bank badge everywhere it appears (the
+// same "small circle" treatment as an on-road incident badge).
+export const COLLATERAL_COVERAGE = 0.7; // pledged assets must cover 70% of the loan
+export const MISSED_STREAK_FOR_REPO = 2; // 2 consecutive missed EMIs on one loan -> repossession
 export const LOAN_PRODUCTS = [
   { id: 'micro', name: 'Micro Loan', icon: 'cash-fast', amount: 500000, apr: 0.10, months: 6, minScore: 0,
     blurb: 'A quick top-up — fuel this week, a small repair, nothing fancy.' },
@@ -297,6 +308,44 @@ export const LOAN_PRODUCTS = [
 export function creditScoreOf(credit) {
   const c = credit || { paid: 0, missed: 0 };
   return Math.max(300, Math.min(900, 650 + (c.paid || 0) * 8 - (c.missed || 0) * 45));
+}
+
+// Every truck/garage currently pledged as collateral on ANY active loan —
+// used to badge them everywhere (Fleet list, truck detail, map) and to stop
+// the same asset being pledged twice.
+export function pledgedTruckIds(s) {
+  const set = new Set();
+  for (const ln of s.loans || []) for (const id of ln.collateral?.truckIds || []) set.add(id);
+  return set;
+}
+export function pledgedHubCityIds(s) {
+  const set = new Set();
+  for (const ln of s.loans || []) for (const id of ln.collateral?.hubCityIds || []) set.add(id);
+  return set;
+}
+// Live resale value of a piece of collateral right now (assets depreciate,
+// so this is recomputed fresh every time, not frozen at pledge time).
+function collateralAssetValue(s, kind, id) {
+  if (kind === 'truck') {
+    const t = s.trucks.find(x => x.id === id);
+    if (!t) return 0;
+    const model = modelById(t.modelId);
+    const wear = Math.min(0.45, (t.km / 200000) * 0.35 + (t.deliveries / 200) * 0.1);
+    return Math.round(model.price * (0.7 - wear));
+  }
+  if (kind === 'hub') {
+    const h = (s.hubs || []).find(x => x.cityId === id);
+    if (!h || h.hq) return 0;
+    return Math.round((h.cost || 0) * 0.5);
+  }
+  return 0;
+}
+export function collateralTotalValue(s, collateral) {
+  if (!collateral) return 0;
+  let total = 0;
+  for (const id of collateral.truckIds || []) total += collateralAssetValue(s, 'truck', id);
+  for (const id of collateral.hubCityIds || []) total += collateralAssetValue(s, 'hub', id);
+  return total;
 }
 
 // ---------- Custom Loan (slider-picked amount, v3.8.0) ----------
@@ -398,7 +447,7 @@ const WEATHER_REGIONS = [
 ];
 export function generateWeather(day) {
   let h = ((day + 7) * 2654435761) >>> 0; h = (h ^ (h >>> 15)) >>> 0;
-  const count = 3 + (h % 3); // 3–5 active zones
+  const count = 4 + (h % 4); // 4–7 active zones
   const zones = [];
   const used = new Set();
   for (let i = 0; i < count * 3 && zones.length < count; i++) {
@@ -1028,7 +1077,17 @@ export const useGame = create(
         // Living weather (v3.1.0): every ~7 real minutes each system breathes —
         // expands toward its peak, then contracts and dissipates; dead systems
         // are replaced by a fresh one somewhere else. Gentle, never jumpy.
-        if (now - (get().lastWeatherEvolveAt || 0) > 7 * 60 * 1000 && (get().weather || []).length) {
+        if (now - (get().lastWeatherEvolveAt || 0) > 30 * 60 * 1000 && (get().weather || []).length) {
+          // Long AFK gap — a single incremental evolve step would look stale
+          // (systems that should've died ages ago still lingering), so do a
+          // full regen instead of nudging.
+          const zones = generateWeather(day).map(z => ({
+            ...z, baseRadiusKm: z.radiusKm, born: now,
+            lifeMs: (20 + Math.random() * 25) * 60 * 1000,
+            drift: { dLat: (Math.random() - 0.5) * 0.5, dLng: (Math.random() - 0.5) * 0.5 },
+          }));
+          set({ weather: zones, lastWeatherEvolveAt: now });
+        } else if (now - (get().lastWeatherEvolveAt || 0) > 7 * 60 * 1000 && (get().weather || []).length) {
           const curZones = get().weather;
           let bornMsg = null;
           const evolved = curZones.map(z => {
@@ -1063,29 +1122,72 @@ export const useGame = create(
           set({ weather: evolved, lastWeatherEvolveAt: now });
           if (bornMsg) get().notify('system', 'weather-cloudy-alert', bornMsg);
         }
-        // Loan EMIs: charged every 30 game days per loan. A missed EMI dings
-        // the credit score and adds 5% penalty interest to what's left.
+        // Loan EMIs: charged every LOAN_EMI_INTERVAL_DAYS game days per loan.
+        // A missed EMI dings the credit score and adds 5% penalty interest to
+        // what's left; miss MISSED_STREAK_FOR_REPO in a row and the bank
+        // repossesses the cheapest pledged asset still standing.
         for (const ln of get().loans || []) {
-          if (day - (ln.lastEmiDay || 0) < 30) continue;
+          const sinceLast = day - (ln.lastEmiDay || 0);
+          if (sinceLast === LOAN_EMI_INTERVAL_DAYS - 1) {
+            get().notify('system', 'bank-clock', `EMI on ${ln.name} due tomorrow — ${inr(Math.min(ln.emi, ln.remaining))}.`);
+          }
+          if (sinceLast < LOAN_EMI_INTERVAL_DAYS) continue;
           const cur = get();
-          const due = Math.min(ln.emi, ln.remaining);
+          const curLoan = (cur.loans || []).find(x => x.id === ln.id);
+          if (!curLoan) continue;
+          const due = Math.min(curLoan.emi, curLoan.remaining);
           if (cur.balance >= due) {
-            const remaining = ln.remaining - due;
+            const remaining = curLoan.remaining - due;
             set({
               balance: cur.balance - due,
               credit: { ...cur.credit, paid: (cur.credit?.paid || 0) + 1 },
               loans: remaining <= 0
-                ? cur.loans.filter(x => x.id !== ln.id)
-                : cur.loans.map(x => x.id === ln.id ? { ...x, remaining, paidMonths: x.paidMonths + 1, lastEmiDay: day } : x),
+                ? cur.loans.filter(x => x.id !== curLoan.id)
+                : cur.loans.map(x => x.id === curLoan.id ? { ...x, remaining, paidMonths: x.paidMonths + 1, lastEmiDay: day, missedStreak: 0 } : x),
             });
-            get().logLedger('loan', 'bank', `EMI · ${ln.name}`, -due);
-            if (remaining <= 0) get().notify('system', 'bank-check', `${ln.name} fully repaid — credit score up!`);
+            get().logLedger('loan', 'bank', `EMI · ${curLoan.name}`, -due);
+            if (remaining <= 0) get().notify('system', 'bank-check', `${curLoan.name} fully repaid — credit score up!`);
           } else {
+            const missedStreak = (curLoan.missedStreak || 0) + 1;
             set({
               credit: { ...cur.credit, missed: (cur.credit?.missed || 0) + 1 },
-              loans: cur.loans.map(x => x.id === ln.id ? { ...x, remaining: Math.round(x.remaining * 1.05), lastEmiDay: day } : x),
+              loans: cur.loans.map(x => x.id === curLoan.id ? { ...x, remaining: Math.round(x.remaining * 1.05), lastEmiDay: day, missedStreak } : x),
             });
-            get().notify('system', 'bank-remove', `EMI missed on ${ln.name}! 5% penalty added and your credit score took a hit.`);
+            get().notify('system', 'bank-remove', `EMI missed on ${curLoan.name}! 5% penalty added and your credit score took a hit.`);
+            if (missedStreak >= MISSED_STREAK_FOR_REPO) {
+              const after = get();
+              const afterLoan = (after.loans || []).find(x => x.id === curLoan.id);
+              if (afterLoan) {
+                // Find the cheapest pledged asset still owned (never the last
+                // truck or the HQ hub).
+                const candidates = [];
+                for (const id of afterLoan.collateral?.truckIds || []) {
+                  if (after.trucks.length <= 1) continue;
+                  const t = after.trucks.find(x => x.id === id);
+                  if (t) candidates.push({ kind: 'truck', id, value: collateralAssetValue(after, 'truck', id), label: t.customName || modelById(t.modelId).name });
+                }
+                for (const id of afterLoan.collateral?.hubCityIds || []) {
+                  const h = (after.hubs || []).find(x => x.cityId === id);
+                  if (h && !h.hq) candidates.push({ kind: 'hub', id, value: collateralAssetValue(after, 'hub', id), label: h.name });
+                }
+                candidates.sort((a, b) => a.value - b.value);
+                const seized = candidates[0];
+                if (seized) {
+                  const remaining2 = Math.max(0, afterLoan.remaining - seized.value);
+                  set({
+                    trucks: seized.kind === 'truck' ? after.trucks.filter(x => x.id !== seized.id) : after.trucks,
+                    hubs: seized.kind === 'hub' ? after.hubs.filter(x => x.cityId !== seized.id) : after.hubs,
+                    loans: remaining2 <= 0
+                      ? after.loans.filter(x => x.id !== afterLoan.id)
+                      : after.loans.map(x => x.id === afterLoan.id ? { ...x, remaining: remaining2, missedStreak: 0 } : x),
+                  });
+                  get().logLedger('loan', 'bank-remove', `Repossessed · ${seized.label} (${afterLoan.name})`, seized.value);
+                  get().notify('system', 'bank-remove', `Bank repossessed ${seized.label} over missed EMIs on ${afterLoan.name} — ${inr(seized.value)} written off the loan.`);
+                }
+                // If no seizable asset remains, penalty interest keeps
+                // accruing as usual on the next miss — no crash, no loop.
+              }
+            }
           }
         }
         // Company level-ups: pay a one-time gold reward per level reached.
@@ -2157,7 +2259,29 @@ export const useGame = create(
 
       // ---------- bank & loans ----------
       creditScore() { return creditScoreOf(get().credit); },
-      takeLoan(productId) {
+      // Validate a proposed collateral pledge: enough value to cover
+      // COLLATERAL_COVERAGE of the amount, no double-pledging, no HQ.
+      _validateCollateral(amount, collateral) {
+        const s = get();
+        const col = collateral || { truckIds: [], hubCityIds: [] };
+        const pledgedTrucks = pledgedTruckIds(s);
+        const pledgedHubs = pledgedHubCityIds(s);
+        for (const id of col.truckIds || []) {
+          if (pledgedTrucks.has(id)) return { ok: false, err: 'One of the pledged trucks is already pledged on another loan' };
+        }
+        for (const id of col.hubCityIds || []) {
+          if (pledgedHubs.has(id)) return { ok: false, err: 'One of the pledged garages is already pledged on another loan' };
+          const h = (s.hubs || []).find(x => x.cityId === id);
+          if (h && h.hq) return { ok: false, err: 'Your HQ can’t be pledged as collateral' };
+        }
+        const value = collateralTotalValue(s, col);
+        const required = amount * COLLATERAL_COVERAGE;
+        if (value < required) {
+          return { ok: false, err: `Pledge more collateral — needs at least ${inr(Math.ceil(required - value))} more value` };
+        }
+        return { ok: true };
+      },
+      takeLoan(productId, collateral) {
         const s = get();
         const p = LOAN_PRODUCTS.find(x => x.id === productId);
         if (!p) return { ok: false, err: 'Unknown loan product' };
@@ -2165,23 +2289,27 @@ export const useGame = create(
         if ((s.loans || []).some(l => l.productId === productId)) return { ok: false, err: 'You already have this loan running' };
         const score = creditScoreOf(s.credit);
         if (score < p.minScore) return { ok: false, err: `Credit score too low — need ${p.minScore}, you have ${score}` };
+        const check = get()._validateCollateral(p.amount, collateral);
+        if (!check.ok) return check;
         const { day } = get().gameDay();
         const totalDue = Math.round(p.amount * (1 + p.apr));
         const loan = {
           id: uid('ln'), productId, name: p.name, principal: p.amount,
           remaining: totalDue, emi: Math.round(totalDue / p.months),
           months: p.months, paidMonths: 0, lastEmiDay: day, since: Date.now(),
+          collateral: { truckIds: [...(collateral?.truckIds || [])], hubCityIds: [...(collateral?.hubCityIds || [])] },
+          missedStreak: 0,
         };
         set({ balance: s.balance + p.amount, loans: [...(s.loans || []), loan] });
         get().logLedger('loan', 'bank-plus', `Loan disbursed · ${p.name}`, p.amount);
-        get().notify('system', 'bank-plus', `${p.name} approved! ${inr(p.amount)} credited. EMI ${inr(loan.emi)} every 30 days × ${p.months}.`);
+        get().notify('system', 'bank-plus', `${p.name} approved! ${inr(p.amount)} credited. EMI ${inr(loan.emi)} every ${LOAN_EMI_INTERVAL_DAYS} days × ${p.months}.`);
         play('coin', 0.9);
         return { ok: true, loan };
       },
       // Custom Loan: any slider-picked amount, terms computed live from the
       // amount + credit score (customLoanTerms) — same 2-loan cap and ledger
       // trail as the fixed catalog products.
-      takeCustomLoan(amount) {
+      takeCustomLoan(amount, collateral) {
         const s = get();
         const amt = Math.round(amount);
         if ((s.loans || []).length >= 2) return { ok: false, err: 'Maximum 2 active loans — repay one first' };
@@ -2189,17 +2317,51 @@ export const useGame = create(
         const max = customLoanMax(score);
         if (!amt || amt < CUSTOM_LOAN_MIN) return { ok: false, err: `Minimum loan is ${inr(CUSTOM_LOAN_MIN)}` };
         if (amt > max) return { ok: false, err: `Your credit score (${score}) caps custom loans at ${inr(max)}` };
+        const check = get()._validateCollateral(amt, collateral);
+        if (!check.ok) return check;
         const { day } = get().gameDay();
         const { apr, months, totalDue, emi } = customLoanTerms(amt, score);
         const loan = {
           id: uid('ln'), productId: 'custom', name: `Custom Loan (${inr(amt)})`, principal: amt,
           remaining: totalDue, emi, months, paidMonths: 0, lastEmiDay: day, since: Date.now(), apr,
+          collateral: { truckIds: [...(collateral?.truckIds || [])], hubCityIds: [...(collateral?.hubCityIds || [])] },
+          missedStreak: 0,
         };
         set({ balance: s.balance + amt, loans: [...(s.loans || []), loan] });
         get().logLedger('loan', 'bank-plus', `Loan disbursed · ${loan.name}`, amt);
-        get().notify('system', 'bank-plus', `${loan.name} approved! ${inr(amt)} credited. EMI ${inr(emi)} every 30 days × ${months}.`);
+        get().notify('system', 'bank-plus', `${loan.name} approved! ${inr(amt)} credited. EMI ${inr(emi)} every ${LOAN_EMI_INTERVAL_DAYS} days × ${months}.`);
         play('coin', 0.9);
         return { ok: true, loan };
+      },
+      // Partial repayment: pay down some of the remaining balance without
+      // settling the whole loan — recomputes paidMonths from what's left.
+      payLoanPartial(loanId, amount) {
+        const s = get();
+        const ln = (s.loans || []).find(x => x.id === loanId);
+        if (!ln) return { ok: false, err: 'Loan not found' };
+        const amt = Math.round(amount);
+        if (!amt || amt <= 0) return { ok: false, err: 'Enter an amount to repay' };
+        if (amt > s.balance) return { ok: false, err: `Need ${inr(amt)} in balance to repay this` };
+        if (amt > ln.remaining) return { ok: false, err: `Only ${inr(ln.remaining)} left owed on this loan` };
+        const remaining = ln.remaining - amt;
+        if (remaining <= 0) {
+          set({
+            balance: s.balance - amt,
+            loans: s.loans.filter(x => x.id !== loanId),
+            credit: { ...s.credit, paid: (s.credit?.paid || 0) + 1 },
+          });
+          get().logLedger('loan', 'bank-check', `Loan paid off · ${ln.name}`, -amt);
+          get().notify('system', 'bank-check', `${ln.name} fully repaid — credit score up!`);
+          return { ok: true };
+        }
+        const paidMonths = Math.max(0, Math.min(ln.months, ln.months - Math.ceil(remaining / ln.emi)));
+        set({
+          balance: s.balance - amt,
+          loans: s.loans.map(x => x.id === loanId ? { ...x, remaining, paidMonths } : x),
+        });
+        get().logLedger('loan', 'bank', `Partial repayment · ${ln.name}`, -amt);
+        get().notify('system', 'bank', `Paid ${inr(amt)} toward ${ln.name} — ${inr(remaining)} left.`);
+        return { ok: true };
       },
       // Early settlement: clear the outstanding balance at a 2% rebate.
       prepayLoan(loanId) {
