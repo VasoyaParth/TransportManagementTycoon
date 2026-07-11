@@ -1,7 +1,7 @@
 // Online Leaflet map (WebView). Mirrors the web version. Reports 'offline'
 // or a load timeout so MapContainer can fall back to the offline SVG map.
 import React, { useRef, useEffect, useMemo, useState, useCallback } from 'react';
-import { View, Pressable, Text, StyleSheet } from 'react-native';
+import { View, Pressable, Text, StyleSheet, AppState } from 'react-native';
 import { WebView } from 'react-native-webview';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { buildLeafletHtml } from './leafletHtml';
@@ -120,12 +120,20 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
   const inject = useCallback((js) => { if (ref.current) ref.current.injectJavaScript(js + '; true;'); }, []);
 
   // Push live truck/route state; ~animation cadence while delivering.
+  // PERF/HEAT: this used to keep ticking every 900ms even with the app
+  // backgrounded (screen off, home button) — the JS thread kept computing
+  // liveState() and pushing it into the WebView bridge for no visible
+  // benefit, burning battery/heat. Now it pauses the instant the app leaves
+  // the foreground and resumes exactly where it left off when it returns.
   useEffect(() => {
     if (!ready) return;
-    inject(`window.applyState(${JSON.stringify(liveState())})`);
-    if (!deliveries.length) return;
-    const iv = setInterval(() => inject(`window.applyState(${JSON.stringify(liveState())})`), 900);
-    return () => clearInterval(iv);
+    let iv = null;
+    const push = () => inject(`window.applyState(${JSON.stringify(liveState())})`);
+    const start = () => { push(); if (deliveries.length && !iv) iv = setInterval(push, 1100); };
+    const stop = () => { if (iv) { clearInterval(iv); iv = null; } };
+    start();
+    const sub = AppState.addEventListener('change', st => (st === 'active' ? start() : stop()));
+    return () => { stop(); sub.remove(); };
   }, [ready, deliveries.length, trucks.length, liveState, inject]);
 
   // Only show city dots for countries the player has unlocked.
@@ -246,9 +254,14 @@ const st = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.94)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6,
     borderWidth: 1, borderColor: C.border,
   },
+  // Sits BELOW the floating header pill + profile capsule (which occupy the
+  // top ~110px), not on top of them — it used to sit at the same top offset
+  // as the header and render behind it (Android elevation stacking), so the
+  // "tap a city" banner was invisible right when it mattered most.
   pickBanner: {
-    position: 'absolute', top: 12, alignSelf: 'center', flexDirection: 'row', alignItems: 'center',
+    position: 'absolute', top: 118, alignSelf: 'center', flexDirection: 'row', alignItems: 'center',
     backgroundColor: C.blue, borderRadius: 24, paddingHorizontal: 14, paddingVertical: 8,
+    shadowColor: '#0B0F14', shadowOpacity: 0.25, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 12,
   },
   pickTxt: { color: '#fff', fontWeight: '700', fontSize: 12.5, marginHorizontal: 4 },
 });

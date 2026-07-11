@@ -327,7 +327,9 @@ const st = StyleSheet.create({
     position: 'absolute', top: 10, left: 10, right: 10, flexDirection: 'row', alignItems: 'center',
     paddingLeft: 14, paddingRight: 4, paddingVertical: 6,
     backgroundColor: 'rgba(255,255,255,0.88)', borderRadius: 26,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.7)',
+    // No border here on purpose — a solid near-white 1px border against this
+    // background read as a stray bold horizontal line across the pill. The
+    // shadow alone gives it enough definition against the map.
     shadowColor: '#0B0F14', shadowOpacity: 0.16, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 8,
   },
   // Right-side vertical action stack (garage / contracts / power-ups).
