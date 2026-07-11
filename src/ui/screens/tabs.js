@@ -11,6 +11,7 @@ import {
   useGame, modelById, cargoById, GAME_HOUR_MS, staffMood,
   ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, EASTER_EGGS,
   LOAN_PRODUCTS, creditScoreOf, DRIVER_PERKS, driverLevel, driverXpForLevel,
+  CUSTOM_LOAN_MIN, customLoanMax, customLoanTerms,
   companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, WEEKLY_JACKPOT,
   STREAK_REWARDS, streakRewardFor,
 } from '../../store/gameStore';
@@ -929,9 +930,12 @@ function InsightRow({ icon, label, value, color = C.text, sub, divider }) {
 
 // Premium day-wise ledger book — every rupee in/out, grouped per game day
 // with a daily net subtotal, newest day first.
+const LEDGER_PAGE = 5; // days shown per "Show more" tap
 function LedgerSheet({ visible, onClose }) {
   const ledger = useGame(s => s.ledger || []);
   const tapLedgerEgg = useEasterEggTap('ledger_lord', 12);
+  const [page, setPage] = useState(1);
+  useEffect(() => { if (visible) setPage(1); }, [visible]);
   const groups = useMemo(() => {
     const m = new Map();
     for (const e of ledger) {
@@ -942,6 +946,7 @@ function LedgerSheet({ visible, onClose }) {
     }
     return [...m.values()].sort((a, b) => b.day - a.day);
   }, [ledger]);
+  const shownGroups = groups.slice(0, page * LEDGER_PAGE);
 
   return (
     <Sheet visible={visible} onClose={onClose} title="Company Ledger" height="88%">
@@ -964,7 +969,7 @@ function LedgerSheet({ visible, onClose }) {
         </Card>
         {groups.length === 0 ? (
           <EmptyState icon="notebook-outline" title="No entries yet" sub="Deliveries, salaries and every purchase will be booked here automatically." />
-        ) : groups.map(g => (
+        ) : shownGroups.map(g => (
           <View key={g.day} style={{ marginBottom: 14 }}>
             <Row style={{ justifyContent: 'space-between', marginBottom: 6, paddingHorizontal: 2 }}>
               <Row>
@@ -1002,6 +1007,10 @@ function LedgerSheet({ visible, onClose }) {
             </Card>
           </View>
         ))}
+        {shownGroups.length < groups.length && (
+          <Btn title={`Show more (${groups.length - shownGroups.length} more day${groups.length - shownGroups.length === 1 ? '' : 's'})`}
+            kind="soft" icon="chevron-down" onPress={() => setPage(p => p + 1)} />
+        )}
       </ScrollView>
     </Sheet>
   );
@@ -1015,13 +1024,19 @@ function BankSheet({ visible, onClose }) {
   const loans = useGame(s => s.loans || []);
   const credit = useGame(s => s.credit);
   const takeLoan = useGame(s => s.takeLoan);
+  const takeCustomLoan = useGame(s => s.takeCustomLoan);
   const prepayLoan = useGame(s => s.prepayLoan);
   const [confirm, setConfirm] = useState(null);
+  const [customAmt, setCustomAmt] = useState(500000); // slider default — exactly the ₹5L example
   useEffect(() => { if (!visible) setConfirm(null); }, [visible]);
   const score = creditScoreOf(credit);
   const scorePct = ((score - 300) / 600) * 100;
   const scoreColor = score >= 720 ? C.green : score >= 600 ? C.amber : C.red;
   const scoreLabel = score >= 780 ? 'Excellent' : score >= 720 ? 'Very Good' : score >= 650 ? 'Good' : score >= 600 ? 'Fair' : 'Poor';
+  const customMax = customLoanMax(score);
+  const customClamped = Math.min(Math.max(CUSTOM_LOAN_MIN, customAmt), customMax);
+  const customTerms = customLoanTerms(customClamped, score);
+  const canCustom = loans.length < 2;
 
   return (
     <Sheet visible={visible} onClose={onClose} title="Truck Empire Bank" height="88%">
@@ -1079,6 +1094,32 @@ function BankSheet({ visible, onClose }) {
             </Card>
           );
         })}
+
+        {/* Custom Loan — pick ANY amount on a slider instead of only the
+            fixed catalog tiers. Terms recompute live as you drag. */}
+        <SectionTitle icon="tune-variant" text="Custom Loan" />
+        <Card style={{ marginBottom: 10 }}>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <Text style={FONT.sub}>Borrow exactly what you need</Text>
+            <Text style={[FONT.h3, { color: C.green }]}>{inr(customClamped)}</Text>
+          </Row>
+          <GameSlider min={CUSTOM_LOAN_MIN} max={customMax} step={50000} value={customClamped} color={C.green}
+            onChange={setCustomAmt} minLabel={inrShort(CUSTOM_LOAN_MIN)} maxLabel={inrShort(customMax)} />
+          <Text style={[FONT.tiny, { marginTop: 4 }]}>Max scales with your credit score ({score}) — better score, bigger ceiling.</Text>
+          <Row style={{ marginTop: 10, backgroundColor: C.bgSoft, borderRadius: RADIUS.md, paddingVertical: 8, justifyContent: 'space-around' }}>
+            <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800' }]}>{Math.round(customTerms.apr * 100)}%</Text><Text style={FONT.tiny}>interest</Text></View>
+            <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800' }]}>{customTerms.months}</Text><Text style={FONT.tiny}>months</Text></View>
+            <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800' }]}>{inrShort(customTerms.emi)}</Text><Text style={FONT.tiny}>EMI / 30d</Text></View>
+            <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800' }]}>{inrShort(customTerms.totalDue)}</Text><Text style={FONT.tiny}>total repay</Text></View>
+          </Row>
+          <Btn
+            title={!canCustom ? 'Loan limit reached (2)' : confirm === 'custom' ? `Confirm — borrow ${inr(customClamped)}` : `Apply · repay ${inrShort(customTerms.totalDue)} total`}
+            kind={canCustom ? 'green' : 'soft'} disabled={!canCustom} style={{ marginTop: 10 }}
+            onPress={() => {
+              if (confirm === 'custom') { const r = takeCustomLoan(customClamped); toast(r.ok ? `Custom loan approved — ${inr(customClamped)} credited!` : r.err, r.ok ? 'success' : 'error'); setConfirm(null); }
+              else setConfirm('custom');
+            }} />
+        </Card>
 
         {/* Products */}
         <SectionTitle icon="cash-plus" text="Loan Products" />

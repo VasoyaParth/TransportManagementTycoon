@@ -83,6 +83,20 @@ function rollSlotSymbol() {
   for (const sym of SLOT_SYMBOLS) { roll -= sym.weight; if (roll <= 0) return sym; }
   return SLOT_SYMBOLS[0];
 }
+
+// Toll Gate Pick (v3.8.0) — replaces Slot Machine + Golden Convoy. Four toll
+// lanes, pick one; most pay a little gold, one lane is a dead lane (nothing),
+// and rarely a lane pays a CASH bonus instead of gold — the only free
+// mini-game that can hand out actual rupees, not just Gold.
+export const TOLL_LANES = [
+  { id: 'gold1', type: 'gold', amount: 2, weight: 30, icon: 'gold', label: '+2 Gold' },
+  { id: 'gold2', type: 'gold', amount: 4, weight: 22, icon: 'gold', label: '+4 Gold' },
+  { id: 'nothing', type: 'nothing', weight: 20, icon: 'close-circle-outline', label: 'Waved through — nothing' },
+  { id: 'gold3', type: 'gold', amount: 7, weight: 14, icon: 'gold', label: '+7 Gold' },
+  { id: 'cash1', type: 'cash', amount: 25000, weight: 9, icon: 'cash', label: '₹25K refund' },
+  { id: 'gold4', type: 'gold', amount: 12, weight: 4, icon: 'gold', label: '+12 Gold' },
+  { id: 'cash2', type: 'cash', amount: 75000, weight: 1, icon: 'cash-multiple', label: '₹75K jackpot refund' },
+];
 // International customs charged per border crossing (v1.4.0 expansion).
 const CUSTOMS_FEE_BASE = 15000;   // ₹ paperwork/duty per crossing
 const CUSTOMS_FEE_PER_TON = 800;  // ₹ per ton per crossing
@@ -269,16 +283,41 @@ const FLAVOR_CARGO = {
 // `months` monthly EMIs charged with the other monthly costs. Credit score
 // moves with on-time vs missed EMIs and gates the bigger products.
 export const LOAN_PRODUCTS = [
+  { id: 'micro', name: 'Micro Loan', icon: 'cash-fast', amount: 500000, apr: 0.10, months: 6, minScore: 0,
+    blurb: 'A quick top-up — fuel this week, a small repair, nothing fancy.' },
   { id: 'kickstart', name: 'Kickstart Loan', icon: 'rocket-launch-outline', amount: 2500000, apr: 0.12, months: 10, minScore: 0,
     blurb: 'A starter line of credit — fuel, hires, first garage.' },
   { id: 'fleet', name: 'Fleet Builder Loan', icon: 'truck-plus', amount: 10000000, apr: 0.15, months: 20, minScore: 600,
     blurb: 'Serious capital for serious rigs. Banks like a clean record.' },
   { id: 'empire', name: 'Empire Loan', icon: 'bank', amount: 50000000, apr: 0.18, months: 30, minScore: 720,
     blurb: 'Country unlocks, garage networks, the big leagues.' },
+  { id: 'titan', name: 'Titan Loan', icon: 'domain', amount: 150000000, apr: 0.20, months: 36, minScore: 800,
+    blurb: 'Continental expansion money. Only the banks’ best customers see this offer.' },
 ];
 export function creditScoreOf(credit) {
   const c = credit || { paid: 0, missed: 0 };
   return Math.max(300, Math.min(900, 650 + (c.paid || 0) * 8 - (c.missed || 0) * 45));
+}
+
+// ---------- Custom Loan (slider-picked amount, v3.8.0) ----------
+// Instead of only fixed catalog amounts, the player can pick ANY amount on a
+// slider — e.g. exactly ₹5,00,000 — and the terms scale smoothly with both
+// the amount (bigger = slightly pricier) and the player's credit score
+// (better score = cheaper + longer runway), computed live as they drag.
+export const CUSTOM_LOAN_MIN = 100000; // ₹1L floor
+export function customLoanMax(score) {
+  // Poor score (300) tops out around ₹25L; excellent score (900) opens up
+  // to ₹6Cr — same spirit as the fixed tiers' minScore gates, but continuous.
+  const f = Math.max(0, Math.min(1, (score - 300) / 600));
+  return Math.round((2500000 + f * 57500000) / 100000) * 100000;
+}
+export function customLoanTerms(amount, score) {
+  const f = Math.max(0, Math.min(1, (score - 300) / 600));
+  const sizeFactor = Math.max(0, Math.min(1, (amount - CUSTOM_LOAN_MIN) / (100000000 - CUSTOM_LOAN_MIN)));
+  const apr = Math.max(0.08, Math.min(0.22, 0.09 + sizeFactor * 0.09 - f * 0.05));
+  const months = 6 + Math.round(sizeFactor * 24) + Math.round(f * 6); // 6–36 months
+  const totalDue = Math.round(amount * (1 + apr));
+  return { apr, months, totalDue, emi: Math.round(totalDue / months) };
 }
 
 // ---------- Fuel price market ----------
@@ -1935,6 +1974,7 @@ export const useGame = create(
           convoyLeft: Math.max(0, DAILY_PLAYS - (g.convoyUsed || 0)),
           betLeft: Math.max(0, DAILY_PLAYS - (g.betUsed || 0)),
           plateLeft: Math.max(0, DAILY_PLAYS - (g.plateUsed || 0)),
+          tollLeft: Math.max(0, DAILY_PLAYS - (g.tollUsed || 0)),
           scratchUsed: g.scratchUsed, spinUsed: g.spinUsed, diceUsed: g.diceUsed || 0, slotUsed: g.slotUsed || 0, convoyUsed: g.convoyUsed || 0,
         };
       },
@@ -2048,6 +2088,25 @@ export const useGame = create(
         return { ok: true, reels, isJackpot, reward, message, left: t.slotLeft - 1 };
       },
 
+      // Toll Gate Pick (v3.8.0) — free daily game replacing Slot Machine +
+      // Golden Convoy. Pick 1 of 4 lanes; the lane's reward is decided up
+      // front (server-authoritative, like the other games) so the UI reveal
+      // never spoils it early.
+      playTollGate() {
+        const t = get().gamesToday();
+        if (t.tollLeft <= 0) return { ok: false, err: 'No toll lanes left today — come back tomorrow!' };
+        const total = TOLL_LANES.reduce((a, x) => a + x.weight, 0);
+        let roll = Math.random() * total, lane = TOLL_LANES[0];
+        for (const l of TOLL_LANES) { roll -= l.weight; if (roll <= 0) { lane = l; break; } }
+        get()._bumpGame('tollUsed');
+        if (lane.type === 'gold') set({ gold: get().gold + lane.amount });
+        else if (lane.type === 'cash') { set({ balance: get().balance + lane.amount }); get().logLedger('bonus', 'cash', 'Toll Gate refund', lane.amount); }
+        const message = lane.type === 'nothing' ? 'Toll Gate: waved straight through — nothing this time!'
+          : lane.type === 'cash' ? `Toll Gate: the operator hands back ${inr(lane.amount)}!`
+            : `Toll Gate: friendly wave and ${lane.label}!`;
+        return { ok: true, laneId: lane.id, lane, message, left: t.tollLeft - 1 };
+      },
+
       // High-Stakes Slots: the player picks a CASH bet with a slider, then the
       // same weighted reels spin. Three-of-a-kind pays bet × symbol jackpot,
       // a pair pays the bet back ×1.5, anything else loses the stake.
@@ -2116,6 +2175,29 @@ export const useGame = create(
         set({ balance: s.balance + p.amount, loans: [...(s.loans || []), loan] });
         get().logLedger('loan', 'bank-plus', `Loan disbursed · ${p.name}`, p.amount);
         get().notify('system', 'bank-plus', `${p.name} approved! ${inr(p.amount)} credited. EMI ${inr(loan.emi)} every 30 days × ${p.months}.`);
+        play('coin', 0.9);
+        return { ok: true, loan };
+      },
+      // Custom Loan: any slider-picked amount, terms computed live from the
+      // amount + credit score (customLoanTerms) — same 2-loan cap and ledger
+      // trail as the fixed catalog products.
+      takeCustomLoan(amount) {
+        const s = get();
+        const amt = Math.round(amount);
+        if ((s.loans || []).length >= 2) return { ok: false, err: 'Maximum 2 active loans — repay one first' };
+        const score = creditScoreOf(s.credit);
+        const max = customLoanMax(score);
+        if (!amt || amt < CUSTOM_LOAN_MIN) return { ok: false, err: `Minimum loan is ${inr(CUSTOM_LOAN_MIN)}` };
+        if (amt > max) return { ok: false, err: `Your credit score (${score}) caps custom loans at ${inr(max)}` };
+        const { day } = get().gameDay();
+        const { apr, months, totalDue, emi } = customLoanTerms(amt, score);
+        const loan = {
+          id: uid('ln'), productId: 'custom', name: `Custom Loan (${inr(amt)})`, principal: amt,
+          remaining: totalDue, emi, months, paidMonths: 0, lastEmiDay: day, since: Date.now(), apr,
+        };
+        set({ balance: s.balance + amt, loans: [...(s.loans || []), loan] });
+        get().logLedger('loan', 'bank-plus', `Loan disbursed · ${loan.name}`, amt);
+        get().notify('system', 'bank-plus', `${loan.name} approved! ${inr(amt)} credited. EMI ${inr(emi)} every 30 days × ${months}.`);
         play('coin', 0.9);
         return { ok: true, loan };
       },

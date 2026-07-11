@@ -10,7 +10,7 @@ import { buildQrFrames, createQrReceiver } from '../../net/qrBackup';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, CONVOY_SYMBOLS, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
@@ -1640,163 +1640,70 @@ function DiceGame({ toast }) {
   );
 }
 
-function SlotGame({ toast }) {
-  const playSlot = useGame(s => s.playSlot);
+function TollGateGame({ toast }) {
+  const playTollGate = useGame(s => s.playTollGate);
   const revealGameResult = useGame(s => s.revealGameResult);
   const games = useGame(s => s.games); // re-render on play
   const gamesToday = useGame(s => s.gamesToday);
-  const left = gamesToday().slotLeft;
-  const [spinning, setSpinning] = useState(false);
-  const [result, setResult] = useState(null);
-  const [display, setDisplay] = useState(['help', 'help', 'help']);
-
-  const doSpin = () => {
-    if (spinning) return;
-    const r = playSlot();
-    if (!r.ok) { toast(r.err, 'warn'); return; }
-    setSpinning(true); setResult(null);
-    let ticks = 0;
-    const iv = setInterval(() => {
-      ticks++;
-      setDisplay([0, 1, 2].map(() => SLOT_SYMBOLS[Math.floor(Math.random() * SLOT_SYMBOLS.length)].icon));
-      if (ticks > 8) {
-        clearInterval(iv);
-        setDisplay(r.reels.map(id => (SLOT_SYMBOLS.find(s => s.id === id) || {}).icon));
-        setSpinning(false); setResult(r);
-        // Reveal only after the reels stop — store stays silent until now.
-        revealGameResult('slot-machine', r.message);
-        haptic(r.isJackpot ? 'success' : r.reward > 0 ? 'medium' : 'light');
-        if (r.reward > 0) play('coin', 0.8);
-        toast(r.isJackpot ? 'JACKPOT!' : r.reward > 0 ? `Won +${r.reward} Gold` : 'No match — try again!', r.reward > 0 ? 'success' : 'info');
-      }
-    }, 90);
-  };
-
-  return (
-    <View style={{ alignItems: 'center' }}>
-      <Text style={[FONT.sub, { textAlign: 'center', marginBottom: 4 }]}>Spin 3 reels — three of a kind hits the jackpot, a pair pays a little.</Text>
-      <Text style={[FONT.tiny, { marginBottom: 14 }]}>{left} of {DAILY_PLAYS} free spins left today</Text>
-      <Row style={{ gap: 12, marginBottom: 16 }}>
-        {[0, 1, 2].map(i => (
-          <View key={i} style={{
-            width: 60, height: 60, borderRadius: 12, borderWidth: 2, borderColor: C.border,
-            alignItems: 'center', justifyContent: 'center', backgroundColor: C.bgSoft,
-          }}>
-            <Icon name={display[i] || 'help'} size={30} color={spinning ? C.faint : C.text} />
-          </View>
-        ))}
-      </Row>
-      <View style={{ minHeight: 30, alignItems: 'center' }}>
-        {result ? (
-          <Text style={[FONT.h3, { color: result.reward > 0 ? C.green : C.sub }]}>
-            {result.isJackpot ? 'JACKPOT! ' : ''}{result.reward > 0 ? `+${result.reward} Gold` : 'No match — try again!'}
-          </Text>
-        ) : null}
-      </View>
-      <Btn title={spinning ? 'Spinning…' : 'Spin the reels'} kind="green" icon="slot-machine" style={{ marginTop: 12, alignSelf: 'stretch' }}
-        disabled={spinning || left <= 0} onPress={doSpin} />
-      {left <= 0 ? <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 6 }]}>Come back tomorrow for 10 more.</Text> : null}
-    </View>
-  );
-}
-
-// Golden Convoy — pick 3 of 9 sealed shipping containers. Matching symbols
-// pay by tier (pair = value, three-of-a-kind = value ×3). Each tap flips a
-// container with a spring pop; the payout, sound and notification only land
-// after the third reveal, so nothing spoils the result early.
-function ConvoyCard({ revealed, symbol, onPress, disabled }) {
-  const flip = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.spring(flip, { toValue: revealed ? 1 : 0, useNativeDriver: true, speed: 14, bounciness: 9 }).start();
-  }, [revealed]);
-  const sym = symbol ? CONVOY_SYMBOLS.find(x => x.id === symbol) : null;
-  const scaleX = flip.interpolate({ inputRange: [0, 0.5, 1], outputRange: [1, 0.05, 1] });
-  return (
-    <Pressable onPress={onPress} disabled={disabled || revealed}>
-      <Animated.View style={[cs.convoyCard, { transform: [{ scaleX }] },
-        revealed && sym && { backgroundColor: sym.color, borderColor: sym.color }]}>
-        {revealed && sym
-          ? <><Icon name={sym.icon} size={30} color="#fff" /><Text style={cs.convoyVal}>{sym.value}G</Text></>
-          : <Icon name="package-variant-closed" size={30} color={C.faint} />}
-      </Animated.View>
-    </Pressable>
-  );
-}
-
-function ConvoyGame({ toast }) {
-  const playConvoy = useGame(s => s.playConvoy);
-  const claimConvoy = useGame(s => s.claimConvoy);
-  const revealGameResult = useGame(s => s.revealGameResult);
-  const games = useGame(s => s.games); // re-render on play
-  const gamesToday = useGame(s => s.gamesToday);
-  const left = gamesToday().convoyLeft;
-  const [board, setBoard] = useState(null);
-  const [picks, setPicks] = useState([]);
+  const left = gamesToday().tollLeft;
+  const [picking, setPicking] = useState(false);
+  const [chosen, setChosen] = useState(null); // lane index tapped
   const [result, setResult] = useState(null);
 
-  const start = () => {
-    const r = playConvoy();
-    if (!r.ok) { toast(r.err, 'warn'); return; }
-    haptic('medium');
-    setBoard(r.board); setPicks([]); setResult(null);
-  };
   const pick = (i) => {
-    if (!board || result || picks.includes(i) || picks.length >= 3) return;
-    haptic('light'); play('tap', 0.4);
-    const next = [...picks, i];
-    setPicks(next);
-    if (next.length === 3) {
-      // Let the third flip land before the payout reveal.
-      setTimeout(() => {
-        const r = claimConvoy(next);
-        if (!r.ok) { toast(r.err, 'error'); return; }
-        setResult(r);
-        revealGameResult('treasure-chest',
-          r.matched >= 3 ? `Golden Convoy: three of a kind → +${r.reward} Gold!`
-            : r.matched === 2 ? `Golden Convoy: a pair → +${r.reward} Gold.`
-              : `Golden Convoy: no match → +${r.reward} Gold consolation.`);
-        haptic(r.matched >= 3 ? 'success' : r.matched === 2 ? 'medium' : 'light');
-        toast(r.matched >= 3 ? `THREE OF A KIND! +${r.reward} Gold` : `+${r.reward} Gold`, r.matched >= 2 ? 'success' : 'info');
-      }, 450);
-    }
+    if (picking || result) return;
+    const r = playTollGate();
+    if (!r.ok) { toast(r.err, 'warn'); return; }
+    setPicking(true); setChosen(i);
+    setTimeout(() => {
+      setPicking(false); setResult(r);
+      revealGameResult(r.lane.icon, r.message);
+      haptic(r.lane.type === 'nothing' ? 'light' : r.lane.type === 'cash' ? 'success' : 'medium');
+      if (r.lane.type !== 'nothing') play('coin', 0.8);
+      toast(r.message, r.lane.type === 'nothing' ? 'info' : 'success');
+    }, 500);
   };
+  const again = () => { setChosen(null); setResult(null); };
 
   return (
     <View style={{ alignItems: 'center' }}>
       <Text style={[FONT.sub, { textAlign: 'center', marginBottom: 4 }]}>
-        Pick 3 of 9 sealed containers. A pair pays its tier, three of a kind pays triple — hunt the Golden Key (12G).
+        Pick a lane at the toll gate — most pay a little Gold, one lane waves you through empty, and rarely the operator hands back real cash.
       </Text>
-      <Text style={[FONT.tiny, { marginBottom: 12 }]}>{left} of {DAILY_PLAYS} free convoys left today</Text>
-      {board ? (
-        <View style={{ width: 258 }}>
-          <Row style={{ flexWrap: 'wrap', gap: 9, justifyContent: 'center' }}>
-            {board.map((symId, i) => (
-              <ConvoyCard key={i} revealed={picks.includes(i) || !!result} symbol={symId}
-                onPress={() => pick(i)} disabled={!!result || picks.length >= 3} />
-            ))}
-          </Row>
-          <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 10 }]}>
-            {result ? '' : `${3 - picks.length} pick${3 - picks.length === 1 ? '' : 's'} left`}
-          </Text>
-        </View>
-      ) : (
-        <View style={[cs.convoyIntro]}>
-          <Icon name="treasure-chest" size={44} color={C.gold} />
-        </View>
-      )}
-      <View style={{ minHeight: 28, alignItems: 'center' }}>
+      <Text style={[FONT.tiny, { marginBottom: 16 }]}>{left} of {DAILY_PLAYS} free lanes left today</Text>
+      <Row style={{ gap: 10, marginBottom: 16 }}>
+        {[0, 1, 2, 3].map(i => {
+          const isChosen = chosen === i;
+          const showResult = isChosen && result;
+          return (
+            <Pressable key={i} onPress={() => pick(i)} disabled={picking || !!result || left <= 0}
+              style={{
+                width: 58, height: 74, borderRadius: 12, borderWidth: 2,
+                borderColor: showResult ? (result.lane.type === 'nothing' ? C.border : C.green) : C.border,
+                backgroundColor: showResult ? (result.lane.type === 'nothing' ? C.bgSoft : C.greenSoft) : C.bgSoft,
+                alignItems: 'center', justifyContent: 'center', opacity: (result && !isChosen) ? 0.4 : 1,
+              }}>
+              <Icon name={isChosen && picking ? 'timer-sand' : showResult ? result.lane.icon : 'car-side'}
+                size={26} color={showResult ? (result.lane.type === 'nothing' ? C.faint : C.green) : C.sub} />
+              <Text style={[FONT.tiny, { marginTop: 4, fontWeight: '700' }]}>Lane {i + 1}</Text>
+            </Pressable>
+          );
+        })}
+      </Row>
+      <View style={{ minHeight: 30, alignItems: 'center' }}>
         {result ? (
-          <Text style={[FONT.h3, { color: result.matched >= 2 ? C.green : C.sub }]}>
-            {result.matched >= 3 ? 'THREE OF A KIND! ' : result.matched === 2 ? 'Pair! ' : ''}+{result.reward} Gold
-          </Text>
+          <Text style={[FONT.h3, { color: result.lane.type === 'nothing' ? C.sub : C.green }]}>{result.lane.label}</Text>
         ) : null}
       </View>
-      <Btn title={board && !result ? 'Picking…' : 'New convoy'} kind="green" icon="treasure-chest"
-        style={{ marginTop: 8, alignSelf: 'stretch' }} disabled={(board && !result) || left <= 0} onPress={start} />
+      {result ? (
+        <Btn title="Try another lane" kind="soft" icon="highway" style={{ marginTop: 8, alignSelf: 'stretch' }}
+          disabled={left <= 0} onPress={again} />
+      ) : null}
       {left <= 0 ? <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 6 }]}>Come back tomorrow for 10 more.</Text> : null}
     </View>
   );
 }
+
 
 // High-Stakes Slots — pick your CASH bet with a slider, spin the same weighted
 // reels. Three-of-a-kind pays bet × symbol multiplier (cherry ×2 … seven ×20),
@@ -1977,16 +1884,15 @@ export function MiniGamesModal({ visible, onClose }) {
           <Chip label="Scratch Card" icon="ticket-confirmation" active={tab === 'scratch'} onPress={() => setTab('scratch')} />
           <Chip label="Lucky Spin" icon="rotate-right" active={tab === 'spin'} onPress={() => setTab('spin')} />
           <Chip label="Dice Roll" icon="dice-multiple" active={tab === 'dice'} onPress={() => setTab('dice')} />
-          <Chip label="Slot Machine" icon="slot-machine" active={tab === 'slot'} onPress={() => setTab('slot')} />
-          <Chip label="Golden Convoy" icon="treasure-chest" active={tab === 'convoy'} onPress={() => setTab('convoy')} />
+          <Chip label="Toll Gate" icon="highway" color={C.green} active={tab === 'toll'} onPress={() => setTab('toll')} />
           <Chip label="High-Stakes" icon="slot-machine-outline" color={C.red} active={tab === 'bet'} onPress={() => setTab('bet')} />
           <Chip label="Lucky Plate" icon="card-text" color={C.gold} active={tab === 'plate'} onPress={() => setTab('plate')} />
         </Row>
       </ScrollView>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
         {tab === 'scratch' ? <ScratchGame toast={toast} /> : tab === 'spin' ? <SpinGame toast={toast} /> : tab === 'dice' ? <DiceGame toast={toast} />
-          : tab === 'slot' ? <SlotGame toast={toast} /> : tab === 'bet' ? <BetSlotGame toast={toast} />
-            : tab === 'plate' ? <PlateGame toast={toast} /> : <ConvoyGame toast={toast} />}
+          : tab === 'toll' ? <TollGateGame toast={toast} /> : tab === 'bet' ? <BetSlotGame toast={toast} />
+            : <PlateGame toast={toast} />}
       </ScrollView>
     </Sheet>
   );
