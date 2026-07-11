@@ -639,13 +639,119 @@ function RoutePreview({ points }) {
 }
 
 // ============ Truck Detail ============
-export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onShowOnMap }) {
+// Live portion of the truck modal, ISOLATED: only this panel re-renders on
+// the 1s tick. The old design ticked the entire modal — every card, SVG and
+// button rebuilt each second, which lagged the sheet and (worse) replaced
+// Pressables mid-touch after scrolling, leaving every button dead until an
+// app restart. Now the static 90% of the modal renders once per open.
+const TruckLivePanel = React.memo(function TruckLivePanel({ truckId }) {
   const toast = useToast();
   const trucks = useGame(s => s.trucks);
   const deliveries = useGame(s => s.deliveries);
+  const callMechanic = useGame(s => s.callMechanic);
+  const truck = trucks.find(t => t.id === truckId);
+  const d = truck ? deliveries.find(x => x.truckId === truck.id) : null;
+  useTick(!!truck && (truck.status === 'delivering' || truck.status === 'building'));
+  if (!truck) return null;
+  const m = modelById(truck.modelId);
+  const now = Date.now();
+  const eta = d ? fmtDur((d.endsAt - now) / 1000) : null;
+  const stopInfo = d ? deliveryStop(d, m, now) : null;
+  const totalKm = d ? d.route.roadKm : 0;
+  const kmCovered = d
+    ? (stopInfo?.stopped && stopInfo.atKm != null ? stopInfo.atKm : Math.round(totalKm * deliveryPhase(d, now).frac))
+    : 0;
+  const prog = d && totalKm > 0 ? Math.min(100, (kmCovered / totalKm) * 100) : 0;
+  const startFuel = d && d.startFuelPct != null ? d.startFuelPct : truck.fuelPct;
+  const arriveFuel = d && d.arriveFuelPct != null ? d.arriveFuelPct : startFuel;
+  const curFuel = d ? Math.max(3, Math.round(startFuel + (arriveFuel - startFuel) * (prog / 100))) : Math.round(truck.fuelPct);
+  const buildLeft = truck.status === 'building' ? Math.max(0, (truck.buildEndsAt - now) / 1000) : 0;
+  const buildPct = truck.status === 'building' ? 100 * (1 - buildLeft / truck.buildTotalSec) : 0;
+  const incident = d && d.incident;
+  const incidentLeft = incident ? Math.max(0, (incident.resolveAt - now) / 1000) : 0;
+  const doCallMechanic = () => { const r = callMechanic(d.id); toast(r.ok ? 'Mechanic on the way — delay cut short.' : r.err, r.ok ? 'success' : 'error'); };
+
+  return (
+    <>
+      {truck.status === 'delivering' && d && (
+        <Card style={{ marginBottom: 12 }}>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <Text style={FONT.h3}>{cityById(d.fromCityId)?.name} → {cityById(d.toCityId)?.name}</Text>
+            <Text style={[FONT.mono, { color: C.blue }]}>ETA {eta}</Text>
+          </Row>
+          <Progress pct={prog} color={C.green} style={{ marginTop: 8 }} />
+          <Row style={{ justifyContent: 'space-between', marginTop: 4 }}>
+            <Text style={FONT.tiny}>{kmCovered} / {totalKm} km</Text>
+            <Text style={FONT.tiny}>{Math.round(prog)}%</Text>
+          </Row>
+          <Row style={{ marginTop: 10 }}>
+            <Gauge value={stopInfo.stopped ? 0 : liveSpeed(m.speed, truck.id)} max={Math.round(m.speed * 1.15)}
+              label="Speed" unit="km/h" color={stopInfo.stopped ? C.amber : C.green} />
+            <Gauge value={curFuel} max={100} label={m.propulsion === 'electric' ? 'Charge' : 'Fuel'} unit="%"
+              color={curFuel > 50 ? C.green : curFuel > 20 ? C.amber : C.red} />
+          </Row>
+          {stopInfo.stopped && (
+            <Row style={{ marginTop: 8, backgroundColor: C.amberSoft, borderRadius: RADIUS.md, padding: 8 }}>
+              <Icon name="pause-circle-outline" size={14} color={C.amber} />
+              <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.text }]}>Truck halted — {stopInfo.label}.</Text>
+            </Row>
+          )}
+        </Card>
+      )}
+
+      {truck.status === 'delivering' && d && (
+        <Card style={{ marginBottom: 12 }}>
+          <Row style={{ justifyContent: 'space-between', marginBottom: 10 }}>
+            <Text style={FONT.h3}>Shipment Tracking</Text>
+            <Row style={{ gap: 10 }}>
+              <Row><Icon name="sleep" size={13} color={C.blue} /><Text style={[FONT.tiny, { marginLeft: 3 }]}>{d.sleepBreaks || 0} sleep</Text></Row>
+              <Row><Icon name="coffee-outline" size={13} color={C.sub} /><Text style={[FONT.tiny, { marginLeft: 3 }]}>{d.shortBreaks || 0} short</Text></Row>
+              <Row><Icon name="gas-station" size={13} color={C.amber} /><Text style={[FONT.tiny, { marginLeft: 3 }]}>{d.refuelCount || (d.stops || []).length || 0} fuel</Text></Row>
+            </Row>
+          </Row>
+          <JourneyTracker delivery={d} model={m} />
+        </Card>
+      )}
+
+      {truck.status === 'building' && (
+        <Card style={{ marginBottom: 12 }}>
+          <Row style={{ justifyContent: 'space-between' }}><Text style={FONT.h3}>Building...</Text><Text style={FONT.mono}>{fmtClock(buildLeft)}</Text></Row>
+          <Progress pct={buildPct} color={C.amber} style={{ marginTop: 8 }} />
+        </Card>
+      )}
+
+      {incident && (() => {
+        const im = incidentMeta(incident.type);
+        return (
+          <Card style={{ marginBottom: 12, borderColor: im.color }}>
+            <Row>
+              <Icon name={im.icon} size={16} color={im.color} />
+              <Text style={[FONT.body, { color: im.color, marginLeft: 6, fontWeight: '700' }]}>{im.title}</Text>
+            </Row>
+            <Text style={[FONT.tiny, { marginTop: 6 }]}>
+              {incident.penalty > 0 ? `Lost ${inr(incident.penalty)} already. ` : ''}
+              {incident.mechanicCalled ? 'Mechanic dispatched — ' : ''}Back on the road in ~{fmtDur(incidentLeft)}.
+            </Text>
+            {im.mechanic && !incident.mechanicCalled ? (
+              <Btn title="Call Mechanic" kind="blue" small icon="wrench" onPress={doCallMechanic} style={{ marginTop: 10 }} />
+            ) : !im.mechanic ? (
+              <Row style={{ marginTop: 8 }}>
+                <Icon name="information-outline" size={12} color={C.sub} />
+                <Text style={[FONT.tiny, { marginLeft: 4, flex: 1 }]}>Nothing to repair — the delivery continues automatically after the delay.</Text>
+              </Row>
+            ) : null}
+          </Card>
+        );
+      })()}
+    </>
+  );
+});
+
+export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onShowOnMap }) {
+  const toast = useToast();
+  const trucks = useGame(s => s.trucks);
   const repairTruck = useGame(s => s.repairTruck);
   const serviceTruck = useGame(s => s.serviceTruck);
-  const callMechanic = useGame(s => s.callMechanic);
   const customizeTruck = useGame(s => s.customizeTruck);
   const sellTruck = useGame(s => s.sellTruck);
   const truckResale = useGame(s => s.truckResale);
@@ -653,44 +759,24 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
   const [histAll, setHistAll] = useState(false);
   useEffect(() => { if (!visible) { setConfirmSell(false); setHistAll(false); } }, [visible]);
   const truck = trucks.find(t => t.id === truckId);
-  useTick(visible && !!truck && (truck.status === 'delivering' || truck.status === 'building'));
-  if (!truck) return <Sheet visible={visible} onClose={onClose} title="Truck" height="50%"><View /></Sheet>;
+  if (!visible || !truck) return <Sheet visible={visible && !!truck} onClose={onClose} title="Truck" height="50%"><View /></Sheet>;
+  // Everything below renders ONCE per open (plus on real state changes) —
+  // no per-second tick here; live data lives inside <TruckLivePanel/>.
   const m = modelById(truck.modelId);
   const meta = statusMeta[truck.status];
-  const d = deliveries.find(x => x.truckId === truck.id);
-  const now = Date.now();
-  const eta = d ? fmtDur((d.endsAt - now) / 1000) : null;
-  // Distance & fuel are PHASE-aware: pinned at 0 while loading, frozen at each
-  // halt (breaks, refuels, incidents), at 100% while unloading — never creeping
-  // up on raw elapsed time while the truck is stood still.
-  const stopInfo = d ? deliveryStop(d, m, now) : null;
-  const totalKm = d ? d.route.roadKm : 0;
-  const kmCovered = d
-    ? (stopInfo?.stopped && stopInfo.atKm != null ? stopInfo.atKm : Math.round(totalKm * deliveryPhase(d, now).frac))
-    : 0;
-  const prog = d && totalKm > 0 ? Math.min(100, (kmCovered / totalKm) * 100) : 0;
-  // Live fuel drains with distance actually driven (not with waiting time).
-  const startFuel = d && d.startFuelPct != null ? d.startFuelPct : truck.fuelPct;
-  const arriveFuel = d && d.arriveFuelPct != null ? d.arriveFuelPct : startFuel;
-  const curFuel = d ? Math.max(3, Math.round(startFuel + (arriveFuel - startFuel) * (prog / 100))) : Math.round(truck.fuelPct);
-  const buildLeft = truck.status === 'building' ? Math.max(0, (truck.buildEndsAt - now) / 1000) : 0;
-  const buildPct = truck.status === 'building' ? 100 * (1 - buildLeft / truck.buildTotalSec) : 0;
-  // Repair/service bills honour the mechanic-skill workshop discount.
   const mechDisc = useGame.getState().mechDiscount();
   const fee = Math.round(m.price * 0.04 * (1 - mechDisc));
   const condition = Math.round(truck.condition == null ? 100 : truck.condition);
   const conditionColor = condition >= 70 ? C.green : condition >= 40 ? C.amber : C.red;
   const serviceCost = Math.round(m.price * 0.05 * (1 - mechDisc));
-  const incident = d && d.incident;
-  const incidentLeft = incident ? Math.max(0, (incident.resolveAt - now) / 1000) : 0;
+  const fuelNow = Math.round(truck.fuelPct);
 
   const doRepair = (gold) => { const r = repairTruck(truck.id, gold); toast(r.ok ? 'Repaired!' : r.err, r.ok ? 'success' : 'error'); };
   const doService = () => { const r = serviceTruck(truck.id); toast(r.ok ? 'Serviced — condition restored!' : r.err, r.ok ? 'success' : 'error'); };
-  const doCallMechanic = () => { const r = callMechanic(d.id); toast(r.ok ? 'Mechanic on the way — delay cut short.' : r.err, r.ok ? 'success' : 'error'); };
 
   return (
     <Sheet visible={visible} onClose={onClose} title={truck.customName || m.name} height="86%">
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" removeClippedSubviews={false}>
         <Row style={{ marginBottom: 12 }}>
           <TruckArtBadge model={m} color={truck.color} size={60} bg={meta.bg} />
           <View style={{ marginLeft: 12, flex: 1 }}>
@@ -700,87 +786,9 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
           </View>
         </Row>
 
-        {truck.status === 'delivering' && d && (
-          <Card style={{ marginBottom: 12 }}>
-            <Row style={{ justifyContent: 'space-between' }}>
-              <Text style={FONT.h3}>{cityById(d.fromCityId)?.name} → {cityById(d.toCityId)?.name}</Text>
-              <Text style={[FONT.mono, { color: C.blue }]}>ETA {eta}</Text>
-            </Row>
-            <Progress pct={prog} color={C.green} style={{ marginTop: 8 }} />
-            <Row style={{ justifyContent: 'space-between', marginTop: 4 }}>
-              <Text style={FONT.tiny}>{kmCovered} / {totalKm} km</Text>
-              <Text style={FONT.tiny}>{Math.round(prog)}%</Text>
-            </Row>
-            {/* Live gauges — speed varies realistically while driving, and drops
-                to 0 whenever the truck is actually halted (loading, unloading,
-                ferry, incident, refuelling, driver breaks). */}
-            {(() => {
-              const stop = stopInfo;
-              return (
-                <>
-                  <Row style={{ marginTop: 10 }}>
-                    <Gauge value={stop.stopped ? 0 : liveSpeed(m.speed, truck.id)} max={Math.round(m.speed * 1.15)}
-                      label="Speed" unit="km/h" color={stop.stopped ? C.amber : C.green} />
-                    <Gauge value={curFuel} max={100} label={m.propulsion === 'electric' ? 'Charge' : 'Fuel'} unit="%"
-                      color={curFuel > 50 ? C.green : curFuel > 20 ? C.amber : C.red} />
-                  </Row>
-                  {stop.stopped && (
-                    <Row style={{ marginTop: 8, backgroundColor: C.amberSoft, borderRadius: RADIUS.md, padding: 8 }}>
-                      <Icon name="pause-circle-outline" size={14} color={C.amber} />
-                      <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.text }]}>Truck halted — {stop.label}.</Text>
-                    </Row>
-                  )}
-                </>
-              );
-            })()}
-          </Card>
-        )}
+        {/* Live trip / build / incident — the ONLY part that ticks */}
+        <TruckLivePanel truckId={truck.id} />
 
-        {/* Amazon-style route tracker */}
-        {truck.status === 'delivering' && d && (
-          <Card style={{ marginBottom: 12 }}>
-            <Row style={{ justifyContent: 'space-between', marginBottom: 10 }}>
-              <Text style={FONT.h3}>Shipment Tracking</Text>
-              <Row style={{ gap: 10 }}>
-                <Row><Icon name="sleep" size={13} color={C.blue} /><Text style={[FONT.tiny, { marginLeft: 3 }]}>{d.sleepBreaks || 0} sleep</Text></Row>
-                <Row><Icon name="coffee-outline" size={13} color={C.sub} /><Text style={[FONT.tiny, { marginLeft: 3 }]}>{d.shortBreaks || 0} short</Text></Row>
-                <Row><Icon name="gas-station" size={13} color={C.amber} /><Text style={[FONT.tiny, { marginLeft: 3 }]}>{d.refuelCount || (d.stops || []).length || 0} fuel</Text></Row>
-              </Row>
-            </Row>
-            <JourneyTracker delivery={d} model={m} />
-          </Card>
-        )}
-        {truck.status === 'building' && (
-          <Card style={{ marginBottom: 12 }}>
-            <Row style={{ justifyContent: 'space-between' }}><Text style={FONT.h3}>Building...</Text><Text style={FONT.mono}>{fmtClock(buildLeft)}</Text></Row>
-            <Progress pct={buildPct} color={C.amber} style={{ marginTop: 8 }} />
-          </Card>
-        )}
-        {incident && (() => {
-          const im = incidentMeta(incident.type);
-          return (
-            <Card style={{ marginBottom: 12, borderColor: im.color }}>
-              <Row>
-                <Icon name={im.icon} size={16} color={im.color} />
-                <Text style={[FONT.body, { color: im.color, marginLeft: 6, fontWeight: '700' }]}>{im.title}</Text>
-              </Row>
-              <Text style={[FONT.tiny, { marginTop: 6 }]}>
-                {incident.penalty > 0 ? `Lost ${inr(incident.penalty)} already. ` : ''}
-                {incident.mechanicCalled ? 'Mechanic dispatched — ' : ''}Back on the road in ~{fmtDur(incidentLeft)}.
-              </Text>
-              {/* Mechanic only for physical breakdowns — theft/checkpost/weather
-                  can't be "repaired", the driver just rides it out. */}
-              {im.mechanic && !incident.mechanicCalled ? (
-                <Btn title="Call Mechanic" kind="blue" small icon="wrench" onPress={doCallMechanic} style={{ marginTop: 10 }} />
-              ) : !im.mechanic ? (
-                <Row style={{ marginTop: 8 }}>
-                  <Icon name="information-outline" size={12} color={C.sub} />
-                  <Text style={[FONT.tiny, { marginLeft: 4, flex: 1 }]}>Nothing to repair — the delivery continues automatically after the delay.</Text>
-                </Row>
-              ) : null}
-            </Card>
-          );
-        })()}
         {truck.status === 'broken' && (
           <Card style={{ marginBottom: 12, borderColor: C.red }}>
             <Row><Icon name="alert" size={16} color={C.red} /><Text style={[FONT.body, { color: C.red, marginLeft: 6, fontWeight: '700' }]}>This truck needs repair.</Text></Row>
@@ -811,23 +819,19 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
             ? <SpecRow icon="battery-high" label="Battery" value={`${m.battery} kWh`} />
             : <SpecRow icon="fuel" label="Fuel tank" value={`${m.tank} L`} />}
           <SpecRow icon="map-marker-distance" label="Full range" value={`${m.range} km`} />
-          <SpecRow icon="fuel" label={m.propulsion === 'electric' ? 'Charge now' : 'Fuel now'}
-            value={`${curFuel}% · ~${Math.round((curFuel / 100) * m.range)} km left`} />
+          <SpecRow icon="fuel" label={m.propulsion === 'electric' ? 'Charge (at last stop)' : 'Fuel (at last stop)'}
+            value={`${fuelNow}% · ~${Math.round((fuelNow / 100) * m.range)} km`} />
           <SpecRow icon="wrench" label="Maintenance" value={`${inr(m.maint)}/km`} />
           <SpecRow icon="cash" label="Purchase price" value={inr(m.price)} />
         </Card>
 
         <Card style={{ marginTop: 10 }}>
           <Text style={[FONT.h3, { marginBottom: 4 }]}>Lifetime</Text>
-          <SpecRow icon="map-marker-path" label="Distance driven"
-            value={`${Math.round(truck.km + kmCovered).toLocaleString()} km${d ? ` (+${kmCovered} in progress)` : ''}`} />
-          <SpecRow icon="package-variant-closed-check" label="Deliveries"
-            value={d ? `${truck.deliveries} (+1 in progress · ${Math.round(prog)}%)` : truck.deliveries} />
+          <SpecRow icon="map-marker-path" label="Distance driven" value={`${Math.round(truck.km).toLocaleString()} km`} />
+          <SpecRow icon="package-variant-closed-check" label="Deliveries" value={truck.deliveries} />
           <SpecRow icon="map-marker" label="Location" value={cityById(truck.cityId)?.name || '—'} />
         </Card>
 
-        {/* This truck's own route history — every completed trip (up to the
-            last 100), 5 shown initially with a Show-more expander. */}
         {(truck.log || []).length > 0 && (() => {
           const log = truck.log || [];
           const shownLog = histAll ? log : log.slice(0, 5);
@@ -907,7 +911,6 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
           {truck.status === 'parked' && <Btn title="New Delivery" kind="green" icon="truck-fast" style={{ flex: 1 }} onPress={() => { onClose(); onNewDelivery(truck.id); }} />}
           <Btn title="Show on Map" kind="soft" icon="crosshairs-gps" style={{ flex: 1 }} onPress={() => onShowOnMap(truck)} />
         </Row>
-        {/* Sell truck — depreciated resale value */}
         {(truck.status === 'parked' || truck.status === 'broken') && (
           <Btn
             title={confirmSell ? `Confirm sell for ${inr(truckResale(truck.id))}?` : `Sell Truck · ${inr(truckResale(truck.id))}`}
