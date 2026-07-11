@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Native launch screen: the splash-navy brand background with the truck
+     app icon centered — shown by the OS the instant the app is tapped, so
+     the player never sees a gray (or plain) window. The JS splash screen
+     (same navy, same logo) then takes over seamlessly. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/splash_bg" />
+    <item
+        android:width="128dp"
+        android:height="128dp"
+        android:gravity="center"
+        android:drawable="@mipmap/ic_launcher_round" />
+</layer-list>

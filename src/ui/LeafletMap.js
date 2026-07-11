@@ -45,12 +45,18 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
     stations: STATION_DATA,
     hubs: hubData(),
     ports: PORT_DATA,
+    ferryArt: ferrySvgString(), // constant RO-RO ship art — sent once, not per truck per tick
     // Persisted port visibility — "off" stays off across restarts.
     portsOn: useGame.getState().settings?.showPorts !== false,
   }), []);
 
   const html = useMemo(() => buildLeafletHtml(initial), [initial]);
 
+  // PERF: per-truck art cache — the SVG art string only crosses the WebView
+  // bridge when its inputs (body/color/status/lights) actually change, not on
+  // every 900ms animation tick. Cuts bridge traffic ~20× on a big fleet,
+  // which is the main phone-heat source during long play sessions.
+  const artKeys = useRef({});
   const liveState = useCallback(() => {
     const now = Date.now();
     const tk = trucks.map(t => {
@@ -82,9 +88,14 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
       const night = isNightHour(new Date().getHours());
       const lights = night && t.status === 'delivering' ? headlightFor(model) : null;
       const dims = truckShapes(bt, color, accent, { lights });
+      const artKey = `${bt}|${color}|${accent}|${lights ? 1 : 0}`;
+      const artChanged = artKeys.current[t.id] !== artKey;
+      if (artChanged) artKeys.current[t.id] = artKey;
       return { id: t.id, lat, lng, heading, status: t.status, statusLabel: meta.label, color,
-        art: truckSvgString(bt, color, accent, { lights }), artW: dims.w, artH: dims.h, bodyH: dims.bodyH,
-        ferryArt: ferrySvgString(), ferryOn, ferryLoading, phase, incidentType: (d && d.incident && d.incident.type) || null,
+        // art omitted when unchanged — the WebView reuses its cached copy.
+        art: artChanged ? truckSvgString(bt, color, accent, { lights }) : undefined,
+        artW: dims.w, artH: dims.h, bodyH: dims.bodyH,
+        ferryOn, ferryLoading, phase, incidentType: (d && d.incident && d.incident.type) || null,
         fuelPct: Math.round(t.fuelPct), name: t.customName || model.name };
     });
     // Split each route's sea (ferry) legs out as separate polylines so water
