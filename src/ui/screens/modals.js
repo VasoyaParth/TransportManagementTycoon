@@ -10,7 +10,8 @@ import { buildQrFrames, createQrReceiver } from '../../net/qrBackup';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds, stockYearReturn, stockReturnOverDays, STOCK_TIMEFRAMES,
+  liveStockPrice, isMarketOpen, fakeTradeFor, STARTUP_SOUNDS } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
@@ -2774,6 +2775,23 @@ export function SettingsModal({ visible, onClose, initialTab }) {
               </Row>
               <GameSlider min={0} max={100} step={5} value={Math.round((settings.sfxVolume ?? 1) * 100)}
                 onChange={v => saveSettings({ sfxVolume: v / 100 })} minLabel="0%" maxLabel="100%" />
+              <Text style={[FONT.tiny, { marginTop: 14, marginBottom: 6 }]}>STARTUP SOUND — plays once each time you open the game</Text>
+              <Row style={{ gap: 6, flexWrap: 'wrap' }}>
+                {STARTUP_SOUNDS.map(o => (
+                  <Chip key={o.key} label={o.label} active={(settings.startupSound || 'start') === o.key}
+                    onPress={() => { saveSettings({ startupSound: o.key }); if (o.key !== 'off') play(o.key, settings.startupVolume ?? 0.7); }} />
+                ))}
+              </Row>
+              {(settings.startupSound || 'start') !== 'off' ? (
+                <>
+                  <Row style={{ justifyContent: 'space-between', marginTop: 10 }}>
+                    <Text style={FONT.tiny}>STARTUP VOLUME</Text>
+                    <Text style={[FONT.tiny, { fontWeight: '800', color: C.blue }]}>{Math.round((settings.startupVolume ?? 0.7) * 100)}%</Text>
+                  </Row>
+                  <GameSlider min={0} max={100} step={5} value={Math.round((settings.startupVolume ?? 0.7) * 100)}
+                    onChange={v => saveSettings({ startupVolume: v / 100 })} minLabel="0%" maxLabel="100%" />
+                </>
+              ) : null}
             </Card>
             <SectionTitle icon="vibrate" text="Vibration" />
             <Card>
@@ -3843,6 +3861,55 @@ export function NewsModal({ visible, onClose }) {
           ));
         })()}
 
+        {/* Market Watch — the exchange's own ticker: today's biggest mover
+            and any freshly-listed IPO, so the stock market feels like part
+            of the same news wire instead of a separate silo. */}
+        {(state.stocks || []).length > 0 ? (() => {
+          if (hidden) return null;
+          const stocks = state.stocks;
+          let top = stocks[0], bottom = stocks[0];
+          for (const st of stocks) {
+            const r = stockYearReturn(st);
+            if (r > stockYearReturn(top)) top = st;
+            if (r < stockYearReturn(bottom)) bottom = st;
+          }
+          const founded = stocks.filter(st => st.founder === 'player').slice(-3);
+          return (
+            <>
+              <SectionTitle icon="finance" text="Market Watch" />
+              <Card style={{ marginBottom: 6, padding: 10, borderLeftWidth: 3, borderLeftColor: C.green }}>
+                <Row style={{ alignItems: 'flex-start' }}>
+                  <Icon name="trending-up" size={16} color={C.green} style={{ marginTop: 1 }} />
+                  <View style={{ marginLeft: 8, flex: 1 }}>
+                    <Text style={[FONT.tiny, { fontWeight: '900', color: C.green, fontSize: 9, letterSpacing: 0.5 }]}>TOP GAINER</Text>
+                    <Text style={FONT.body} numberOfLines={2}>{top.name} is up {Math.round(stockYearReturn(top) * 100)}% this year — trading at {inr(top.price)}.</Text>
+                  </View>
+                </Row>
+              </Card>
+              <Card style={{ marginBottom: 6, padding: 10, borderLeftWidth: 3, borderLeftColor: C.red }}>
+                <Row style={{ alignItems: 'flex-start' }}>
+                  <Icon name="trending-down" size={16} color={C.red} style={{ marginTop: 1 }} />
+                  <View style={{ marginLeft: 8, flex: 1 }}>
+                    <Text style={[FONT.tiny, { fontWeight: '900', color: C.red, fontSize: 9, letterSpacing: 0.5 }]}>TOP LOSER</Text>
+                    <Text style={FONT.body} numberOfLines={2}>{bottom.name} is down {Math.round(Math.abs(stockYearReturn(bottom)) * 100)}% this year — now {inr(bottom.price)}.</Text>
+                  </View>
+                </Row>
+              </Card>
+              {founded.map(st => (
+                <Card key={st.id} style={{ marginBottom: 6, padding: 10, borderLeftWidth: 3, borderLeftColor: C.gold }}>
+                  <Row style={{ alignItems: 'flex-start' }}>
+                    <Icon name="rocket-launch" size={16} color={C.gold} style={{ marginTop: 1 }} />
+                    <View style={{ marginLeft: 8, flex: 1 }}>
+                      <Text style={[FONT.tiny, { fontWeight: '900', color: '#C0161C', fontSize: 9, letterSpacing: 0.5 }]}>IPO WATCH</Text>
+                      <Text style={FONT.body} numberOfLines={2}>{st.name} debuted on the exchange, founded by {state.company?.name} — now trading at {inr(st.price)}.</Text>
+                    </View>
+                  </Row>
+                </Card>
+              ))}
+            </>
+          );
+        })() : null}
+
         {/* World events */}
         {events.length > 0 && (
           <>
@@ -3868,6 +3935,385 @@ export function NewsModal({ visible, onClose }) {
           <Text style={[FONT.tiny, { marginTop: 6 }]}>— Apna News desk. 100% unverified, 200% confident. Tera kya jata?</Text>
         </Card>
       </ScrollView>
+    </Sheet>
+  );
+}
+
+// ============================== STOCK MARKET ==============================
+function LoadMore({ shown, total, onMore }) {
+  if (shown >= total) return null;
+  return (
+    <Pressable onPress={onMore} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, marginTop: 2, borderRadius: 22, borderWidth: 1, borderColor: C.border, backgroundColor: C.bgSoft }}>
+      <Icon name="chevron-down" size={16} color={C.blue} />
+      <Text style={{ color: C.blue, fontWeight: '700', marginLeft: 4 }}>Show more ({total - shown})</Text>
+    </Pressable>
+  );
+}
+
+// A candle/line chart built from a stock's daily-close history — synthetic
+// OHLC per point (deterministic jitter from the point's own values, not
+// stored) so candles look real without doubling the persisted data.
+function StockChart({ stock, days, mode, tf, now }) {
+  const W = 320, H = 140, PAD = 6;
+  let points;
+  if (tf?.live) {
+    // Live 1H/3H windows are synthesized from the same deterministic jitter
+    // curve the ticker uses — sampled every ~5 minutes across the window —
+    // so the chart and the live price on screen always agree.
+    const windowMs = tf.hours * 3600 * 1000;
+    const steps = 24;
+    points = Array.from({ length: steps + 1 }, (_, i) => {
+      const t = now - windowMs + (windowMs * i) / steps;
+      return { day: t, price: liveStockPrice(stock, t) };
+    });
+  } else {
+    const hist = stock.history || [];
+    const nowDay = hist.length ? hist[hist.length - 1].day : 1;
+    const cutoff = nowDay - days;
+    points = hist.filter(h => h.day > cutoff);
+    if (points.length < 2) points = hist.slice(-2);
+  }
+  if (points.length < 2) points = [{ day: 0, price: stock.price }, { day: 1, price: stock.price }];
+
+  const prices = points.map(p => p.price);
+  const min = Math.min(...prices), max = Math.max(...prices);
+  const span = Math.max(0.01, max - min);
+  const x = i => PAD + (i / Math.max(1, points.length - 1)) * (W - PAD * 2);
+  const y = v => H - PAD - ((v - min) / span) * (H - PAD * 2);
+  const up = points[points.length - 1].price >= points[0].price;
+  const color = up ? C.green : C.red;
+
+  if (mode === 'candle') {
+    const cw = Math.max(2, ((W - PAD * 2) / points.length) * 0.6);
+    return (
+      <Svg width={W} height={H}>
+        {points.map((p, i) => {
+          // Synthetic OHLC: open = previous close, close = this point,
+          // high/low nudged out by a tiny deterministic jitter.
+          const openP = i > 0 ? points[i - 1].price : p.price;
+          const closeP = p.price;
+          const seed = Math.abs(Math.sin(p.day * 12.9898 + i));
+          const wick = span * 0.04 * (0.3 + seed);
+          const hi = Math.max(openP, closeP) + wick;
+          const lo = Math.min(openP, closeP) - wick;
+          const cUp = closeP >= openP;
+          const cColor = cUp ? C.green : C.red;
+          const cx = x(i);
+          const bodyTop = y(Math.max(openP, closeP));
+          const bodyBot = y(Math.min(openP, closeP));
+          return (
+            <G key={i}>
+              <Path d={`M${cx} ${y(hi)} L${cx} ${y(lo)}`} stroke={cColor} strokeWidth={1} />
+              <Path
+                d={`M${cx - cw / 2} ${bodyTop} L${cx + cw / 2} ${bodyTop} L${cx + cw / 2} ${Math.max(bodyBot, bodyTop + 1)} L${cx - cw / 2} ${Math.max(bodyBot, bodyTop + 1)} Z`}
+                fill={cColor} />
+            </G>
+          );
+        })}
+      </Svg>
+    );
+  }
+
+  const line = points.map((p, i) => `${x(i)},${y(p.price)}`).join(' ');
+  const area = `${x(0)},${H - PAD} ${line} ${x(points.length - 1)},${H - PAD}`;
+  return (
+    <Svg width={W} height={H}>
+      <Polyline points={area} fill={color} opacity={0.12} stroke="none" />
+      <Polyline points={line} fill="none" stroke={color} strokeWidth={2} />
+    </Svg>
+  );
+}
+
+function StockDetail({ stock, portfolio, balance, buyStock, sellStock, toast, onBack }) {
+  const [tf, setTf] = useState('1D');
+  const [mode, setMode] = useState('line');
+  const [now, setNow] = useState(Date.now());
+  const [feed, setFeed] = useState([]);
+  const tfDef = STOCK_TIMEFRAMES.find(t => t.key === tf) || STOCK_TIMEFRAMES[2];
+  const open = isMarketOpen(now);
+
+  // Live ticker — only this ONE open stock re-computes every couple of
+  // seconds (local component state, not a store subscription), so this
+  // can't repeat the earlier freeze bug no matter how many companies exist.
+  useEffect(() => {
+    const id = setInterval(() => {
+      const t = Date.now();
+      setNow(t);
+      if (isMarketOpen(t) && Math.random() < 0.6) {
+        setFeed(f => [fakeTradeFor(stock, t), ...f].slice(0, 6));
+      }
+    }, 2500);
+    return () => clearInterval(id);
+  }, [stock.id]);
+
+  const livePrice = tfDef.live ? liveStockPrice(stock, now) : stock.price;
+  const ret = tfDef.live
+    ? (liveStockPrice(stock, now) - liveStockPrice(stock, now - tfDef.hours * 3600 * 1000)) / liveStockPrice(stock, now - tfDef.hours * 3600 * 1000)
+    : stockReturnOverDays(stock, tfDef.days);
+  const pos = portfolio[stock.id];
+  const holdingValue = pos ? pos.shares * stock.price : 0;
+  const holdingPL = pos ? holdingValue - pos.shares * pos.avgCost : 0;
+  const maxAffordable = Math.max(0, Math.floor(balance / (stock.price * 1.005)));
+
+  return (
+    <View>
+      <Pressable onPress={onBack} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+        <Icon name="chevron-left" size={18} color={C.blue} />
+        <Text style={[FONT.body, { color: C.blue, fontWeight: '700', marginLeft: 2 }]}>Back to market</Text>
+      </Pressable>
+      <Card style={{ marginBottom: 10, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
+        <Row style={{ justifyContent: 'space-between' }}>
+          <View style={{ flex: 1 }}>
+            <Text style={[FONT.h3, { color: '#F8FAFC' }]} numberOfLines={1}>{stock.name}</Text>
+            <Text style={[FONT.tiny, { color: '#94A3B8' }]}>{stock.sector}{stock.founder === 'player' ? ' · Founder shares' : ''}</Text>
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text style={[FONT.h2, { color: '#F8FAFC' }]}>{inr(livePrice)}</Text>
+            <Text style={[FONT.tiny, { color: ret >= 0 ? '#4ADE80' : '#F87171', fontWeight: '800' }]}>
+              {ret >= 0 ? '▲' : '▼'} {Math.abs(Math.round(ret * 1000) / 10)}% · {tf}
+            </Text>
+          </View>
+        </Row>
+        <Row style={{ marginTop: 8, alignItems: 'center' }}>
+          <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: open ? '#4ADE80' : '#64748B', marginRight: 6 }} />
+          <Text style={[FONT.tiny, { color: '#94A3B8' }]}>{open ? 'Market open · live · 9:15 AM–3:30 PM' : 'Market closed · frozen at last close · reopens 9:15 AM'}</Text>
+        </Row>
+      </Card>
+
+      <Row style={{ gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+        {STOCK_TIMEFRAMES.map(t => (
+          <Pressable key={t.key} onPress={() => setTf(t.key)}
+            style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: RADIUS.sm, backgroundColor: tf === t.key ? C.blueSoft : C.bgSoft, borderWidth: 1, borderColor: tf === t.key ? C.blue : C.border }}>
+            <Text style={[FONT.tiny, { fontWeight: '700', color: tf === t.key ? C.blue : C.sub }]}>{t.label}</Text>
+          </Pressable>
+        ))}
+        <Pressable onPress={() => setMode(m => m === 'line' ? 'candle' : 'line')}
+          style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: RADIUS.sm, backgroundColor: C.bgSoft, borderWidth: 1, borderColor: C.border, flexDirection: 'row', alignItems: 'center' }}>
+          <Icon name={mode === 'line' ? 'chart-line' : 'chart-candlestick'} size={14} color={C.sub} />
+          <Text style={[FONT.tiny, { fontWeight: '700', marginLeft: 4, color: C.sub }]}>{mode === 'line' ? 'Line' : 'Candle'}</Text>
+        </Pressable>
+      </Row>
+
+      <Card style={{ marginBottom: 10, alignItems: 'center' }}>
+        <StockChart stock={stock} days={tfDef.days} tf={tfDef} now={now} mode={mode} />
+      </Card>
+
+      {open && feed.length > 0 ? (
+        <Card style={{ marginBottom: 10 }}>
+          <Text style={[FONT.tiny, { fontWeight: '800', color: C.sub, marginBottom: 6 }]}>LIVE MARKET ACTIVITY</Text>
+          {feed.map((tr, i) => (
+            <Row key={i} style={{ justifyContent: 'space-between', marginTop: i ? 4 : 0 }}>
+              <Text style={FONT.tiny} numberOfLines={1}>{tr.trader}</Text>
+              <Text style={[FONT.tiny, { fontWeight: '700', color: tr.side === 'buy' ? C.green : C.red }]}>
+                {tr.side === 'buy' ? 'Bought' : 'Sold'} {tr.qty} sh
+              </Text>
+            </Row>
+          ))}
+        </Card>
+      ) : null}
+
+      {pos ? (
+        <Card style={{ marginBottom: 10 }}>
+          <Text style={[FONT.body, { fontWeight: '800' }]}>Your Position</Text>
+          <Row style={{ justifyContent: 'space-between', marginTop: 6 }}>
+            <Text style={FONT.tiny}>{pos.shares} shares · avg {inrShort(pos.avgCost)}</Text>
+            <Text style={[FONT.tiny, { fontWeight: '800', color: holdingPL >= 0 ? C.green : C.red }]}>
+              {holdingPL >= 0 ? '+' : ''}{inrShort(holdingPL)} · {inrShort(holdingValue)} value
+            </Text>
+          </Row>
+        </Card>
+      ) : null}
+
+      <Card style={{ marginBottom: 10 }}>
+        <Text style={[FONT.body, { fontWeight: '800' }]}>Buy</Text>
+        <Row style={{ gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+          {[1, 5, 10, 25].map(n => (
+            <Pressable key={n} disabled={maxAffordable < n} onPress={() => {
+              const r = buyStock(stock.id, n);
+              toast(r.ok ? `Bought ${n} × ${stock.name}` : r.err, r.ok ? 'success' : 'error');
+            }} style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: RADIUS.sm, backgroundColor: C.greenSoft, borderWidth: 1, borderColor: C.green, opacity: maxAffordable < n ? 0.4 : 1 }}>
+              <Text style={[FONT.tiny, { fontWeight: '700', color: C.green }]}>{n} sh</Text>
+            </Pressable>
+          ))}
+          <Pressable disabled={maxAffordable <= 0} onPress={() => {
+            const r = buyStock(stock.id, maxAffordable);
+            toast(r.ok ? `Bought ${maxAffordable} × ${stock.name}` : r.err, r.ok ? 'success' : 'error');
+          }} style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: RADIUS.sm, backgroundColor: C.green, opacity: maxAffordable <= 0 ? 0.4 : 1 }}>
+            <Text style={[FONT.tiny, { fontWeight: '800', color: '#fff' }]}>Max ({maxAffordable})</Text>
+          </Pressable>
+        </Row>
+      </Card>
+
+      {pos ? (
+        <Card style={{ marginBottom: 10 }}>
+          <Text style={[FONT.body, { fontWeight: '800' }]}>Sell</Text>
+          <Row style={{ gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+            {[0.25, 0.5, 1].map(frac => {
+              const n = Math.max(1, Math.round(pos.shares * frac));
+              return (
+                <Pressable key={frac} onPress={() => {
+                  const r = sellStock(stock.id, n);
+                  toast(r.ok ? `Sold ${n} × ${stock.name}` : r.err, r.ok ? 'success' : 'error');
+                }} style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: RADIUS.sm, backgroundColor: C.redSoft || '#FEE2E2', borderWidth: 1, borderColor: C.red }}>
+                  <Text style={[FONT.tiny, { fontWeight: '700', color: C.red }]}>{frac === 1 ? `All (${n})` : `${Math.round(frac * 100)}% (${n})`}</Text>
+                </Pressable>
+              );
+            })}
+          </Row>
+        </Card>
+      ) : null}
+    </View>
+  );
+}
+
+const STOCK_PAGE = 20;
+export function StockMarketModal({ visible, onClose }) {
+  const toast = useToast();
+  const stocks = useGame(s => s.stocks || []);
+  const portfolio = useGame(s => s.portfolio || {});
+  const balance = useGame(s => s.balance);
+  const buyStock = useGame(s => s.buyStock);
+  const sellStock = useGame(s => s.sellStock);
+  const launchStock = useGame(s => s.launchStock);
+  const ipoRequirements = useGame(s => s.ipoRequirements);
+  const [selectedId, setSelectedId] = useState(null);
+  const [query, setQuery] = useState('');
+  const [page, setPage] = useState(1);
+  useEffect(() => { if (!visible) { setSelectedId(null); setQuery(''); setPage(1); } }, [visible]);
+
+  const selected = selectedId ? stocks.find(s => s.id === selectedId) : null;
+
+  // Only crunch the whole 1000+-company list while the sheet is actually
+  // open on the list view — never on every render, never in the background.
+  const insight = useMemo(() => {
+    if (!visible || selected || !stocks.length) return null;
+    let top = stocks[0], bottom = stocks[0];
+    let portfolioValue = 0, portfolioCost = 0;
+    for (const st of stocks) {
+      const r = stockYearReturn(st);
+      if (r > stockYearReturn(top)) top = st;
+      if (r < stockYearReturn(bottom)) bottom = st;
+      const pos = portfolio[st.id];
+      if (pos) { portfolioValue += pos.shares * st.price; portfolioCost += pos.shares * pos.avgCost; }
+    }
+    return { top, bottom, portfolioValue, portfolioCost, count: stocks.length };
+  }, [visible, selected, stocks, portfolio]);
+
+  const filtered = useMemo(() => {
+    if (!visible || selected) return [];
+    const q = query.trim().toLowerCase();
+    const list = q ? stocks.filter(s => s.name.toLowerCase().includes(q) || s.sector.toLowerCase().includes(q)) : stocks;
+    return list;
+  }, [visible, selected, stocks, query]);
+  const visibleRows = filtered.slice(0, page * STOCK_PAGE);
+
+  const req = visible && !selected ? ipoRequirements() : null;
+
+  return (
+    <Sheet visible={visible} onClose={onClose} title="Stock Market" height="90%">
+      {selected ? (
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+          <StockDetail stock={selected} portfolio={portfolio} balance={balance}
+            buyStock={buyStock} sellStock={sellStock} toast={toast} onBack={() => setSelectedId(null)} />
+        </ScrollView>
+      ) : (
+        <View style={{ flex: 1 }}>
+          {insight ? (
+            <Card style={{ marginBottom: 10, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <View>
+                  <Text style={[FONT.tiny, { color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 1 }]}>Your Portfolio</Text>
+                  <Text style={[FONT.h1, { color: '#F8FAFC', marginTop: 2 }]}>{inrShort(insight.portfolioValue)}</Text>
+                </View>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <Text style={[FONT.tiny, { color: '#94A3B8' }]}>{insight.count.toLocaleString()} listed</Text>
+                  <Text style={[FONT.tiny, { color: insight.portfolioValue >= insight.portfolioCost ? '#4ADE80' : '#F87171', marginTop: 4, fontWeight: '800' }]}>
+                    {insight.portfolioValue >= insight.portfolioCost ? '▲' : '▼'} {inrShort(Math.abs(insight.portfolioValue - insight.portfolioCost))} P&L
+                  </Text>
+                </View>
+              </Row>
+              <Row style={{ marginTop: 10, gap: 8 }}>
+                <Pressable style={{ flex: 1, backgroundColor: '#1E293B', borderRadius: RADIUS.md, padding: 8 }} onPress={() => setSelectedId(insight.top.id)}>
+                  <Text style={[FONT.tiny, { color: '#4ADE80', fontWeight: '800' }]}>▲ Top gainer</Text>
+                  <Text style={[FONT.tiny, { color: '#F8FAFC', marginTop: 2 }]} numberOfLines={1}>{insight.top.name}</Text>
+                </Pressable>
+                <Pressable style={{ flex: 1, backgroundColor: '#1E293B', borderRadius: RADIUS.md, padding: 8 }} onPress={() => setSelectedId(insight.bottom.id)}>
+                  <Text style={[FONT.tiny, { color: '#F87171', fontWeight: '800' }]}>▼ Top loser</Text>
+                  <Text style={[FONT.tiny, { color: '#F8FAFC', marginTop: 2 }]} numberOfLines={1}>{insight.bottom.name}</Text>
+                </Pressable>
+              </Row>
+            </Card>
+          ) : null}
+
+          {req ? (
+            <Card style={{ marginBottom: 10, opacity: req.met ? 1 : 0.9 }}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Text style={[FONT.body, { fontWeight: '800' }]}>Launch Your Own IPO</Text>
+                <Icon name="rocket-launch" size={18} color={req.met ? C.gold : C.faint} />
+              </Row>
+              <Text style={[FONT.tiny, { marginTop: 2 }]}>Prove your empire's track record to list on the exchange — ₹50L listing fee, 5,000 founder shares.</Text>
+              {[
+                { label: 'Distance driven', have: req.have.km, need: req.km, unit: 'km' },
+                { label: 'Lifetime revenue', have: req.have.revenue, need: req.revenue, unit: '₹' },
+                { label: 'Deliveries completed', have: req.have.deliveries, need: req.deliveries, unit: '' },
+              ].map(row => (
+                <View key={row.label} style={{ marginTop: 8 }}>
+                  <Row style={{ justifyContent: 'space-between' }}>
+                    <Text style={FONT.tiny}>{row.label}</Text>
+                    <Text style={[FONT.tiny, { fontWeight: '700', color: row.have >= row.need ? C.green : C.sub }]}>
+                      {row.unit === '₹' ? inrShort(row.have) : row.have.toLocaleString()} / {row.unit === '₹' ? inrShort(row.need) : row.need.toLocaleString()}
+                    </Text>
+                  </Row>
+                  <Progress pct={Math.min(100, (row.have / row.need) * 100)} color={row.have >= row.need ? C.green : C.amber} style={{ marginTop: 4 }} />
+                </View>
+              ))}
+              <Btn title={req.met ? 'Launch IPO · ₹50,00,000' : 'Requirements not met yet'} kind={req.met ? 'green' : 'soft'} disabled={!req.met}
+                style={{ marginTop: 10 }}
+                onPress={() => {
+                  const r = launchStock();
+                  toast(r.ok ? `${r.stock.name} listed! You hold 5,000 founder shares.` : r.err, r.ok ? 'success' : 'error');
+                  if (r.ok) setSelectedId(r.stock.id);
+                }} />
+            </Card>
+          ) : null}
+
+          <TextInput value={query} onChangeText={t => { setQuery(t); setPage(1); }} placeholder="Search companies or sectors..."
+            placeholderTextColor={C.faint}
+            style={{ backgroundColor: C.bgSoft, borderRadius: RADIUS.md, borderWidth: 1, borderColor: C.border, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10, color: C.text }} />
+
+          <FlatList
+            data={visibleRows}
+            keyExtractor={s => s.id}
+            renderItem={({ item: st }) => {
+              const ret = stockYearReturn(st);
+              const pos = portfolio[st.id];
+              return (
+                <Pressable onPress={() => setSelectedId(st.id)}>
+                  <Card style={{ marginBottom: 8, padding: 10 }}>
+                    <Row style={{ justifyContent: 'space-between' }}>
+                      <View style={{ flex: 1 }}>
+                        <Row>
+                          <Text style={[FONT.body, { fontWeight: '700', flexShrink: 1 }]} numberOfLines={1}>{st.name}</Text>
+                          {pos ? <Icon name="briefcase-check" size={13} color={C.blue} style={{ marginLeft: 6 }} /> : null}
+                        </Row>
+                        <Text style={FONT.tiny}>{st.sector}</Text>
+                      </View>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={[FONT.mono, { fontWeight: '800' }]}>{inr(st.price)}</Text>
+                        <Text style={[FONT.tiny, { fontWeight: '800', color: ret >= 0 ? C.green : C.red }]}>
+                          {ret >= 0 ? '▲' : '▼'} {Math.abs(Math.round(ret * 1000) / 10)}%
+                        </Text>
+                      </View>
+                    </Row>
+                  </Card>
+                </Pressable>
+              );
+            }}
+            ListFooterComponent={<LoadMore shown={visibleRows.length} total={filtered.length} onMore={() => setPage(p => p + 1)} />}
+            contentContainerStyle={{ paddingBottom: 24 }}
+          />
+        </View>
+      )}
     </Sheet>
   );
 }
@@ -3961,6 +4407,51 @@ export function CountriesModal({ visible, onClose }) {
         {showAllC && (
           <Btn title="Show less" kind="soft" icon="chevron-up" onPress={() => setShowAllC(false)} style={{ marginTop: 4 }} />
         )}
+      </ScrollView>
+    </Sheet>
+  );
+}
+
+// Fires once, the moment an existing save first crosses into v4.0.0 — the
+// final grand release. Pure celebration screen, no game logic.
+export function FinaleModal({ visible, onClose }) {
+  const company = useGame(s => s.company);
+  const stats = useGame(s => s.stats);
+  const trucks = useGame(s => s.trucks);
+  return (
+    <Sheet visible={visible} onClose={onClose} title="Grand Finale" height="70%">
+      <ScrollView contentContainerStyle={{ paddingBottom: 24, alignItems: 'center' }}>
+        <View style={{ width: 88, height: 88, borderRadius: 44, backgroundColor: C.goldSoft || '#FEF3C7', alignItems: 'center', justifyContent: 'center', marginTop: 8, marginBottom: 14 }}>
+          <Icon name="trophy" size={44} color={C.gold} />
+        </View>
+        <Text style={[FONT.h1, { textAlign: 'center' }]}>Congratulations, {company?.name}!</Text>
+        <Text style={[FONT.body, { textAlign: 'center', marginTop: 10, color: C.sub, lineHeight: 20 }]}>
+          Truck Empire Tycoon just hit its final grand release — v4.0.0. The Stock Market is open, the roads are yours, and this
+          send-off is for every kilometre you've driven to get here.
+        </Text>
+        <Card style={{ marginTop: 18, width: '100%', backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
+          <Row style={{ justifyContent: 'space-around' }}>
+            <View style={{ alignItems: 'center' }}>
+              <Text style={[FONT.h2, { color: '#F8FAFC' }]}>{Math.round(stats.km).toLocaleString('en-IN')}</Text>
+              <Text style={[FONT.tiny, { color: '#94A3B8' }]}>km driven</Text>
+            </View>
+            <View style={{ alignItems: 'center' }}>
+              <Text style={[FONT.h2, { color: '#F8FAFC' }]}>{trucks.length}</Text>
+              <Text style={[FONT.tiny, { color: '#94A3B8' }]}>trucks strong</Text>
+            </View>
+            <View style={{ alignItems: 'center' }}>
+              <Text style={[FONT.h2, { color: '#F8FAFC' }]}>{stats.deliveries}</Text>
+              <Text style={[FONT.tiny, { color: '#94A3B8' }]}>deliveries</Text>
+            </View>
+          </Row>
+        </Card>
+        <Card style={{ marginTop: 10, width: '100%', backgroundColor: C.greenSoft }}>
+          <Row style={{ justifyContent: 'center' }}>
+            <Icon name="gift" size={18} color={C.green} />
+            <Text style={[FONT.body, { fontWeight: '800', marginLeft: 8, color: C.text }]}>+₹5 Crore + 500 Gold credited to celebrate!</Text>
+          </Row>
+        </Card>
+        <Btn title="Onward!" kind="green" icon="rocket-launch" style={{ marginTop: 18, alignSelf: 'stretch' }} onPress={onClose} />
       </ScrollView>
     </Sheet>
   );

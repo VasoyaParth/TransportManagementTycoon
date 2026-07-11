@@ -10,6 +10,10 @@ import { TRUCK_MODELS, CARGO_TYPES, CAMPAIGNS, POWERUPS, CONTRACT_FLAVORS } from
 import { COUNTRY_BY_CODE } from '../data/expansion';
 import { STAFF_NAMES, STAFF_LEVELS } from '../data/staffNames';
 import { CITIES } from '../data/cities';
+import {
+  generateStockPool, stockDailyStep, stockYearReturn, stockReturnOverDays, STOCK_SECTORS, STOCK_TIMEFRAMES,
+  liveJitterPct, liveStockPrice, isMarketOpen, fakeTradeFor,
+} from '../data/stocks';
 import { computeRoute, planFuelStops, cityById } from '../engine/routing';
 import { deliveryEconomics, tripDurationSec, inr, REAL_SEC_PER_GAME_HOUR, ECON } from '../engine/economy';
 import { play, setSoundEnabled, setMusicVolume, setSfxVolume } from '../engine/sound';
@@ -313,6 +317,11 @@ export function creditScoreOf(credit) {
 // Every truck/garage currently pledged as collateral on ANY active loan —
 // used to badge them everywhere (Fleet list, truck detail, map) and to stop
 // the same asset being pledged twice.
+export {
+  stockYearReturn, stockReturnOverDays, STOCK_SECTORS, STOCK_TIMEFRAMES,
+  liveJitterPct, liveStockPrice, isMarketOpen, fakeTradeFor,
+};
+
 export function pledgedTruckIds(s) {
   const set = new Set();
   for (const ln of s.loans || []) for (const id of ln.collateral?.truckIds || []) set.add(id);
@@ -397,6 +406,15 @@ export function dealPriceFor(model, day) {
 // ---------- Driver XP, levels & perks ----------
 // Drivers earn XP per delivery (distance-weighted). Levels unlock permanent
 // perks that plug straight into the delivery economics and incident rolls.
+// Startup sound choices — all reuse SFX already bundled with the app (no new
+// audio assets needed), just picked out as a dedicated "welcome" moment.
+export const STARTUP_SOUNDS = [
+  { key: 'off', label: 'Off', icon: 'volume-off' },
+  { key: 'start', label: 'Engine Start', icon: 'engine' },
+  { key: 'coin', label: 'Coin Chime', icon: 'gold' },
+  { key: 'success', label: 'Success Ding', icon: 'check-decagram' },
+];
+
 export const DRIVER_PERKS = [
   { level: 2, id: 'fuel_saver', name: 'Fuel Saver', icon: 'gas-station-outline', desc: '−5% fuel cost on every trip' },
   { level: 4, id: 'night_rider', name: 'Night Rider', icon: 'weather-night', desc: '+8% driving pace' },
@@ -818,6 +836,9 @@ const initialState = {
   ledger: [], // day-wise money book: {id, ts, day, kind, icon, label, amount} — newest first, capped
   loans: [], // active bank loans: {id, productId, name, principal, remaining, emi, months, paidMonths, lastEmiDay}
   credit: { paid: 0, missed: 0 }, // EMI track record → credit score
+  stocks: [], // listed companies: {id, name, sector, price, vol, drift, history, founder}
+  portfolio: {}, // stockId -> {shares, avgCost}
+  lastStockDay: 0,
   weather: [], // today's active weather zones (regenerated each game day)
   weatherDay: 0,
   lastWeatherEvolveAt: 0, // real ms of the last gentle weather-evolution step
@@ -836,6 +857,7 @@ const initialState = {
     speed: 1, autosave: true, sound: true, haptics: true, showStations: true, showPorts: true,
     difficulty: 'normal', events: 'rare', tutorialSeen: false,
     musicVolume: 0.4, sfxVolume: 1, hapticIntensity: 'medium',
+    startupSound: 'start', startupVolume: 0.7, // played once each time the game opens
     notif: { delivery: true, truck: true, fuel: true, daily: true },
   },
   easterEggs: { found: [] }, // ids of discovered hidden gems (persisted, one-time rewards)
@@ -902,7 +924,7 @@ export const useGame = create(
         };
         set({
           phase: 'game',
-          updateGiftVersion: '3.0.0', // fresh companies skip the update gift
+          updateGiftVersion: '4.0.0', // fresh companies skip the update gifts
           company: { name, ceo, logo, avatar, hqCityId, code, createdAt: Date.now() },
           balance: startCapital - model.price,
           gold: 100,
@@ -916,6 +938,9 @@ export const useGame = create(
           unlockedCountries: ['IN'],
           contracts: randomContracts(1),
           candidates: randomCandidates(),
+          stocks: generateStockPool(1500),
+          portfolio: {},
+          lastStockDay: 0,
           notifications: [makeNotification('system', 'rocket-launch',
             `${name} is live! Your first ${model.name} is being built at ${hq.name}.`)],
         });
@@ -1041,6 +1066,19 @@ export const useGame = create(
           get().logLedger('bonus', 'party-popper', 'Update 3.0.0 welcome gift', 25000000);
           get().notify('system', 'party-popper',
             'UPDATE 3.0.0 IS HERE — the biggest one ever! 17 new countries across two horizons: Thailand to the Philippines & Indonesia in the east, Saudi Arabia to Kenya & Ethiopia in the west. Welcome gift: +₹2.5 Crore + 300 Gold. Thank you for building your empire with us!');
+          play('coin', 1);
+        }
+        // ---- v4.0.0 Grand Finale gift: the Stock Market goes live, and
+        // this is the final major content release — existing players get a
+        // proper send-off (cash, gold, a big congratulatory notice, and the
+        // in-game finale celebration screen keyed off this same flag).
+        // New companies skip it — createCompany stamps the version at birth.
+        if ((s.updateGiftVersion || '') !== '4.0.0') {
+          const gcur = get();
+          set({ updateGiftVersion: '4.0.0', gold: gcur.gold + 500, balance: gcur.balance + 50000000 });
+          get().logLedger('bonus', 'party-popper', 'v4.0.0 Grand Finale gift — Stock Market is live!', 50000000);
+          get().notify('system', 'party-popper',
+            'CONGRATULATIONS — TRUCK EMPIRE TYCOON v4.0.0 IS HERE! The Stock Market has opened: 1,500 companies to trade, a live ticker, candlestick charts, and your own IPO to launch once you\'ve earned it. This is our final grand release — thank you for building this empire with us. +₹5 Crore + 500 Gold to celebrate!');
           play('coin', 1);
         }
         // ---- v2.4.0 daily/periodic systems ----
@@ -1208,6 +1246,13 @@ export const useGame = create(
             set({ weekly: buildWeekly(wid, get().stats) });
             if (s.weekly) get().notify('system', 'calendar-week', 'New weekly challenges are live — big bonus for a clean sweep!');
           }
+        }
+        // Stock market: once per game day, every listed company takes one
+        // random-walk price step (see stockDailyStep) — cheap since it only
+        // runs on day rollover, not every tick, even with a large listing.
+        if (day > (s.lastStockDay || 0) && (s.stocks || []).length) {
+          const updated = s.stocks.map(st => stockDailyStep(st, day));
+          set({ stocks: updated, lastStockDay: day });
         }
         // fresh contracts each day + flavor event
         if (day > s.lastContractDay) {
@@ -2378,6 +2423,75 @@ export const useGame = create(
         get().logLedger('loan', 'bank-check', `Loan settled early · ${ln.name}`, -cost);
         get().notify('system', 'bank-check', `${ln.name} settled early for ${inr(cost)} (2% rebate). Credit score up!`);
         return { ok: true, cost };
+      },
+
+      // ---------- stock market ----------
+      // Buying/selling carries a small spread (the "market maker's cut") so
+      // day-trading in and out isn't free money — it's a real cost of entry.
+      buyStock(stockId, shares) {
+        const s = get();
+        const st = (s.stocks || []).find(x => x.id === stockId);
+        if (!st) return { ok: false, err: 'Company not found' };
+        const n = Math.max(0, Math.floor(shares));
+        if (!n) return { ok: false, err: 'Pick at least 1 share' };
+        const cost = Math.round(n * st.price * 1.005);
+        if (s.balance < cost) return { ok: false, err: `Need ${inr(cost)} to buy ${n} shares` };
+        const pos = s.portfolio?.[stockId] || { shares: 0, avgCost: 0 };
+        const totalShares = pos.shares + n;
+        const avgCost = (pos.avgCost * pos.shares + cost) / totalShares;
+        set({
+          balance: s.balance - cost,
+          portfolio: { ...s.portfolio, [stockId]: { shares: totalShares, avgCost } },
+        });
+        get().logLedger('stock', 'trending-up', `Bought ${n} × ${st.name}`, -cost);
+        return { ok: true, cost };
+      },
+      sellStock(stockId, shares) {
+        const s = get();
+        const st = (s.stocks || []).find(x => x.id === stockId);
+        if (!st) return { ok: false, err: 'Company not found' };
+        const pos = s.portfolio?.[stockId];
+        const n = Math.max(0, Math.floor(shares));
+        if (!n) return { ok: false, err: 'Pick at least 1 share' };
+        if (!pos || pos.shares < n) return { ok: false, err: `You only hold ${pos?.shares || 0} shares` };
+        const proceeds = Math.round(n * st.price * 0.995);
+        const remaining = pos.shares - n;
+        const nextPortfolio = { ...s.portfolio };
+        if (remaining <= 0) delete nextPortfolio[stockId];
+        else nextPortfolio[stockId] = { ...pos, shares: remaining };
+        set({ balance: s.balance + proceeds, portfolio: nextPortfolio });
+        get().logLedger('stock', 'trending-down', `Sold ${n} × ${st.name}`, proceeds);
+        return { ok: true, proceeds };
+      },
+      // Founding your own IPO needs a proven track record first — real
+      // distance driven, real revenue booked, real delivery volume — so it
+      // reads as "you earned the right to list", not a cash-code shortcut.
+      ipoRequirements() {
+        const s = get();
+        const req = { km: 100000, revenue: 500000000, deliveries: 300 };
+        return {
+          ...req,
+          have: { km: Math.floor(s.stats.km), revenue: Math.floor(s.stats.revenue), deliveries: s.stats.deliveries },
+          met: s.stats.km >= req.km && s.stats.revenue >= req.revenue && s.stats.deliveries >= req.deliveries,
+        };
+      },
+      launchStock() {
+        const s = get();
+        const { met } = get().ipoRequirements();
+        if (!met) return { ok: false, err: 'You don’t meet the IPO listing requirements yet' };
+        const listingFee = 5000000;
+        if (s.balance < listingFee) return { ok: false, err: `Need ${inr(listingFee)} listing fee` };
+        const [fresh] = generateStockPool(1, Math.random);
+        const stock = { ...fresh, name: `${s.company?.name || 'Founder'} ${fresh.name.split(' ').slice(1).join(' ')}`, founder: 'player' };
+        const founderShares = 5000;
+        set({
+          balance: s.balance - listingFee,
+          stocks: [...(s.stocks || []), stock],
+          portfolio: { ...s.portfolio, [stock.id]: { shares: founderShares, avgCost: 0 } },
+        });
+        get().logLedger('stock', 'rocket-launch', `IPO listed · ${stock.name}`, -listingFee);
+        get().notify('system', 'rocket-launch', `${stock.name} just listed on the exchange — you hold ${founderShares.toLocaleString()} founder shares!`);
+        return { ok: true, stock };
       },
 
       // ---------- fuel market ----------

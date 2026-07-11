@@ -12,9 +12,10 @@ import { FleetTab, RoutesTab, StaffTab, EconomyTab, MarketingTab, RewardsTab } f
 import {
   NewDeliveryModal, TruckDetailModal, BuyTruckModal, ContractsModal,
   PowerupsModal, NotificationsModal, SettingsModal, HubsModal, DriverDetailModal, CountriesModal, MiniGamesModal, HubInfoModal,
-  CompanyInsightsModal, NewsModal, PhotoModeModal,
+  CompanyInsightsModal, NewsModal, PhotoModeModal, StockMarketModal, FinaleModal,
 } from './modals';
 import { haptic } from '../../engine/haptics';
+import { play } from '../../engine/sound';
 import Tutorial from './Tutorial';
 import { checkForUpdate } from '../../net/updates';
 
@@ -39,6 +40,18 @@ export default function GameScreen() {
   const settings = useGame(s => s.settings);
   const [tab, setTab] = useState(null);
   const [modal, setModal] = useState(null); // {kind, ...props}
+  const updateGiftVersion = useGame(s => s.updateGiftVersion);
+  const finaleSeen = useGame(s => s.settings.finaleSeen);
+  const finaleShown = useRef(false);
+  useEffect(() => {
+    try {
+      if (updateGiftVersion === '4.0.0' && !finaleSeen && !finaleShown.current) {
+        finaleShown.current = true;
+        setModal({ kind: 'finale' });
+        saveSettings({ finaleSeen: true });
+      }
+    } catch (e) { /* never block the game on a celebration screen */ }
+  }, [updateGiftVersion, finaleSeen]);
   // Lazy modal mounting: every modal used to render (hidden) on first paint,
   // which made app start-up do the work of ten sheets. Instead a modal only
   // mounts once its kind has been opened, then stays mounted so the Sheet's
@@ -108,6 +121,16 @@ export default function GameScreen() {
     start();
     const sub = AppState.addEventListener('change', st => (st === 'active' ? start() : stop()));
     return () => { stop(); sub.remove(); };
+  }, []);
+
+  // Startup sound — plays once each time the game opens (not on every tab
+  // switch or modal), picked from Settings > Sound. 'off' plays nothing.
+  useEffect(() => {
+    try {
+      const choice = settings.startupSound || 'start';
+      if (choice !== 'off') play(choice, settings.startupVolume ?? 0.7);
+    } catch (e) { /* audio unavailable — never block startup on this */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // surface new notifications as toasts
@@ -208,7 +231,7 @@ export default function GameScreen() {
           {/* Folding drawer: expands smoothly above the toggle */}
           <Animated.View style={{
             overflow: 'hidden',
-            height: drawerAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 3 * 48] }),
+            height: drawerAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 4 * 48] }),
             opacity: drawerAnim,
           }}>
             <Pressable style={[st.actionBtn, { marginBottom: 8 }]} onPress={() => { haptic('light'); setModal({ kind: 'contracts' }); }}>
@@ -216,6 +239,9 @@ export default function GameScreen() {
             </Pressable>
             <Pressable style={[st.actionBtn, { marginBottom: 8 }]} onPress={() => { haptic('light'); setModal({ kind: 'countries' }); }}>
               <Icon name="earth" size={19} color={C.blue} />
+            </Pressable>
+            <Pressable style={[st.actionBtn, { marginBottom: 8 }]} onPress={() => { haptic('light'); setModal({ kind: 'stocks' }); }}>
+              <Icon name="finance" size={19} color={C.green} />
             </Pressable>
             <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'powerups' }); }}>
               <Icon name="star-four-points" size={19} color={C.gold} />
@@ -308,6 +334,8 @@ export default function GameScreen() {
         onOpenPhotoMode={() => setModal({ kind: 'photomode' })} />}
       {mounted('photomode') && <PhotoModeModal visible={modal?.kind === 'photomode'} onClose={() => setModal(null)} />}
       {mounted('news') && <NewsModal visible={modal?.kind === 'news'} onClose={() => setModal(null)} />}
+      {mounted('stocks') && <StockMarketModal visible={modal?.kind === 'stocks'} onClose={() => setModal(null)} />}
+      {mounted('finale') && <FinaleModal visible={modal?.kind === 'finale'} onClose={() => setModal(null)} />}
 
       {/* First-time guided tour */}
       {settings.tutorialSeen !== true && (

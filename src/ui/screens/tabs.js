@@ -126,7 +126,8 @@ const FLEET_PAGE = 8;
 export function FleetTab({ onTruckPress, onBuyTruck }) {
   const trucks = useGame(s => s.trucks);
   const deliveries = useGame(s => s.deliveries);
-  const pledged = useGame(pledgedTruckIds);
+  const loansForPledge = useGame(s => s.loans);
+  const pledged = useMemo(() => pledgedTruckIds({ loans: loansForPledge }), [loansForPledge]);
   const hasLive = trucks.some(t => t.status === 'delivering' || t.status === 'building');
   const now = useNow(hasLive);
   const [filter, setFilter] = useState('all');
@@ -1055,7 +1056,7 @@ function RepayQuickAmounts({ remaining, balance, onPick }) {
 function CollateralPicker({ amount, trucks, hubs, pledgedT, pledgedH, selTrucks, selHubs, onToggleTruck, onToggleHub }) {
   const required = Math.ceil((amount || 0) * COLLATERAL_COVERAGE);
   const pledgeable = { truckIds: [...selTrucks], hubCityIds: [...selHubs] };
-  const s = useGame(x => x);
+  const s = { trucks, hubs };
   const value = collateralTotalValue(s, pledgeable);
   const met = value >= required && required > 0;
   const availTrucks = trucks.filter(t => !pledgedT.has(t.id));
@@ -1111,8 +1112,8 @@ function BankSheet({ visible, onClose }) {
   const credit = useGame(s => s.credit);
   const trucks = useGame(s => s.trucks);
   const hubs = useGame(s => s.hubs || []);
-  const pledgedT = useGame(pledgedTruckIds);
-  const pledgedH = useGame(pledgedHubCityIds);
+  const pledgedT = useMemo(() => pledgedTruckIds({ loans }), [loans]);
+  const pledgedH = useMemo(() => pledgedHubCityIds({ loans }), [loans]);
   const takeLoan = useGame(s => s.takeLoan);
   const takeCustomLoan = useGame(s => s.takeCustomLoan);
   const prepayLoan = useGame(s => s.prepayLoan);
