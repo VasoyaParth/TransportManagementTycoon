@@ -4145,42 +4145,64 @@ function StockDetail({ stock, portfolio, balance, buyStock, sellStock, toast, on
 
       <Card style={{ marginBottom: 10 }}>
         <Text style={[FONT.body, { fontWeight: '800' }]}>Buy</Text>
-        <Row style={{ gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-          {[1, 5, 10, 25].map(n => (
-            <Pressable key={n} disabled={maxAffordable < n} onPress={() => {
-              const r = buyStock(stock.id, n);
-              toast(r.ok ? `Bought ${n} × ${stock.name}` : r.err, r.ok ? 'success' : 'error');
-            }} style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: RADIUS.sm, backgroundColor: C.greenSoft, borderWidth: 1, borderColor: C.green, opacity: maxAffordable < n ? 0.4 : 1 }}>
-              <Text style={[FONT.tiny, { fontWeight: '700', color: C.green }]}>{n} sh</Text>
-            </Pressable>
-          ))}
-          <Pressable disabled={maxAffordable <= 0} onPress={() => {
-            const r = buyStock(stock.id, maxAffordable);
-            toast(r.ok ? `Bought ${maxAffordable} × ${stock.name}` : r.err, r.ok ? 'success' : 'error');
-          }} style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: RADIUS.sm, backgroundColor: C.green, opacity: maxAffordable <= 0 ? 0.4 : 1 }}>
-            <Text style={[FONT.tiny, { fontWeight: '800', color: '#fff' }]}>Max ({maxAffordable})</Text>
-          </Pressable>
-        </Row>
+        <ShareStepper max={maxAffordable} accent={C.green}
+          costFor={n => Math.round(n * stock.price * 1.005)}
+          onConfirm={n => {
+            const r = buyStock(stock.id, n);
+            toast(r.ok ? `Bought ${n} × ${stock.name}` : r.err, r.ok ? 'success' : 'error');
+            return r.ok;
+          }} />
       </Card>
 
       {pos ? (
         <Card style={{ marginBottom: 10 }}>
           <Text style={[FONT.body, { fontWeight: '800' }]}>Sell</Text>
-          <Row style={{ gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-            {[0.25, 0.5, 1].map(frac => {
-              const n = Math.max(1, Math.round(pos.shares * frac));
-              return (
-                <Pressable key={frac} onPress={() => {
-                  const r = sellStock(stock.id, n);
-                  toast(r.ok ? `Sold ${n} × ${stock.name}` : r.err, r.ok ? 'success' : 'error');
-                }} style={{ paddingHorizontal: 12, paddingVertical: 8, borderRadius: RADIUS.sm, backgroundColor: C.redSoft || '#FEE2E2', borderWidth: 1, borderColor: C.red }}>
-                  <Text style={[FONT.tiny, { fontWeight: '700', color: C.red }]}>{frac === 1 ? `All (${n})` : `${Math.round(frac * 100)}% (${n})`}</Text>
-                </Pressable>
-              );
-            })}
-          </Row>
+          <ShareStepper max={pos.shares} accent={C.red}
+            costFor={n => Math.round(n * stock.price * 0.995)}
+            costLabel="proceeds"
+            onConfirm={n => {
+              const r = sellStock(stock.id, n);
+              toast(r.ok ? `Sold ${n} × ${stock.name}` : r.err, r.ok ? 'success' : 'error');
+              return r.ok;
+            }} />
         </Card>
       ) : null}
+    </View>
+  );
+}
+
+// Shared +/- stepper with a direct-type input box for buy/sell share counts
+// — replaces the old fixed quick-amount buttons with something that can hit
+// ANY exact number, one at a time or typed straight in.
+function ShareStepper({ max, accent, costFor, costLabel = 'cost', onConfirm }) {
+  const [qty, setQty] = useState('1');
+  const n = Math.max(0, Math.min(max, Math.floor(Number(qty) || 0)));
+  const clamp = v => String(Math.max(1, Math.min(max, v || 1)));
+  return (
+    <View style={{ marginTop: 8 }}>
+      <Row style={{ alignItems: 'center', gap: 8 }}>
+        <Pressable onPress={() => setQty(q => clamp((Math.floor(Number(q) || 0)) - 1))}
+          style={{ width: 40, height: 40, borderRadius: RADIUS.sm, backgroundColor: C.bgSoft, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="minus" size={18} color={C.text} />
+        </Pressable>
+        <TextInput value={qty} onChangeText={t => setQty(t.replace(/[^0-9]/g, ''))}
+          onBlur={() => setQty(clamp(Number(qty)))} keyboardType="number-pad"
+          style={{ flex: 1, textAlign: 'center', borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.sm, paddingVertical: 8, color: C.text, fontWeight: '800', fontSize: 16 }} />
+        <Pressable onPress={() => setQty(q => clamp((Math.floor(Number(q) || 0)) + 1))}
+          style={{ width: 40, height: 40, borderRadius: RADIUS.sm, backgroundColor: C.bgSoft, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="plus" size={18} color={C.text} />
+        </Pressable>
+        <Pressable onPress={() => setQty(String(max))} style={{ paddingHorizontal: 10, paddingVertical: 8 }}>
+          <Text style={[FONT.tiny, { fontWeight: '700', color: C.blue }]}>Max</Text>
+        </Pressable>
+      </Row>
+      <Row style={{ justifyContent: 'space-between', marginTop: 8 }}>
+        <Text style={FONT.tiny}>{n} share{n === 1 ? '' : 's'} · {costLabel}</Text>
+        <Text style={[FONT.tiny, { fontWeight: '800' }]}>{inrShort(costFor(n))}</Text>
+      </Row>
+      <Btn title={n > 0 ? `Confirm — ${n} share${n === 1 ? '' : 's'}` : 'Enter a quantity'} kind={n > 0 ? 'primary' : 'soft'}
+        disabled={n <= 0} style={{ marginTop: 10, backgroundColor: n > 0 ? accent : undefined }}
+        onPress={() => { if (onConfirm(n)) setQty('1'); }} />
     </View>
   );
 }
@@ -4188,6 +4210,62 @@ function StockDetail({ stock, portfolio, balance, buyStock, sellStock, toast, on
 // A completely separate path from the main market: applying for an IPO is
 // its own screen with its own criteria, reachable via a dedicated button —
 // it does NOT share a page with buying/selling other companies' shares.
+// Dedicated portfolio screen — every held company with shares, avg cost,
+// current value, and P&L, tapping straight into that stock's detail view.
+function PortfolioPanel({ stocks, portfolio, onBack, onOpen }) {
+  const rows = Object.entries(portfolio)
+    .map(([id, pos]) => ({ stock: stocks.find(s => s.id === id), pos }))
+    .filter(r => r.stock);
+  const totalValue = rows.reduce((a, r) => a + r.pos.shares * r.stock.price, 0);
+  const totalCost = rows.reduce((a, r) => a + r.pos.shares * r.pos.avgCost, 0);
+  const totalPL = totalValue - totalCost;
+
+  return (
+    <View>
+      <Pressable onPress={onBack} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+        <Icon name="chevron-left" size={18} color={C.blue} />
+        <Text style={[FONT.body, { color: C.blue, fontWeight: '700', marginLeft: 2 }]}>Back to market</Text>
+      </Pressable>
+      <Card style={{ marginBottom: 10, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
+        <Text style={[FONT.tiny, { color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 1 }]}>Total Portfolio Value</Text>
+        <Text style={[FONT.h1, { color: '#F8FAFC', marginTop: 2 }]}>{inrShort(totalValue)}</Text>
+        <Text style={[FONT.tiny, { color: totalPL >= 0 ? '#4ADE80' : '#F87171', marginTop: 4, fontWeight: '800' }]}>
+          {totalPL >= 0 ? '▲' : '▼'} {inrShort(Math.abs(totalPL))} overall P&L · {rows.length} holding{rows.length === 1 ? '' : 's'}
+        </Text>
+      </Card>
+      {rows.length === 0 ? (
+        <Card style={{ alignItems: 'center', paddingVertical: 28 }}>
+          <Icon name="briefcase-outline" size={40} color={C.faint} />
+          <Text style={[FONT.h3, { marginTop: 10 }]}>No holdings yet</Text>
+          <Text style={[FONT.sub, { marginTop: 4, textAlign: 'center' }]}>Buy shares in any company from the main market list to start building a portfolio.</Text>
+        </Card>
+      ) : rows.map(({ stock, pos }) => {
+        const value = pos.shares * stock.price;
+        const cost = pos.shares * pos.avgCost;
+        const pl = value - cost;
+        return (
+          <Pressable key={stock.id} onPress={() => onOpen(stock.id)}>
+            <Card style={{ marginBottom: 8, padding: 10 }}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[FONT.body, { fontWeight: '700' }]} numberOfLines={1}>{stock.name}</Text>
+                  <Text style={FONT.tiny}>{pos.shares} shares · avg {inrShort(pos.avgCost)}</Text>
+                </View>
+                <View style={{ alignItems: 'flex-end' }}>
+                  <Text style={[FONT.mono, { fontWeight: '800' }]}>{inrShort(value)}</Text>
+                  <Text style={[FONT.tiny, { fontWeight: '800', color: pl >= 0 ? C.green : C.red }]}>
+                    {pl >= 0 ? '+' : ''}{inrShort(pl)}
+                  </Text>
+                </View>
+              </Row>
+            </Card>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 function IpoLaunchPanel({ req, launchStock, toast, onBack, onLaunched }) {
   return (
     <View>
@@ -4304,6 +4382,17 @@ export function StockMarketModal({ visible, onClose }) {
     );
   }
 
+  if (view === 'portfolio') {
+    return (
+      <Sheet visible={visible} onClose={onClose} title="My Portfolio" height="90%">
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+          <PortfolioPanel stocks={stocks} portfolio={portfolio}
+            onBack={() => setView('list')} onOpen={id => { setView('list'); setSelectedId(id); }} />
+        </ScrollView>
+      </Sheet>
+    );
+  }
+
   return (
     <Sheet visible={visible} onClose={onClose} title="Stock Market" height="90%">
       <View style={{ flex: 1 }}>
@@ -4331,10 +4420,24 @@ export function StockMarketModal({ visible, onClose }) {
                 <Text style={[FONT.tiny, { color: '#F8FAFC', marginTop: 2 }]} numberOfLines={1}>{insight.bottom.name}</Text>
               </Pressable>
             </Row>
-            <Btn title="Launch your own IPO" kind="soft" icon="rocket-launch-outline" small style={{ marginTop: 10 }} onPress={() => setView('ipo')} />
+            <Row style={{ gap: 8, marginTop: 10 }}>
+              <View style={{ flex: 1 }}>
+                <Btn title="My Portfolio" kind="soft" icon="briefcase-outline" small onPress={() => setView('portfolio')} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Btn title="Launch IPO" kind="soft" icon="rocket-launch-outline" small onPress={() => setView('ipo')} />
+              </View>
+            </Row>
           </Card>
         ) : (
-          <Btn title="Launch your own IPO" kind="soft" icon="rocket-launch-outline" small style={{ marginBottom: 10 }} onPress={() => setView('ipo')} />
+          <Row style={{ gap: 8, marginBottom: 10 }}>
+            <View style={{ flex: 1 }}>
+              <Btn title="My Portfolio" kind="soft" icon="briefcase-outline" small onPress={() => setView('portfolio')} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Btn title="Launch IPO" kind="soft" icon="rocket-launch-outline" small onPress={() => setView('ipo')} />
+            </View>
+          </Row>
         )}
 
         <TextInput value={query} onChangeText={t => { setQuery(t); setPage(1); }} placeholder="Search companies or sectors..."
@@ -4472,7 +4575,7 @@ export function CountriesModal({ visible, onClose }) {
   );
 }
 
-// Fires once, the moment an existing save first crosses into v5.5.5 — the
+// Fires once, the moment an existing save first crosses into v10.8.5 — the
 // final grand release. Pure celebration screen, no game logic.
 export function FinaleModal({ visible, onClose }) {
   const company = useGame(s => s.company);
@@ -4486,7 +4589,7 @@ export function FinaleModal({ visible, onClose }) {
         </View>
         <Text style={[FONT.h1, { textAlign: 'center' }]}>Congratulations, {company?.name}!</Text>
         <Text style={[FONT.body, { textAlign: 'center', marginTop: 10, color: C.sub, lineHeight: 20 }]}>
-          Truck Empire Tycoon just hit its final grand release — v5.5.5. The Stock Market is open, the roads are yours, and this
+          Truck Empire Tycoon just hit its final grand release — v10.8.5. The Stock Market is open, the roads are yours, and this
           send-off is for every kilometre you've driven to get here.
         </Text>
         <Card style={{ marginTop: 18, width: '100%', backgroundColor: '#0F172A', borderColor: '#1E293B' }}>

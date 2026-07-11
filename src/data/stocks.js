@@ -25,10 +25,38 @@ export const STOCK_SECTORS = [
 
 function pick(arr, rnd) { return arr[Math.floor(rnd() * arr.length)]; }
 
-// Generates `count` unique-named companies with a random starting price,
-// volatility and drift — every company's future performance is otherwise
-// unscripted, it just random-walks day to day (see stockDailyStep below).
-export function generateStockPool(count, rnd = Math.random) {
+// Deterministic PRNG (mulberry32) — same seed always produces the exact same
+// sequence. This is what makes the stock roster (names, sectors, starting
+// prices, and even the seeded backstory below) IDENTICAL on every install:
+// two players who've never met still see "Shree Motors Ltd" trading at the
+// same starting price with the same historical chart on day 1. Forward
+// price movement from there on is genuinely per-player (each game runs its
+// own local clock/dailyTick — there's no server, so that part can't sync,
+// and this game never claims otherwise), but the roster and its backstory
+// are pinned, not random-per-install.
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+// Fixed seed for the whole game's stock roster — never change this unless
+// you intend to reshuffle every player's company list on next launch.
+export const STOCK_ROSTER_SEED = 20260101;
+export const STOCK_ROSTER_COUNT = 80;
+// Version bump forces a one-time re-seed of existing saves onto the fixed,
+// shared roster (see the migration in gameStore.js) — bump this again only
+// if the roster generation logic changes and old saves need to pick it up.
+export const STOCKS_VERSION = 2;
+
+// Generates `count` unique-named companies from a deterministic seed — same
+// seed always produces the same roster, starting prices, and historical
+// backstory. Forward performance from day 1 onward is still unscripted
+// (see stockDailyStep), evolving locally per save from here.
+export function generateStockPool(count = STOCK_ROSTER_COUNT, rnd = mulberry32(STOCK_ROSTER_SEED)) {
   const used = new Set();
   const out = [];
   let guard = 0;
@@ -41,10 +69,27 @@ export function generateStockPool(count, rnd = Math.random) {
     const basePrice = Math.round((20 + rnd() * 980) * 100) / 100; // ₹20 - ₹1,000
     const vol = 0.01 + rnd() * 0.05; // 1%-6% daily volatility
     const drift = (rnd() - 0.45) * 0.01; // small bias, slightly upward on average
+    // Seeded backstory: ~150 days of synthetic history walked BACKWARD from
+    // basePrice, so every chart already has real-looking ups and downs
+    // instead of a flat single point — identical for every player since
+    // it's generated from the same fixed seed. Numbered day 0 (today) down
+    // through negative days (the past), strictly BEFORE the real game's
+    // day 1, so stockDailyStep's future day numbers (1, 2, 3...) never
+    // collide with or precede this backstory.
+    const backDays = 150;
+    const backHistory = new Array(backDays);
+    let p = basePrice;
+    backHistory[backDays - 1] = { day: 0, price: basePrice };
+    for (let i = backDays - 2; i >= 0; i--) {
+      const shock = (rnd() - 0.5) * 2;
+      const pct = drift + vol * shock;
+      p = Math.max(2, p / (1 + pct)); // walk backward: undo the "next" step
+      backHistory[i] = { day: -(backDays - 1 - i), price: Math.round(p * 100) / 100 };
+    }
     out.push({
-      id: `stk-${out.length}-${Math.floor(rnd() * 1e6)}`,
+      id: `stk-${out.length}`,
       name, sector, price: basePrice, vol, drift,
-      history: [{ day: 1, price: basePrice }],
+      history: backHistory,
       founder: null,
     });
   }
@@ -57,10 +102,10 @@ export function stockDailyStep(stock, day, rnd = Math.random) {
   const shock = (rnd() - 0.5) * 2; // -1..1
   const pct = stock.drift + stock.vol * shock;
   const next = Math.max(2, Math.round(stock.price * (1 + pct) * 100) / 100);
-  // Cap history so 1,500+ companies don't bloat AsyncStorage forever — 120
-  // daily points (~4 months of continuous play) keeps 1Y/3Y returns using
-  // best-available data (see stockReturnOverDays) without unbounded growth.
-  const history = [...(stock.history || []), { day, price: next }].slice(-120);
+  // Cap history so a fixed 80-company roster doesn't bloat AsyncStorage
+  // forever — 200 points comfortably holds the full 150-day seeded backstory
+  // plus real ongoing play without truncating it on the very first tick.
+  const history = [...(stock.history || []), { day, price: next }].slice(-200);
   return { ...stock, price: next, history };
 }
 
