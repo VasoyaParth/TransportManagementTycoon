@@ -11,7 +11,7 @@ import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
 import { CITIES } from '../../data/cities';
 import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
-import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, TRUCK_COLORS, TRUCK_LOGOS } from '../../data/trucks';
+import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, TRUCK_COLORS, TRUCK_LOGOS, CAMPAIGNS } from '../../data/trucks';
 import { inr, inrShort } from '../../engine/economy';
 import { APP_VERSION, checkForUpdate, fmtMB, cmpVer } from '../../net/updates';
 import { exportBackup, parseBackup, readAutoBackup, pickBackupFile } from '../../engine/backup';
@@ -639,13 +639,119 @@ function RoutePreview({ points }) {
 }
 
 // ============ Truck Detail ============
-export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onShowOnMap }) {
+// Live portion of the truck modal, ISOLATED: only this panel re-renders on
+// the 1s tick. The old design ticked the entire modal — every card, SVG and
+// button rebuilt each second, which lagged the sheet and (worse) replaced
+// Pressables mid-touch after scrolling, leaving every button dead until an
+// app restart. Now the static 90% of the modal renders once per open.
+const TruckLivePanel = React.memo(function TruckLivePanel({ truckId }) {
   const toast = useToast();
   const trucks = useGame(s => s.trucks);
   const deliveries = useGame(s => s.deliveries);
+  const callMechanic = useGame(s => s.callMechanic);
+  const truck = trucks.find(t => t.id === truckId);
+  const d = truck ? deliveries.find(x => x.truckId === truck.id) : null;
+  useTick(!!truck && (truck.status === 'delivering' || truck.status === 'building'));
+  if (!truck) return null;
+  const m = modelById(truck.modelId);
+  const now = Date.now();
+  const eta = d ? fmtDur((d.endsAt - now) / 1000) : null;
+  const stopInfo = d ? deliveryStop(d, m, now) : null;
+  const totalKm = d ? d.route.roadKm : 0;
+  const kmCovered = d
+    ? (stopInfo?.stopped && stopInfo.atKm != null ? stopInfo.atKm : Math.round(totalKm * deliveryPhase(d, now).frac))
+    : 0;
+  const prog = d && totalKm > 0 ? Math.min(100, (kmCovered / totalKm) * 100) : 0;
+  const startFuel = d && d.startFuelPct != null ? d.startFuelPct : truck.fuelPct;
+  const arriveFuel = d && d.arriveFuelPct != null ? d.arriveFuelPct : startFuel;
+  const curFuel = d ? Math.max(3, Math.round(startFuel + (arriveFuel - startFuel) * (prog / 100))) : Math.round(truck.fuelPct);
+  const buildLeft = truck.status === 'building' ? Math.max(0, (truck.buildEndsAt - now) / 1000) : 0;
+  const buildPct = truck.status === 'building' ? 100 * (1 - buildLeft / truck.buildTotalSec) : 0;
+  const incident = d && d.incident;
+  const incidentLeft = incident ? Math.max(0, (incident.resolveAt - now) / 1000) : 0;
+  const doCallMechanic = () => { const r = callMechanic(d.id); toast(r.ok ? 'Mechanic on the way — delay cut short.' : r.err, r.ok ? 'success' : 'error'); };
+
+  return (
+    <>
+      {truck.status === 'delivering' && d && (
+        <Card style={{ marginBottom: 12 }}>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <Text style={FONT.h3}>{cityById(d.fromCityId)?.name} → {cityById(d.toCityId)?.name}</Text>
+            <Text style={[FONT.mono, { color: C.blue }]}>ETA {eta}</Text>
+          </Row>
+          <Progress pct={prog} color={C.green} style={{ marginTop: 8 }} />
+          <Row style={{ justifyContent: 'space-between', marginTop: 4 }}>
+            <Text style={FONT.tiny}>{kmCovered} / {totalKm} km</Text>
+            <Text style={FONT.tiny}>{Math.round(prog)}%</Text>
+          </Row>
+          <Row style={{ marginTop: 10 }}>
+            <Gauge value={stopInfo.stopped ? 0 : liveSpeed(m.speed, truck.id)} max={Math.round(m.speed * 1.15)}
+              label="Speed" unit="km/h" color={stopInfo.stopped ? C.amber : C.green} />
+            <Gauge value={curFuel} max={100} label={m.propulsion === 'electric' ? 'Charge' : 'Fuel'} unit="%"
+              color={curFuel > 50 ? C.green : curFuel > 20 ? C.amber : C.red} />
+          </Row>
+          {stopInfo.stopped && (
+            <Row style={{ marginTop: 8, backgroundColor: C.amberSoft, borderRadius: RADIUS.md, padding: 8 }}>
+              <Icon name="pause-circle-outline" size={14} color={C.amber} />
+              <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.text }]}>Truck halted — {stopInfo.label}.</Text>
+            </Row>
+          )}
+        </Card>
+      )}
+
+      {truck.status === 'delivering' && d && (
+        <Card style={{ marginBottom: 12 }}>
+          <Row style={{ justifyContent: 'space-between', marginBottom: 10 }}>
+            <Text style={FONT.h3}>Shipment Tracking</Text>
+            <Row style={{ gap: 10 }}>
+              <Row><Icon name="sleep" size={13} color={C.blue} /><Text style={[FONT.tiny, { marginLeft: 3 }]}>{d.sleepBreaks || 0} sleep</Text></Row>
+              <Row><Icon name="coffee-outline" size={13} color={C.sub} /><Text style={[FONT.tiny, { marginLeft: 3 }]}>{d.shortBreaks || 0} short</Text></Row>
+              <Row><Icon name="gas-station" size={13} color={C.amber} /><Text style={[FONT.tiny, { marginLeft: 3 }]}>{d.refuelCount || (d.stops || []).length || 0} fuel</Text></Row>
+            </Row>
+          </Row>
+          <JourneyTracker delivery={d} model={m} />
+        </Card>
+      )}
+
+      {truck.status === 'building' && (
+        <Card style={{ marginBottom: 12 }}>
+          <Row style={{ justifyContent: 'space-between' }}><Text style={FONT.h3}>Building...</Text><Text style={FONT.mono}>{fmtClock(buildLeft)}</Text></Row>
+          <Progress pct={buildPct} color={C.amber} style={{ marginTop: 8 }} />
+        </Card>
+      )}
+
+      {incident && (() => {
+        const im = incidentMeta(incident.type);
+        return (
+          <Card style={{ marginBottom: 12, borderColor: im.color }}>
+            <Row>
+              <Icon name={im.icon} size={16} color={im.color} />
+              <Text style={[FONT.body, { color: im.color, marginLeft: 6, fontWeight: '700' }]}>{im.title}</Text>
+            </Row>
+            <Text style={[FONT.tiny, { marginTop: 6 }]}>
+              {incident.penalty > 0 ? `Lost ${inr(incident.penalty)} already. ` : ''}
+              {incident.mechanicCalled ? 'Mechanic dispatched — ' : ''}Back on the road in ~{fmtDur(incidentLeft)}.
+            </Text>
+            {im.mechanic && !incident.mechanicCalled ? (
+              <Btn title="Call Mechanic" kind="blue" small icon="wrench" onPress={doCallMechanic} style={{ marginTop: 10 }} />
+            ) : !im.mechanic ? (
+              <Row style={{ marginTop: 8 }}>
+                <Icon name="information-outline" size={12} color={C.sub} />
+                <Text style={[FONT.tiny, { marginLeft: 4, flex: 1 }]}>Nothing to repair — the delivery continues automatically after the delay.</Text>
+              </Row>
+            ) : null}
+          </Card>
+        );
+      })()}
+    </>
+  );
+});
+
+export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onShowOnMap }) {
+  const toast = useToast();
+  const trucks = useGame(s => s.trucks);
   const repairTruck = useGame(s => s.repairTruck);
   const serviceTruck = useGame(s => s.serviceTruck);
-  const callMechanic = useGame(s => s.callMechanic);
   const customizeTruck = useGame(s => s.customizeTruck);
   const sellTruck = useGame(s => s.sellTruck);
   const truckResale = useGame(s => s.truckResale);
@@ -653,44 +759,24 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
   const [histAll, setHistAll] = useState(false);
   useEffect(() => { if (!visible) { setConfirmSell(false); setHistAll(false); } }, [visible]);
   const truck = trucks.find(t => t.id === truckId);
-  useTick(visible && !!truck && (truck.status === 'delivering' || truck.status === 'building'));
-  if (!truck) return <Sheet visible={visible} onClose={onClose} title="Truck" height="50%"><View /></Sheet>;
+  if (!visible || !truck) return <Sheet visible={visible && !!truck} onClose={onClose} title="Truck" height="50%"><View /></Sheet>;
+  // Everything below renders ONCE per open (plus on real state changes) —
+  // no per-second tick here; live data lives inside <TruckLivePanel/>.
   const m = modelById(truck.modelId);
   const meta = statusMeta[truck.status];
-  const d = deliveries.find(x => x.truckId === truck.id);
-  const now = Date.now();
-  const eta = d ? fmtDur((d.endsAt - now) / 1000) : null;
-  // Distance & fuel are PHASE-aware: pinned at 0 while loading, frozen at each
-  // halt (breaks, refuels, incidents), at 100% while unloading — never creeping
-  // up on raw elapsed time while the truck is stood still.
-  const stopInfo = d ? deliveryStop(d, m, now) : null;
-  const totalKm = d ? d.route.roadKm : 0;
-  const kmCovered = d
-    ? (stopInfo?.stopped && stopInfo.atKm != null ? stopInfo.atKm : Math.round(totalKm * deliveryPhase(d, now).frac))
-    : 0;
-  const prog = d && totalKm > 0 ? Math.min(100, (kmCovered / totalKm) * 100) : 0;
-  // Live fuel drains with distance actually driven (not with waiting time).
-  const startFuel = d && d.startFuelPct != null ? d.startFuelPct : truck.fuelPct;
-  const arriveFuel = d && d.arriveFuelPct != null ? d.arriveFuelPct : startFuel;
-  const curFuel = d ? Math.max(3, Math.round(startFuel + (arriveFuel - startFuel) * (prog / 100))) : Math.round(truck.fuelPct);
-  const buildLeft = truck.status === 'building' ? Math.max(0, (truck.buildEndsAt - now) / 1000) : 0;
-  const buildPct = truck.status === 'building' ? 100 * (1 - buildLeft / truck.buildTotalSec) : 0;
-  // Repair/service bills honour the mechanic-skill workshop discount.
   const mechDisc = useGame.getState().mechDiscount();
   const fee = Math.round(m.price * 0.04 * (1 - mechDisc));
   const condition = Math.round(truck.condition == null ? 100 : truck.condition);
   const conditionColor = condition >= 70 ? C.green : condition >= 40 ? C.amber : C.red;
   const serviceCost = Math.round(m.price * 0.05 * (1 - mechDisc));
-  const incident = d && d.incident;
-  const incidentLeft = incident ? Math.max(0, (incident.resolveAt - now) / 1000) : 0;
+  const fuelNow = Math.round(truck.fuelPct);
 
   const doRepair = (gold) => { const r = repairTruck(truck.id, gold); toast(r.ok ? 'Repaired!' : r.err, r.ok ? 'success' : 'error'); };
   const doService = () => { const r = serviceTruck(truck.id); toast(r.ok ? 'Serviced — condition restored!' : r.err, r.ok ? 'success' : 'error'); };
-  const doCallMechanic = () => { const r = callMechanic(d.id); toast(r.ok ? 'Mechanic on the way — delay cut short.' : r.err, r.ok ? 'success' : 'error'); };
 
   return (
     <Sheet visible={visible} onClose={onClose} title={truck.customName || m.name} height="86%">
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" removeClippedSubviews={false}>
         <Row style={{ marginBottom: 12 }}>
           <TruckArtBadge model={m} color={truck.color} size={60} bg={meta.bg} />
           <View style={{ marginLeft: 12, flex: 1 }}>
@@ -700,87 +786,9 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
           </View>
         </Row>
 
-        {truck.status === 'delivering' && d && (
-          <Card style={{ marginBottom: 12 }}>
-            <Row style={{ justifyContent: 'space-between' }}>
-              <Text style={FONT.h3}>{cityById(d.fromCityId)?.name} → {cityById(d.toCityId)?.name}</Text>
-              <Text style={[FONT.mono, { color: C.blue }]}>ETA {eta}</Text>
-            </Row>
-            <Progress pct={prog} color={C.green} style={{ marginTop: 8 }} />
-            <Row style={{ justifyContent: 'space-between', marginTop: 4 }}>
-              <Text style={FONT.tiny}>{kmCovered} / {totalKm} km</Text>
-              <Text style={FONT.tiny}>{Math.round(prog)}%</Text>
-            </Row>
-            {/* Live gauges — speed varies realistically while driving, and drops
-                to 0 whenever the truck is actually halted (loading, unloading,
-                ferry, incident, refuelling, driver breaks). */}
-            {(() => {
-              const stop = stopInfo;
-              return (
-                <>
-                  <Row style={{ marginTop: 10 }}>
-                    <Gauge value={stop.stopped ? 0 : liveSpeed(m.speed, truck.id)} max={Math.round(m.speed * 1.15)}
-                      label="Speed" unit="km/h" color={stop.stopped ? C.amber : C.green} />
-                    <Gauge value={curFuel} max={100} label={m.propulsion === 'electric' ? 'Charge' : 'Fuel'} unit="%"
-                      color={curFuel > 50 ? C.green : curFuel > 20 ? C.amber : C.red} />
-                  </Row>
-                  {stop.stopped && (
-                    <Row style={{ marginTop: 8, backgroundColor: C.amberSoft, borderRadius: RADIUS.md, padding: 8 }}>
-                      <Icon name="pause-circle-outline" size={14} color={C.amber} />
-                      <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.text }]}>Truck halted — {stop.label}.</Text>
-                    </Row>
-                  )}
-                </>
-              );
-            })()}
-          </Card>
-        )}
+        {/* Live trip / build / incident — the ONLY part that ticks */}
+        <TruckLivePanel truckId={truck.id} />
 
-        {/* Amazon-style route tracker */}
-        {truck.status === 'delivering' && d && (
-          <Card style={{ marginBottom: 12 }}>
-            <Row style={{ justifyContent: 'space-between', marginBottom: 10 }}>
-              <Text style={FONT.h3}>Shipment Tracking</Text>
-              <Row style={{ gap: 10 }}>
-                <Row><Icon name="sleep" size={13} color={C.blue} /><Text style={[FONT.tiny, { marginLeft: 3 }]}>{d.sleepBreaks || 0} sleep</Text></Row>
-                <Row><Icon name="coffee-outline" size={13} color={C.sub} /><Text style={[FONT.tiny, { marginLeft: 3 }]}>{d.shortBreaks || 0} short</Text></Row>
-                <Row><Icon name="gas-station" size={13} color={C.amber} /><Text style={[FONT.tiny, { marginLeft: 3 }]}>{d.refuelCount || (d.stops || []).length || 0} fuel</Text></Row>
-              </Row>
-            </Row>
-            <JourneyTracker delivery={d} model={m} />
-          </Card>
-        )}
-        {truck.status === 'building' && (
-          <Card style={{ marginBottom: 12 }}>
-            <Row style={{ justifyContent: 'space-between' }}><Text style={FONT.h3}>Building...</Text><Text style={FONT.mono}>{fmtClock(buildLeft)}</Text></Row>
-            <Progress pct={buildPct} color={C.amber} style={{ marginTop: 8 }} />
-          </Card>
-        )}
-        {incident && (() => {
-          const im = incidentMeta(incident.type);
-          return (
-            <Card style={{ marginBottom: 12, borderColor: im.color }}>
-              <Row>
-                <Icon name={im.icon} size={16} color={im.color} />
-                <Text style={[FONT.body, { color: im.color, marginLeft: 6, fontWeight: '700' }]}>{im.title}</Text>
-              </Row>
-              <Text style={[FONT.tiny, { marginTop: 6 }]}>
-                {incident.penalty > 0 ? `Lost ${inr(incident.penalty)} already. ` : ''}
-                {incident.mechanicCalled ? 'Mechanic dispatched — ' : ''}Back on the road in ~{fmtDur(incidentLeft)}.
-              </Text>
-              {/* Mechanic only for physical breakdowns — theft/checkpost/weather
-                  can't be "repaired", the driver just rides it out. */}
-              {im.mechanic && !incident.mechanicCalled ? (
-                <Btn title="Call Mechanic" kind="blue" small icon="wrench" onPress={doCallMechanic} style={{ marginTop: 10 }} />
-              ) : !im.mechanic ? (
-                <Row style={{ marginTop: 8 }}>
-                  <Icon name="information-outline" size={12} color={C.sub} />
-                  <Text style={[FONT.tiny, { marginLeft: 4, flex: 1 }]}>Nothing to repair — the delivery continues automatically after the delay.</Text>
-                </Row>
-              ) : null}
-            </Card>
-          );
-        })()}
         {truck.status === 'broken' && (
           <Card style={{ marginBottom: 12, borderColor: C.red }}>
             <Row><Icon name="alert" size={16} color={C.red} /><Text style={[FONT.body, { color: C.red, marginLeft: 6, fontWeight: '700' }]}>This truck needs repair.</Text></Row>
@@ -811,23 +819,19 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
             ? <SpecRow icon="battery-high" label="Battery" value={`${m.battery} kWh`} />
             : <SpecRow icon="fuel" label="Fuel tank" value={`${m.tank} L`} />}
           <SpecRow icon="map-marker-distance" label="Full range" value={`${m.range} km`} />
-          <SpecRow icon="fuel" label={m.propulsion === 'electric' ? 'Charge now' : 'Fuel now'}
-            value={`${curFuel}% · ~${Math.round((curFuel / 100) * m.range)} km left`} />
+          <SpecRow icon="fuel" label={m.propulsion === 'electric' ? 'Charge (at last stop)' : 'Fuel (at last stop)'}
+            value={`${fuelNow}% · ~${Math.round((fuelNow / 100) * m.range)} km`} />
           <SpecRow icon="wrench" label="Maintenance" value={`${inr(m.maint)}/km`} />
           <SpecRow icon="cash" label="Purchase price" value={inr(m.price)} />
         </Card>
 
         <Card style={{ marginTop: 10 }}>
           <Text style={[FONT.h3, { marginBottom: 4 }]}>Lifetime</Text>
-          <SpecRow icon="map-marker-path" label="Distance driven"
-            value={`${Math.round(truck.km + kmCovered).toLocaleString()} km${d ? ` (+${kmCovered} in progress)` : ''}`} />
-          <SpecRow icon="package-variant-closed-check" label="Deliveries"
-            value={d ? `${truck.deliveries} (+1 in progress · ${Math.round(prog)}%)` : truck.deliveries} />
+          <SpecRow icon="map-marker-path" label="Distance driven" value={`${Math.round(truck.km).toLocaleString()} km`} />
+          <SpecRow icon="package-variant-closed-check" label="Deliveries" value={truck.deliveries} />
           <SpecRow icon="map-marker" label="Location" value={cityById(truck.cityId)?.name || '—'} />
         </Card>
 
-        {/* This truck's own route history — every completed trip (up to the
-            last 100), 5 shown initially with a Show-more expander. */}
         {(truck.log || []).length > 0 && (() => {
           const log = truck.log || [];
           const shownLog = histAll ? log : log.slice(0, 5);
@@ -907,7 +911,6 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
           {truck.status === 'parked' && <Btn title="New Delivery" kind="green" icon="truck-fast" style={{ flex: 1 }} onPress={() => { onClose(); onNewDelivery(truck.id); }} />}
           <Btn title="Show on Map" kind="soft" icon="crosshairs-gps" style={{ flex: 1 }} onPress={() => onShowOnMap(truck)} />
         </Row>
-        {/* Sell truck — depreciated resale value */}
         {(truck.status === 'parked' || truck.status === 'broken') && (
           <Btn
             title={confirmSell ? `Confirm sell for ${inr(truckResale(truck.id))}?` : `Sell Truck · ${inr(truckResale(truck.id))}`}
@@ -2351,6 +2354,21 @@ function RoadmapTab() {
 }
 
 // ============ Settings ============
+// v3.1.0 redesign: info-first. Profile & Company open as clean VIEW pages —
+// a read-only summary card with an Edit button; the form only appears in
+// edit mode and returns to the view after saving.
+function ViewRow({ icon, label, value, divider }) {
+  return (
+    <Row style={[{ paddingVertical: 9, justifyContent: 'space-between' }, divider && { borderTopWidth: 1, borderTopColor: C.border }]}>
+      <Row style={{ flex: 1 }}>
+        <Icon name={icon} size={16} color={C.sub} />
+        <Text style={[FONT.sub, { marginLeft: 8 }]}>{label}</Text>
+      </Row>
+      <Text style={[FONT.body, { fontWeight: '700', maxWidth: '55%' }]} numberOfLines={1}>{value}</Text>
+    </Row>
+  );
+}
+
 export function SettingsModal({ visible, onClose, initialTab }) {
   const toast = useToast();
   const company = useGame(s => s.company);
@@ -2363,7 +2381,9 @@ export function SettingsModal({ visible, onClose, initialTab }) {
   const resetGame = useGame(s => s.resetGame);
   const gameDay = useGame(s => s.gameDay);
   const [tab, setTab] = useState(initialTab || 'profile');
-  useEffect(() => { if (visible) setTab(initialTab || 'profile'); }, [visible, initialTab]);
+  const [editing, setEditing] = useState(null); // 'profile' | 'company' | null — view-first pages
+  useEffect(() => { if (visible) { setTab(initialTab || 'profile'); setEditing(null); } }, [visible, initialTab]);
+  useEffect(() => { setEditing(null); }, [tab]);
   const [ceo, setCeo] = useState(company?.ceo || '');
   const [avatar, setAvatar] = useState(company?.avatar);
   const [cname, setCname] = useState(company?.name || '');
@@ -2400,39 +2420,80 @@ export function SettingsModal({ visible, onClose, initialTab }) {
         <Row style={{ gap: 6 }}>{TABS.map(([id, l, icon]) => <Chip key={id} label={l} icon={icon} active={tab === id} onPress={() => { if (id === 'about' && tab === 'about') tapCuriousEgg(); setTab(id); }} />)}</Row>
       </ScrollView>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
-        {tab === 'profile' && (
+        {tab === 'profile' && (editing !== 'profile' ? (
           <>
-            <SectionTitle icon="account-circle" text="Your Profile" />
+            {/* VIEW: clean identity card, no form in sight */}
+            <Card style={{ alignItems: 'center', paddingVertical: 20, marginBottom: 12, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
+              <Pressable onPress={tapMirrorEgg}>
+                <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: '#1E293B', alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name={company?.avatar || 'account-tie'} size={38} color="#5B8DF0" />
+                </View>
+              </Pressable>
+              <Text style={[FONT.h2, { marginTop: 10, color: '#F8FAFC' }]}>{company?.ceo}</Text>
+              <Text style={[FONT.tiny, { color: '#94A3B8' }]}>CEO · {company?.name}</Text>
+              <Btn title="Edit Profile" kind="blue" small icon="pencil" style={{ marginTop: 12 }}
+                onPress={() => { setCeo(company?.ceo || ''); setAvatar(company?.avatar); setEditing('profile'); }} />
+            </Card>
+            <SectionTitle icon="chart-box-outline" text="Lifetime Stats" />
+            <Card>
+              <ViewRow icon="package-variant-closed-check" label="Deliveries" value={String(stats.deliveries)} />
+              <ViewRow divider icon="cash-multiple" label="Revenue" value={inrShort(stats.revenue)} />
+              <ViewRow divider icon="map-marker-distance" label="Distance" value={`${Math.round(stats.km).toLocaleString()} km`} />
+              <ViewRow divider icon="truck" label="Trucks owned" value={String(trucks.length)} />
+              <ViewRow divider icon="account-group" label="Staff" value={String(staff.length)} />
+              <ViewRow divider icon="calendar" label="Current day" value={String(day)} />
+            </Card>
+          </>
+        ) : (
+          <>
+            {/* EDIT: the form appears only on demand */}
+            <SectionTitle icon="pencil" text="Edit Profile" />
             <Card>
               <Text style={[FONT.tiny, { marginBottom: 4 }]}>CEO NAME</Text>
               <TextInput value={ceo} onChangeText={setCeo} maxLength={30} style={cs.input} />
               <Text style={[FONT.tiny, { marginTop: 14, marginBottom: 4 }]}>AVATAR</Text>
               <IconGrid options={AVATARS} value={avatar} onChange={o => { if (o === avatar) tapMirrorEgg(); setAvatar(o); }} />
             </Card>
-            <SectionTitle icon="chart-box-outline" text="Lifetime Stats" />
-            <Card>
-              <SpecRow icon="package-variant-closed-check" label="Deliveries" value={stats.deliveries} />
-              <SpecRow icon="cash-multiple" label="Revenue" value={inrShort(stats.revenue)} />
-              <SpecRow icon="map-marker-distance" label="Distance" value={`${Math.round(stats.km).toLocaleString()} km`} />
-              <SpecRow icon="truck" label="Trucks owned" value={trucks.length} />
-              <SpecRow icon="account-group" label="Staff" value={staff.length} />
-              <SpecRow icon="calendar" label="Current day" value={day} />
-            </Card>
-            <Btn title="Save Profile" kind="green" icon="content-save-outline" style={{ marginTop: 14 }} onPress={() => { saveCompany({ ceo, avatar }); toast('Profile saved', 'success'); }} />
+            <Btn title="Save Profile" kind="green" icon="content-save-outline" style={{ marginTop: 14 }}
+              onPress={() => { saveCompany({ ceo, avatar }); setEditing(null); toast('Profile saved', 'success'); }} />
+            <Btn title="Cancel" kind="ghost" style={{ marginTop: 8 }} onPress={() => setEditing(null)} />
           </>
-        )}
-        {tab === 'company' && (
+        ))}
+        {tab === 'company' && (editing !== 'company' ? (
           <>
-            <SectionTitle icon="domain" text="Company Identity" />
+            <Card style={{ alignItems: 'center', paddingVertical: 20, marginBottom: 12, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
+              <Pressable onPress={tapBrandedEgg}>
+                <View style={{ width: 72, height: 72, borderRadius: 20, backgroundColor: '#1E293B', alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name={company?.logo || 'truck'} size={38} color="#5B8DF0" />
+                </View>
+              </Pressable>
+              <Text style={[FONT.h2, { marginTop: 10, color: '#F8FAFC' }]}>{company?.name}</Text>
+              <Text style={[FONT.tiny, { color: '#94A3B8' }]}>Est. day 1 · HQ {cityById(company?.hqCityId)?.name}</Text>
+              <Btn title="Edit Company" kind="blue" small icon="pencil" style={{ marginTop: 12 }}
+                onPress={() => { setCname(company?.name || ''); setLogo(company?.logo); setEditing('company'); }} />
+            </Card>
+            <SectionTitle icon="information-outline" text="Company Details" />
+            <Card>
+              <ViewRow icon="domain" label="Company name" value={company?.name || '—'} />
+              <ViewRow divider icon="account-tie" label="CEO" value={company?.ceo || '—'} />
+              <ViewRow divider icon="map-marker" label="Headquarters" value={cityById(company?.hqCityId)?.name || '—'} />
+              <ViewRow divider icon="calendar-check" label="Founded" value={company?.createdAt ? new Date(company.createdAt).toDateString() : '—'} />
+            </Card>
+          </>
+        ) : (
+          <>
+            <SectionTitle icon="pencil" text="Edit Company" />
             <Card>
               <Text style={[FONT.tiny, { marginBottom: 4 }]}>COMPANY NAME</Text>
               <TextInput value={cname} onChangeText={setCname} maxLength={40} style={cs.input} />
               <Text style={[FONT.tiny, { marginTop: 14, marginBottom: 4 }]}>LOGO</Text>
               <IconGrid options={LOGOS} value={logo} onChange={o => { if (o === logo) tapBrandedEgg(); setLogo(o); }} />
             </Card>
-            <Btn title="Save Company" kind="green" icon="content-save-outline" style={{ marginTop: 14 }} onPress={() => { saveCompany({ name: cname, logo }); toast('Company saved', 'success'); }} />
+            <Btn title="Save Company" kind="green" icon="content-save-outline" style={{ marginTop: 14 }}
+              onPress={() => { saveCompany({ name: cname, logo }); setEditing(null); toast('Company saved', 'success'); }} />
+            <Btn title="Cancel" kind="ghost" style={{ marginTop: 8 }} onPress={() => setEditing(null)} />
           </>
-        )}
+        ))}
         {tab === 'gameplay' && (
           <>
             <SectionTitle icon="controller-classic" text="Simulation" />
@@ -3074,6 +3135,9 @@ export function HubInfoModal({ visible, onClose, cityId, onNewDelivery, onOpenTr
 // a real dashboard, not a shortcut into Settings.
 export function CompanyInsightsModal({ visible, onClose, onOpenSettings }) {
   const state = useGame(s => s);
+  // PERF: once opened these sheets stay mounted; skip all the analytics work
+  // (and the whole render tree) while hidden.
+  if (!visible) return <Sheet visible={false} onClose={onClose} title="Company Insights" height="88%"><View /></Sheet>;
   const company = state.company;
   const hq = company ? cityById(company.hqCityId) : null;
   if (!company) return <Sheet visible={visible} onClose={onClose} title="Company" height="40%"><View /></Sheet>;
@@ -3165,6 +3229,9 @@ export function CompanyInsightsModal({ visible, onClose, onOpenSettings }) {
 export function NewsModal({ visible, onClose }) {
   const state = useGame(s => s);
   const day = state.gameDay().day;
+  // Suggestions memo must run unconditionally (hooks), but the heavy city
+  // scans inside it only execute while the sheet is visible.
+  const hidden = !visible;
   const fuel = fuelFactorForDay(day);
   const fuelY = fuelFactorForDay(Math.max(1, day - 1));
   const zones = state.weather || [];
@@ -3182,6 +3249,7 @@ export function NewsModal({ visible, onClose }) {
 
   // Suggested destinations: busy tier-1/2 unlocked cities with CLEAR skies.
   const suggestions = useMemo(() => {
+    if (hidden) return [];
     const inZone = (c) => zones.some(z => {
       const kLat = 111, kLng = 111 * Math.cos((z.lat * Math.PI) / 180);
       const dy = (c.lat - z.lat) * kLat, dx = (c.lng - z.lng) * kLng;
@@ -3192,7 +3260,8 @@ export function NewsModal({ visible, onClose }) {
       .sort((a, b) => (b.pop || 0) - (a.pop || 0))
       .filter((_, i) => (i + day) % 7 < 3) // rotate picks day to day
       .slice(0, 4);
-  }, [zones, unlocked, day]);
+  }, [zones, unlocked, day, hidden]);
+  if (hidden) return <Sheet visible={false} onClose={onClose} title="Apna News, Tera Kya Jata" height="88%"><View /></Sheet>;
 
   const gossip = [
     'Transporters association demands wider bypasses around metro mandis. Hamare drivers bole: "pehle chai ka thela hatao".',
@@ -3285,6 +3354,43 @@ export function NewsModal({ visible, onClose }) {
           ))}
           <Text style={[FONT.tiny, { marginTop: 8 }]}>Picks rotate daily — clear-sky tier-1/2 cities in your unlocked countries.</Text>
         </Card>
+
+        {/* BREAKING: your empire's own wire — live incidents, thefts,
+            marketing launches and the freshest company headlines. */}
+        <SectionTitle icon="flash" text="Breaking — Empire Wire" />
+        {(() => {
+          const items = [];
+          // Live incidents on trucks right now
+          for (const d of state.deliveries) {
+            if (!d.incident) continue;
+            const t = state.trucks.find(x => x.id === d.truckId);
+            const im = incidentMeta(d.incident.type);
+            items.push({ key: 'inc' + d.id, icon: im.icon, color: im.color, tag: 'HAPPENING NOW',
+              text: `${im.title.replace('!', '')} — ${state.company?.name}'s ${t ? (t.customName || modelById(t.modelId).name) : 'truck'} held up en route to ${cityById(d.toCityId)?.name}.` });
+          }
+          // Marketing campaigns on air
+          for (const a of state.campaigns.filter(x => x.endsAt > Date.now())) {
+            const def = CAMPAIGNS.find(c => c.id === a.campaignId);
+            if (def) items.push({ key: 'mk' + a.id, icon: 'bullhorn', color: C.blue, tag: 'AD WATCH',
+              text: `${state.company?.name} blankets the market with "${def.name}" — rivals reportedly sweating (+${Math.round(def.boost * 100)}% freight buzz).` });
+          }
+          // Freshest company headlines from the notification wire
+          for (const n of state.notifications.slice(0, 6)) {
+            items.push({ key: n.id, icon: n.icon, color: C.sub, tag: relTime(n.ts).toUpperCase(), text: n.message });
+          }
+          if (!items.length) return <Card style={{ marginBottom: 12 }}><Text style={FONT.sub}>A quiet hour on the wire — even the bandits are on chai break.</Text></Card>;
+          return items.slice(0, 9).map((it, i) => (
+            <Card key={it.key} style={{ marginBottom: 6, padding: 10, borderLeftWidth: 3, borderLeftColor: it.color || C.red }}>
+              <Row style={{ alignItems: 'flex-start' }}>
+                <Icon name={it.icon || 'flash'} size={16} color={it.color || C.red} style={{ marginTop: 1 }} />
+                <View style={{ marginLeft: 8, flex: 1 }}>
+                  <Text style={[FONT.tiny, { fontWeight: '900', color: '#C0161C', fontSize: 9, letterSpacing: 0.5 }]}>{it.tag}</Text>
+                  <Text style={FONT.body} numberOfLines={3}>{it.text}</Text>
+                </View>
+              </Row>
+            </Card>
+          ));
+        })()}
 
         {/* World events */}
         {events.length > 0 && (

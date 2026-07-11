@@ -5,7 +5,7 @@ import { StatusBar, PermissionsAndroid, Platform, AppState } from 'react-native'
 import { useGame } from './store/gameStore';
 import { ToastProvider } from './ui/components';
 import { C } from './ui/theme';
-import Splash, { BootSplash } from './ui/screens/Splash';
+import Splash from './ui/screens/Splash';
 import Onboarding from './ui/screens/Onboarding';
 import GameScreen from './ui/screens/GameScreen';
 import { initSound, setSoundEnabled, setMusicVolume, setSfxVolume } from './engine/sound';
@@ -28,7 +28,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const tm = setTimeout(() => setSplashDone(true), 2800);
+    // Native-only splash: no artificial hold — enter the game as soon as the
+    // save has hydrated (the map's own native-look cover takes it from there).
+    const tm = setTimeout(() => setSplashDone(true), 350);
     return () => clearTimeout(tm);
   }, []);
 
@@ -65,16 +67,12 @@ export default function App() {
     }).catch(() => {});
   }, []);
 
-  // Full-brand boot splash while the saved game hydrates from disk — the very
-  // first thing the player sees, so it matches the launcher icon and splash.
-  // Held for a ~2.8s minimum even when hydration is instant.
+  // NO custom boot splash (v3.2.0): while the save hydrates, React renders
+  // nothing — so the NATIVE launch screen (navy + truck logo, set in
+  // styles.xml/launch_screen.xml) simply stays on screen. One splash, native,
+  // from icon-tap until the game is ready.
   if (!hydrated || !splashDone) {
-    return (
-      <>
-        <StatusBar barStyle="light-content" backgroundColor="#0F1D30" />
-        <BootSplash />
-      </>
-    );
+    return <StatusBar barStyle="light-content" backgroundColor="#0F1D30" translucent={false} />;
   }
 
   return (
