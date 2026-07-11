@@ -12,7 +12,7 @@ import { STAFF_NAMES, STAFF_LEVELS } from '../data/staffNames';
 import { CITIES } from '../data/cities';
 import {
   generateStockPool, stockDailyStep, stockYearReturn, stockReturnOverDays, STOCK_SECTORS, STOCK_TIMEFRAMES,
-  liveJitterPct, liveStockPrice, isMarketOpen, fakeTradeFor, stockFundamentals,
+  liveJitterPct, liveStockPrice, isMarketOpen, fakeTradeFor, stockFundamentals, STOCKS_VERSION,
 } from '../data/stocks';
 import { computeRoute, planFuelStops, cityById } from '../engine/routing';
 import { cmpVer } from '../net/updates';
@@ -832,6 +832,7 @@ const initialState = {
   stocks: [], // listed companies: {id, name, sector, price, vol, drift, history, founder}
   portfolio: {}, // stockId -> {shares, avgCost}
   lastStockDay: 0,
+  stocksVersion: 0, // bump target for the fixed shared roster — see STOCKS_VERSION migration
   weather: [], // today's active weather zones (regenerated each game day)
   weatherDay: 0,
   lastWeatherEvolveAt: 0, // real ms of the last gentle weather-evolution step
@@ -917,7 +918,7 @@ export const useGame = create(
         };
         set({
           phase: 'game',
-          updateGiftVersion: '3.0.0', // fresh companies skip only the old "two horizons" gift — the v5.5.5 Grand Finale (settings.finaleSeen) is NOT stamped here, so every new company still gets that celebration once
+          updateGiftVersion: '3.0.0', // fresh companies skip only the old "two horizons" gift — the v10.8.5 Grand Finale (settings.finaleSeen) is NOT stamped here, so every new company still gets that celebration once
           company: { name, ceo, logo, avatar, hqCityId, code, createdAt: Date.now() },
           balance: startCapital - model.price,
           gold: 100,
@@ -931,9 +932,10 @@ export const useGame = create(
           unlockedCountries: ['IN'],
           contracts: randomContracts(1),
           candidates: randomCandidates(),
-          stocks: generateStockPool(1500),
+          stocks: generateStockPool(),
           portfolio: {},
           lastStockDay: 0,
+          stocksVersion: STOCKS_VERSION,
           notifications: [makeNotification('system', 'rocket-launch',
             `${name} is live! Your first ${model.name} is being built at ${hq.name}.`)],
         });
@@ -1067,7 +1069,7 @@ export const useGame = create(
             'UPDATE 3.0.0 IS HERE — the biggest one ever! 17 new countries across two horizons: Thailand to the Philippines & Indonesia in the east, Saudi Arabia to Kenya & Ethiopia in the west. Welcome gift: +₹2.5 Crore + 300 Gold. Thank you for building your empire with us!');
           play('coin', 1);
         }
-        // ---- v5.5.5 Grand Finale gift: the Stock Market goes live, and
+        // ---- v10.8.5 Grand Finale gift: the Stock Market goes live, and
         // this is the final major content release. Deliberately on its OWN
         // flag (settings.finaleSeen) instead of chaining onto
         // updateGiftVersion — every company (brand new or returning) gets
@@ -1079,9 +1081,9 @@ export const useGame = create(
             settings: { ...gcur.settings, finaleSeen: true },
             gold: gcur.gold + 500, balance: gcur.balance + 50000000,
           });
-          get().logLedger('bonus', 'party-popper', 'v5.5.5 Grand Finale gift — Stock Market is live!', 50000000);
+          get().logLedger('bonus', 'party-popper', 'v10.8.5 Grand Finale gift — Stock Market is live!', 50000000);
           get().notify('system', 'party-popper',
-            'CONGRATULATIONS — TRUCK EMPIRE TYCOON v5.5.5 IS HERE! The Stock Market has opened: 1,500+ companies to trade, a live ticker, candlestick charts, and your own IPO to launch once you\'ve earned it. This is our final grand release — thank you for building this empire with us. +₹5 Crore + 500 Gold to celebrate!');
+            'CONGRATULATIONS — TRUCK EMPIRE TYCOON v10.8.5 IS HERE! The Stock Market has opened: 80 fixed companies to trade, a live ticker, candlestick charts, and your own IPO to launch once you\'ve earned it. This is our final grand release — thank you for building this empire with us. +₹5 Crore + 500 Gold to celebrate!');
           play('coin', 1);
         }
         // ---- v2.4.0 daily/periodic systems ----
@@ -1250,13 +1252,33 @@ export const useGame = create(
             if (s.weekly) get().notify('system', 'calendar-week', 'New weekly challenges are live — big bonus for a clean sweep!');
           }
         }
-        // Stock market backfill: any save started BEFORE the Stock Market
-        // existed (only createCompany seeds `stocks` for brand-new
-        // companies) would otherwise have an empty listing forever — the
-        // market sheet would show nothing but the IPO button. One-time,
-        // cheap (a few ms even at 1,500 companies).
-        if (!(s.stocks || []).length) {
-          set({ stocks: generateStockPool(1500) });
+        // Stock market migration: any save on an older stocksVersion (either
+        // pre-dating the feature entirely, with stocks=[], or created before
+        // the roster became a fixed shared list) gets moved onto the current
+        // fixed roster — every player ends up with the SAME company names,
+        // sectors and starting/backstory prices. Any shares already held are
+        // refunded at their last-known value (fair cash-out, since the old
+        // stock ids no longer exist) rather than silently vanishing.
+        if ((s.stocksVersion || 0) < STOCKS_VERSION) {
+          const cur = get();
+          let refund = 0;
+          for (const [stockId, pos] of Object.entries(cur.portfolio || {})) {
+            const old = (cur.stocks || []).find(x => x.id === stockId);
+            if (old) refund += pos.shares * old.price;
+          }
+          set({
+            stocks: generateStockPool(),
+            portfolio: {},
+            lastStockDay: 0,
+            stocksVersion: STOCKS_VERSION,
+            balance: cur.balance + refund,
+          });
+          if (refund > 0) {
+            get().logLedger('stock', 'bank-check', 'Stock market re-listed — old holdings cashed out', refund);
+            get().notify('system', 'bank-check', `The exchange re-listed under a shared, fixed company roster — your old holdings were cashed out for ${inr(refund)}.`);
+          } else {
+            get().notify('system', 'finance', 'The Stock Market now runs a fixed, shared company roster — same companies for every player.');
+          }
         }
         // Stock market: once per game day, every listed company takes one
         // random-walk price step (see stockDailyStep) — cheap since it only
