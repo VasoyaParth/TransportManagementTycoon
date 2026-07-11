@@ -322,24 +322,19 @@ const st = StyleSheet.create({
     width: 34, height: 34, borderRadius: 17, backgroundColor: C.blueSoft,
     alignItems: 'center', justifyContent: 'center',
   },
-  // Single floating frosted header pill — glassmorphism pass: more
-  // translucent (map shows through), a brighter top edge to fake a glass
-  // specular highlight, softer/wider shadow for a "floating slab" feel.
-  // No real blur (no native module in this project) — this is the closest
-  // look achievable with opacity/border/shadow alone.
+  // Single floating frosted header pill (Samsung-style glass) over the map.
   hdrPill: {
     position: 'absolute', top: 10, left: 10, right: 10, flexDirection: 'row', alignItems: 'center',
     paddingLeft: 14, paddingRight: 4, paddingVertical: 6,
-    backgroundColor: 'rgba(255,255,255,0.62)', borderRadius: 26,
-    borderWidth: 1, borderTopColor: 'rgba(255,255,255,0.95)', borderColor: 'rgba(255,255,255,0.45)',
-    shadowColor: '#0B0F14', shadowOpacity: 0.14, shadowRadius: 20, shadowOffset: { width: 0, height: 8 }, elevation: 8,
+    backgroundColor: 'rgba(255,255,255,0.88)', borderRadius: 26,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.7)',
+    shadowColor: '#0B0F14', shadowOpacity: 0.16, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 8,
   },
   // Right-side vertical action stack (garage / contracts / power-ups).
   actionStack: { position: 'absolute', top: 76, right: 12, gap: 8 },
   actionBtn: {
     width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.68)', borderWidth: 1, borderTopColor: 'rgba(255,255,255,0.95)', borderColor: 'rgba(255,255,255,0.4)',
-    shadowColor: '#0B0F14', shadowOpacity: 0.1, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 4,
+    backgroundColor: 'rgba(255,255,255,0.94)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.7)',
   },
   // Gold chip beside the balance.
   goldChip: {
@@ -359,20 +354,19 @@ const st = StyleSheet.create({
     borderRadius: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.7)',
     shadowColor: '#0B0F14', shadowOpacity: 0.12, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 4,
   },
-  // Floating pill navigation — glass pass: more translucent + bright top edge.
+  // Floating pill navigation (Samsung-style) — not edge-to-edge, frosted glass.
   nav: {
     position: 'absolute', left: 12, right: 12, bottom: 14, flexDirection: 'row',
-    backgroundColor: 'rgba(255,255,255,0.64)', borderRadius: 30, paddingVertical: 9, paddingHorizontal: 6,
-    borderWidth: 1, borderTopColor: 'rgba(255,255,255,0.95)', borderColor: 'rgba(255,255,255,0.42)',
-    shadowColor: '#0B0F14', shadowOpacity: 0.14, shadowRadius: 24, shadowOffset: { width: 0, height: 10 }, elevation: 10,
+    backgroundColor: 'rgba(255,255,255,0.88)', borderRadius: 30, paddingVertical: 9, paddingHorizontal: 6,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.7)',
+    shadowColor: '#0B0F14', shadowOpacity: 0.16, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 10,
   },
   navItem: { flex: 1, alignItems: 'center', gap: 2, paddingVertical: 2 },
   navTxt: { fontSize: 9.5, fontWeight: '700', color: C.sub },
-  // Delivery button — identical glass chrome to the map toggle buttons.
+  // Delivery button — identical chrome to the map toggle buttons (one right-column set).
   fab: {
     position: 'absolute', right: 14, bottom: 84, width: 40, height: 40, borderRadius: 20,
     alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.68)', borderWidth: 1, borderTopColor: 'rgba(255,255,255,0.95)', borderColor: 'rgba(255,255,255,0.4)',
-    shadowColor: '#0B0F14', shadowOpacity: 0.1, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 4,
+    backgroundColor: 'rgba(255,255,255,0.94)', borderWidth: 1, borderColor: C.border,
   },
 });
