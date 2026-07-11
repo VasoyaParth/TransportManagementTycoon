@@ -6,7 +6,11 @@
 export const REPO = 'VasoyaParth/TransportManagementTycoon';
 // The version baked into THIS build. Bump together with android versionName and
 // the release tag. Compared against the latest GitHub release to detect updates.
-export const APP_VERSION = 'v2.4.1';
+export const APP_VERSION = 'v1.0.0-beta';
+// Beta build: a separate app (com.truckempiretycoon.beta) that installs
+// alongside the main game. The auto-updater is disabled so main-app releases
+// never nag the beta.
+export const IS_BETA = true;
 
 const RELEASES_URL = `https://api.github.com/repos/${REPO}/releases`;
 
@@ -62,6 +66,7 @@ export async function fetchReleases(limit = 15) {
 
 // Compare the newest release against APP_VERSION.
 export async function checkForUpdate() {
+  if (IS_BETA) return { current: APP_VERSION, latest: null, hasUpdate: false, releases: [] };
   const releases = await fetchReleases(15);
   const latest = releases.find(r => !r.prerelease) || releases[0] || null;
   const hasUpdate = latest ? cmpVer(APP_VERSION, latest.version) < 0 : false;

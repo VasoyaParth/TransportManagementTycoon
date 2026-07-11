@@ -16,6 +16,7 @@ import { play, setSoundEnabled, setMusicVolume, setSfxVolume } from '../engine/s
 import { setHapticsEnabled, setHapticsIntensity } from '../engine/haptics';
 import { initNotifications, pushNow, scheduleAt, setNotificationsEnabled, flavor } from '../engine/notify';
 import { writeAutoBackup } from '../engine/backup';
+import { fetchRealRoad } from '../net/roads';
 
 // Random-flavoured OS push: picks a fresh funny line each time.
 const pushFlavor = (kind, vars) => { const f = flavor(kind, vars); pushNow(f.title, f.body); };
@@ -732,6 +733,9 @@ export const useGame = create(
         for (const d of [...s.deliveries]) {
           if (d.endsAt <= now) get().completeDelivery(d.id, true);
         }
+        // Still-running deliveries get their real road shape too (no-op if
+        // already real or offline — falls back to the classic path).
+        for (const d of get().deliveries) setTimeout(() => { get().beautifyRoute(d.id); }, 200);
         // expired campaigns just fall out of the active filter naturally
         get().dailyTick();
       },
@@ -1236,6 +1240,80 @@ export const useGame = create(
         return { ok: true, fee, km };
       },
 
+      // ---------- real road geometry (v2.5.0) ----------
+      // Swap a delivery's visual path for the ACTUAL road shape (OSRM), leg
+      // by leg. Sea/ferry legs are kept exactly as the graph built them (the
+      // harbour network is ours), and land legs are fetched with up to 8
+      // corridor waypoints sampled from the graph path so the real road
+      // follows the SAME corridor and border crossings the economics used.
+      // Distance, money, ETA, phases: 100% unchanged — endsAt/econ/roadKm are
+      // never touched; only points/cum/ferry fractions are rebuilt so the
+      // truck animates along real bends. Fails silently to the classic path.
+      async beautifyRoute(deliveryId) {
+        const s0 = get();
+        const d = s0.deliveries.find(x => x.id === deliveryId);
+        if (!d || d.route.realRoad || !d.route.points || d.route.points.length < 2) return;
+        const pts = d.route.points, cum = d.route.cum || [];
+        const total = cum.length ? cum[cum.length - 1] : 0;
+        if (!total) return;
+        const segs = d.route.ferrySegments || (d.route.ferrySegment ? [d.route.ferrySegment] : []);
+        const idxOf = f => { for (let i = 0; i < cum.length; i++) { if (cum[i] / total >= f - 1e-9) return i; } return cum.length - 1; };
+        // Ordered legs: land / sea / land / ...
+        const legs = [];
+        let prev = 0;
+        for (const fs of segs) {
+          const i0 = idxOf(fs.startFrac), i1 = idxOf(fs.endFrac);
+          if (i0 > prev) legs.push({ type: 'land', i0: prev, i1: i0 });
+          legs.push({ type: 'sea', i0, i1 });
+          prev = i1;
+        }
+        if (prev < pts.length - 1) legs.push({ type: 'land', i0: prev, i1: pts.length - 1 });
+        // Fetch each land leg along real roads (corridor-guided waypoints).
+        const newLegs = [];
+        for (const leg of legs) {
+          const slice = pts.slice(leg.i0, leg.i1 + 1);
+          if (leg.type === 'sea' || slice.length < 2) { newLegs.push({ ...leg, pts: slice }); continue; }
+          const wpN = Math.min(8, slice.length);
+          const wps = [];
+          for (let i = 0; i < wpN; i++) wps.push(slice[Math.round(i * (slice.length - 1) / (wpN - 1))]);
+          const real = await fetchRealRoad(wps);
+          newLegs.push({ ...leg, pts: real && real.length > 1 ? real : slice });
+        }
+        // Rebuild points + cum (haversine km) + ferry fractions from the legs.
+        const havKm = (a, b) => {
+          const R = 6371, dLa = (b.lat - a.lat) * Math.PI / 180, dLo = (b.lng - a.lng) * Math.PI / 180;
+          const q = Math.sin(dLa / 2) ** 2 + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dLo / 2) ** 2;
+          return 2 * R * Math.asin(Math.sqrt(q));
+        };
+        const newPts = []; const seaRanges = [];
+        for (const leg of newLegs) {
+          const start = newPts.length ? newPts.length - 1 : 0;
+          for (const p of leg.pts) {
+            const last = newPts[newPts.length - 1];
+            if (!last || last.lat !== p.lat || last.lng !== p.lng) newPts.push(p);
+          }
+          if (leg.type === 'sea') seaRanges.push({ i0: start, i1: newPts.length - 1 });
+        }
+        if (newPts.length < 2) return;
+        const newCum = [0];
+        for (let i = 1; i < newPts.length; i++) newCum.push(newCum[i - 1] + havKm(newPts[i - 1], newPts[i]));
+        const newTotal = newCum[newCum.length - 1] || 1;
+        const newSegs = seaRanges.map(r => ({ startFrac: newCum[r.i0] / newTotal, endFrac: newCum[r.i1] / newTotal }));
+        // Apply — only if the delivery is still running.
+        const s1 = get();
+        if (!s1.deliveries.some(x => x.id === deliveryId)) return;
+        const newRoute = (r) => ({
+          ...r, points: newPts, cum: newCum, realRoad: true,
+          ferrySegments: newSegs, ferrySegment: newSegs[0] || null,
+        });
+        const corrId = [d.fromCityId, d.toCityId].sort().join('~');
+        set({
+          deliveries: s1.deliveries.map(x => x.id === deliveryId ? { ...x, route: newRoute(x.route) } : x),
+          // The permanent map corridor gets the real shape too.
+          corridors: s1.corridors.map(c => c.id === corrId ? { ...c, points: newPts } : c),
+        });
+      },
+
       // ---------- deliveries ----------
       previewDelivery(truckId, toCityId, cargoType, cargoTons) {
         const s = get();
@@ -1386,6 +1464,10 @@ export const useGame = create(
         });
         const to = cityById(toCityId);
         const truckName = t.customName || modelById(t.modelId).name;
+        // Fetch the real road shape in the background (v2.5.0 / beta) — the
+        // truck departs immediately on the classic path and snaps onto real
+        // highways as soon as OSRM answers.
+        setTimeout(() => { get().beautifyRoute(d.id); }, 50);
         play('start', 0.7);
         get().notify('delivery', 'truck-fast', `Delivery started to ${to.name} — ${p.route.roadKm} km by road.`);
         // Real OS notifications, scheduled at each fuel stop's ETA and at the
