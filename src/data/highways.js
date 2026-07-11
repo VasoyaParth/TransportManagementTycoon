@@ -733,9 +733,32 @@ Object.assign(ROAD_NODES, INTL_NODES);
 ROAD_EDGES.push(...INTL_EDGES);
 
 // --- v2.3.0 "Every Corner": merge the per-city locality zones into the road
-// graph (zone <-> parent-city edges). Existing nodes are never overwritten. ---
+// graph (zone <-> parent-city edges). Existing nodes are never overwritten.
+// CRITICAL (v2.4.2 fix): a city that was NOT already a highway node must be
+// linked to its nearest real highway node — otherwise it becomes an isolated
+// star (city + its zones) and every route from/to it fails ("no road
+// connection"). Kalavad & co. were unroutable because of exactly this. ---
 import { LOCALITY_NODES, LOCALITY_EDGES } from './cities';
-for (const id in LOCALITY_NODES) {
-  if (!ROAD_NODES[id]) ROAD_NODES[id] = { lat: LOCALITY_NODES[id].lat, lng: LOCALITY_NODES[id].lng };
+{
+  const originalIds = Object.keys(ROAD_NODES); // the real highway network
+  const seeded = [];
+  for (const id in LOCALITY_NODES) {
+    if (!ROAD_NODES[id]) {
+      ROAD_NODES[id] = { lat: LOCALITY_NODES[id].lat, lng: LOCALITY_NODES[id].lng };
+      if (LOCALITY_NODES[id].seedOnly) seeded.push(id); // parent cities only (zones link via LOCALITY_EDGES)
+    }
+  }
+  for (const id of seeded) {
+    const pnode = ROAD_NODES[id];
+    let best = null, bd = Infinity;
+    for (const oid of originalIds) {
+      const o = ROAD_NODES[oid];
+      const dLat = o.lat - pnode.lat;
+      const dLng = (o.lng - pnode.lng) * Math.cos((pnode.lat * Math.PI) / 180);
+      const d = dLat * dLat + dLng * dLng;
+      if (d < bd) { bd = d; best = oid; }
+    }
+    if (best) ROAD_EDGES.push({ a: id, b: best, nh: 'Link Rd' });
+  }
 }
 ROAD_EDGES.push(...LOCALITY_EDGES);

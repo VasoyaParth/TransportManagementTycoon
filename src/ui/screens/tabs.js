@@ -12,6 +12,7 @@ import {
   ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, EASTER_EGGS,
   LOAN_PRODUCTS, creditScoreOf, DRIVER_PERKS, driverLevel, driverXpForLevel,
   companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, WEEKLY_JACKPOT,
+  STREAK_REWARDS, streakRewardFor,
 } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { CAMPAIGNS, CARGO_TYPES } from '../../data/trucks';
@@ -933,6 +934,8 @@ export function EconomyTab() {
   const [priceEdit, setPriceEdit] = useState(null); // cargo id whose slider is open
   const [ledgerOpen, setLedgerOpen] = useState(false);
   const [bankOpen, setBankOpen] = useState(false);
+  const [barSel, setBarSel] = useState(null);   // tapped profit bar
+  const [fuelSel, setFuelSel] = useState(null); // tapped fuel-history bar
   const fuelToday = useGame(s => s.fuelToday);
   const loans = useGame(s => s.loans || []);
   const tapDistanceEgg = useEasterEggTap('long_hauler', 10);
@@ -998,12 +1001,10 @@ export function EconomyTab() {
         </Row>
         <Row style={{ marginTop: 12, gap: 8 }}>
           <View style={{ flex: 1 }}>
-            <Btn title="Company Ledger" icon="notebook-outline" kind="soft" small
-              style={{ backgroundColor: '#1E293B' }} onPress={() => setLedgerOpen(true)} />
+            <Btn title="Company Ledger" icon="notebook-outline" kind="blue" small onPress={() => setLedgerOpen(true)} />
           </View>
           <View style={{ flex: 1 }}>
-            <Btn title={loans.length ? `Bank (${loans.length})` : 'Bank & Loans'} icon="bank" kind="soft" small
-              style={{ backgroundColor: '#1E293B' }} onPress={() => setBankOpen(true)} />
+            <Btn title={loans.length ? `Bank (${loans.length})` : 'Bank & Loans'} icon="bank" kind="green" small onPress={() => setBankOpen(true)} />
           </View>
         </Row>
       </Card>
@@ -1041,18 +1042,23 @@ export function EconomyTab() {
             {fuel.factor > 1 ? '+' : ''}{Math.round((fuel.factor - 1) * 100)}%
           </Text>
         </Row>
-        {/* 7-day price bars — today is the last (highlighted) bar */}
+        {/* 7-day price bars — tap any bar for that day's exact price */}
         <Row style={{ alignItems: 'flex-end', height: 46, marginTop: 10, gap: 4 }}>
           {fuel.history.map((f, i) => (
-            <View key={i} style={{
-              flex: 1, borderRadius: 3,
-              height: 8 + ((f - 0.85) / 0.4) * 38,
-              backgroundColor: i === fuel.history.length - 1 ? (f >= 1.12 ? C.red : f <= 0.95 ? C.green : C.blue) : C.border,
-            }} />
+            <Pressable key={i} onPress={() => { haptic('light'); setFuelSel(fuelSel === i ? null : i); }} style={{ flex: 1 }}>
+              <View style={{
+                borderRadius: 3,
+                height: 8 + ((f - 0.85) / 0.4) * 38,
+                backgroundColor: fuelSel === i ? '#0F172A'
+                  : i === fuel.history.length - 1 ? (f >= 1.12 ? C.red : f <= 0.95 ? C.green : C.blue) : C.border,
+              }} />
+            </Pressable>
           ))}
         </Row>
         <Text style={[FONT.tiny, { marginTop: 6, textAlign: 'center' }]}>
-          Last 7 days · the market moves every game day and hits every delivery's fuel bill
+          {fuelSel != null
+            ? `Day ${fuel.day - (fuel.history.length - 1 - fuelSel)} · ₹${Math.round(fuel.base * fuel.history[fuelSel])}/L (${fuel.history[fuelSel] > 1 ? '+' : ''}${Math.round((fuel.history[fuelSel] - 1) * 100)}%)`
+            : `Last 7 days · tap a bar for that day's price`}
         </Text>
       </Card>
 
@@ -1102,27 +1108,34 @@ export function EconomyTab() {
         <Text style={[FONT.sub, { textAlign: 'center', paddingVertical: 16 }]}>Complete deliveries to see your profit trend.</Text>
       ) : (
         <Card style={{ marginBottom: 14 }}>
+          {/* Interactive: tap any bar and its exact value pops above it. */}
           <Row style={{ alignItems: 'flex-end', height: 130, justifyContent: 'space-between' }}>
-            {bars.map(b => {
+            {bars.map((b, i) => {
               const h = Math.max(6, (Math.abs(b.net) / maxAbs) * 96);
-              const tallest = Math.abs(b.net) === maxAbs;
+              const active = barSel != null ? barSel === i : Math.abs(b.net) === maxAbs;
               return (
-                <View key={b.id} style={{ flex: 1, alignItems: 'center', justifyContent: 'flex-end', marginHorizontal: 3 }}>
-                  {tallest ? (
-                    <Text style={[FONT.tiny, { marginBottom: 3, fontWeight: '700', color: b.net >= 0 ? C.green : C.red }]} numberOfLines={1}>
-                      {inrShort(b.net)}
-                    </Text>
+                <Pressable key={b.id} onPress={() => { haptic('light'); setBarSel(barSel === i ? null : i); }}
+                  style={{ flex: 1, alignItems: 'center', justifyContent: 'flex-end', marginHorizontal: 3 }}>
+                  {active ? (
+                    <View style={{ backgroundColor: '#0F172A', borderRadius: 6, paddingHorizontal: 5, paddingVertical: 2, marginBottom: 3 }}>
+                      <Text style={[FONT.tiny, { fontWeight: '800', color: b.net >= 0 ? '#4ADE80' : '#F87171' }]} numberOfLines={1}>
+                        {inrShort(b.net)}
+                      </Text>
+                    </View>
                   ) : null}
                   <View style={{
                     width: '100%', height: h, borderRadius: 4,
                     backgroundColor: b.net >= 0 ? C.green : C.red,
-                    opacity: 0.9,
+                    opacity: active ? 1 : 0.65,
+                    borderWidth: barSel === i ? 1.5 : 0, borderColor: '#0F172A',
                   }} />
-                </View>
+                </Pressable>
               );
             })}
           </Row>
-          <Text style={[FONT.tiny, { marginTop: 8, textAlign: 'center' }]}>Last {bars.length} deliveries — net profit</Text>
+          <Text style={[FONT.tiny, { marginTop: 8, textAlign: 'center' }]}>
+            {barSel != null ? `${cityById(bars[barSel].fromCityId)?.name || '?'} → ${cityById(bars[barSel].toCityId)?.name || '?'} · ${bars[barSel].km} km · ${relTime(bars[barSel].ts)}` : `Last ${bars.length} deliveries — tap a bar for details`}
+          </Text>
         </Card>
       )}
 
@@ -1194,8 +1207,67 @@ export function MarketingTab() {
   const now = useNow(active.length > 0);
   const dayMs = 24 * GAME_HOUR_MS / settings.speed;
 
+  // ---- Marketing intelligence (v3.0.0): what the boost is actually worth.
+  // Average daily gross from recent history → estimated extra revenue per
+  // campaign → ROI and payback, so launching is a decision, not a guess.
+  const history = useGame(s => s.history);
+  const stats = useGame(s => s.stats);
+  const marketingBoost = useGame(s => s.marketingBoost);
+  const curBoost = marketingBoost();
+  const dailyGross = useMemo(() => {
+    const recent = history.slice(0, 12);
+    if (!recent.length) return 0;
+    const spanDays = Math.max(0.5, (Date.now() - recent[recent.length - 1].ts) / (24 * GAME_HOUR_MS / (settings.speed || 1)));
+    return recent.reduce((a, h) => a + (h.gross || h.net), 0) / spanDays;
+  }, [history, settings.speed]);
+  const roiFor = (def) => {
+    const extra = dailyGross * def.boost * def.days;
+    const profit = extra - def.cost;
+    return { extra, profit, ratio: def.cost > 0 ? extra / def.cost : 0 };
+  };
+  const bestId = useMemo(() => {
+    if (!dailyGross) return null;
+    let best = null, bp = -Infinity;
+    for (const def of CAMPAIGNS) { const r = roiFor(def); if (r.profit > bp) { bp = r.profit; best = def.id; } }
+    return bp > 0 ? best : null;
+  }, [dailyGross]);
+  const soonest = active.length ? Math.min(...active.map(a => a.endsAt)) : 0;
+
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
+      {/* ---- Marketing HQ hero ---- */}
+      <Card style={{ marginBottom: 12, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
+        <Row style={{ justifyContent: 'space-between' }}>
+          <View>
+            <Text style={[FONT.tiny, { color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 1 }]}>Active Revenue Boost</Text>
+            <Row style={{ alignItems: 'flex-end', marginTop: 2 }}>
+              <Text style={[FONT.h1, { color: curBoost > 0 ? '#4ADE80' : '#F8FAFC' }]}>+{Math.round(curBoost * 100)}%</Text>
+              {curBoost > 0 && soonest ? <Text style={[FONT.tiny, { color: '#94A3B8', marginLeft: 8, marginBottom: 5 }]}>ends in {Math.max(0, Math.ceil((soonest - now) / dayMs))}d</Text> : null}
+            </Row>
+          </View>
+          <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: '#1E293B', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="bullhorn" size={24} color="#5B8DF0" />
+          </View>
+        </Row>
+        <Row style={{ marginTop: 10, backgroundColor: '#1E293B', borderRadius: RADIUS.md, paddingVertical: 8, justifyContent: 'space-around' }}>
+          <View style={{ alignItems: 'center' }}>
+            <Text style={[FONT.body, { fontWeight: '800', color: '#F8FAFC' }]}>{inrShort(dailyGross)}</Text>
+            <Text style={[FONT.tiny, { color: '#64748B' }]}>avg gross / day</Text>
+          </View>
+          <View style={{ alignItems: 'center' }}>
+            <Text style={[FONT.body, { fontWeight: '800', color: '#4ADE80' }]}>{inrShort(dailyGross * curBoost)}</Text>
+            <Text style={[FONT.tiny, { color: '#64748B' }]}>extra / day now</Text>
+          </View>
+          <View style={{ alignItems: 'center' }}>
+            <Text style={[FONT.body, { fontWeight: '800', color: '#F8FAFC' }]}>{stats.campaigns || 0}</Text>
+            <Text style={[FONT.tiny, { color: '#64748B' }]}>campaigns run</Text>
+          </View>
+        </Row>
+        <Text style={[FONT.tiny, { color: '#64748B', marginTop: 8 }]}>
+          Only the strongest active campaign applies — stack end dates, not boosts. Estimates use your last {Math.min(history.length, 12)} deliveries.
+        </Text>
+      </Card>
+
       <SectionTitle icon="bullhorn" text="Active Campaigns" />
       {active.length === 0 ? (
         <EmptyState icon="bullhorn-outline" title="No active campaigns" sub="Launch a campaign below to boost delivery revenue." />
@@ -1240,8 +1312,18 @@ export function MarketingTab() {
                   <Text style={FONT.tiny} numberOfLines={2}>{def.desc}</Text>
                 </View>
               </Row>
-              <Pill text={`+${Math.round(def.boost * 100)}%`} color={C.green} bg={C.greenSoft} />
+              <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                <Pill text={`+${Math.round(def.boost * 100)}%`} color={C.green} bg={C.greenSoft} />
+                {bestId === def.id ? <Pill text="Best value" icon="star" color={C.gold} bg={C.amberSoft} /> : null}
+              </View>
             </Row>
+            {dailyGross > 0 && (() => { const r = roiFor(def); return (
+              <Row style={{ marginTop: 10, backgroundColor: C.bgSoft, borderRadius: RADIUS.md, paddingVertical: 7, justifyContent: 'space-around' }}>
+                <View style={{ alignItems: 'center' }}><Text style={[FONT.tiny, { fontWeight: '800', color: C.green }]}>{inrShort(r.extra)}</Text><Text style={[FONT.tiny, { fontSize: 9 }]}>est. extra revenue</Text></View>
+                <View style={{ alignItems: 'center' }}><Text style={[FONT.tiny, { fontWeight: '800', color: r.profit >= 0 ? C.green : C.red }]}>{r.profit >= 0 ? '+' : '−'}{inrShort(Math.abs(r.profit))}</Text><Text style={[FONT.tiny, { fontSize: 9 }]}>est. net gain</Text></View>
+                <View style={{ alignItems: 'center' }}><Text style={[FONT.tiny, { fontWeight: '800' }]}>{r.ratio.toFixed(1)}×</Text><Text style={[FONT.tiny, { fontSize: 9 }]}>return on spend</Text></View>
+              </Row>
+            ); })()}
             <Row style={{ justifyContent: 'space-between', marginTop: 12 }}>
               <Text style={FONT.sub}>{inr(def.cost)} · {def.days} days</Text>
               <Btn
@@ -1263,7 +1345,7 @@ export function MarketingTab() {
 // ============================== 6. REWARDS ==============================
 // Daily login streak, achievements and hidden-gem progress in one place —
 // everything the game pays you for showing up.
-const STREAK_MAX = 7;
+const STREAK_MAX = 30;
 
 function TierDots({ reached, total }) {
   return (
@@ -1294,12 +1376,14 @@ export function RewardsTab({ onOpenGames }) {
   const level = companyLevelOf(xp);
   const nextXp = companyXpForLevel(level + 1);
   const curXp = companyXpForLevel(level);
+  const deliveriesActive = useGame(s => s.deliveries.length);
+  useNow(deliveriesActive > 0); // 1s re-render: weekly km/₹ tick LIVE while trucks drive
   const weeklyList = weeklyProgress();
   const sweepDone = weekly && weekly.claimed.length === (weekly.challenges || []).length && weekly.challenges.length > 0;
 
   const streak = login.streak || 0;
-  const todayBonus = Math.min(Math.max(streak, 1), STREAK_MAX) * 2;
-  const tomorrowBonus = Math.min(streak + 1, STREAK_MAX) * 2;
+  const todayReward = streakRewardFor(Math.max(streak, 1));
+  const tomorrowReward = streakRewardFor(streak + 1);
   const claimedToday = login.lastDay === new Date().toDateString();
 
   const doneTiers = Object.keys(unlocked).length;
@@ -1320,35 +1404,39 @@ export function RewardsTab({ onOpenGames }) {
             <View style={{ marginLeft: 12, flex: 1 }}>
               <Text style={[FONT.h2, { color: '#F8FAFC' }]}>{streak} day streak</Text>
               <Text style={[FONT.tiny, { color: '#94A3B8' }]}>
-                {claimedToday ? `+${todayBonus} Gold claimed today` : 'Open the game daily to keep it alive'}
-                {streak >= STREAK_MAX ? ' · MAX bonus!' : ` · tomorrow pays +${tomorrowBonus}`}
+                {claimedToday ? `${todayReward.label} claimed today` : 'Open the game daily to keep it alive'}
+                {streak >= STREAK_MAX ? ' · calendar complete!' : ` · tomorrow: ${tomorrowReward.label}`}
               </Text>
             </View>
           </Row>
           <Row><Icon name="gold" size={15} color={C.gold} /><Text style={[FONT.h3, { color: C.gold, marginLeft: 4 }]}>{gold}</Text></Row>
         </Row>
-        {/* 7-day track */}
-        <Row style={{ marginTop: 14, justifyContent: 'space-between' }}>
-          {Array.from({ length: STREAK_MAX }, (_, i) => {
-            const day = i + 1;
-            const hit = streak >= day;
+        {/* 30-day reward calendar — every day shows its ACTUAL reward icon:
+            gold, cash, speed boost, shield, 2× trip, and the day-30 chest. */}
+        <View style={{ marginTop: 14, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 8 }}>
+          {STREAK_REWARDS.map(rw => {
+            const hit = streak >= rw.day;
+            const isNext = streak + 1 === rw.day && !claimedToday;
+            const mega = rw.type === 'mega';
             return (
-              <View key={day} style={{ alignItems: 'center', flex: 1 }}>
+              <View key={rw.day} style={{ width: '16%', alignItems: 'center' }}>
                 <View style={{
-                  width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center',
-                  backgroundColor: hit ? '#7C2D12' : '#1E293B',
-                  borderWidth: streak + 1 === day && !claimedToday ? 1.5 : 0, borderColor: '#FB923C',
+                  width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+                  backgroundColor: hit ? '#7C2D12' : mega ? '#3B2F0B' : '#1E293B',
+                  borderWidth: isNext || mega ? 1.5 : 0, borderColor: mega ? '#F4D35E' : '#FB923C',
                 }}>
                   {hit ? <Icon name="check-bold" size={15} color="#FB923C" />
-                    : <Text style={[FONT.tiny, { color: '#64748B', fontWeight: '800' }]}>+{day * 2}</Text>}
+                    : <Icon name={rw.icon} size={16} color={mega ? '#F4D35E' : rw.type === 'gold' ? '#C9A227' : rw.type === 'cash' ? '#4ADE80' : '#7DA9F5'} />}
                 </View>
-                <Text style={[FONT.tiny, { color: '#64748B', marginTop: 3, fontSize: 9 }]}>D{day}</Text>
+                <Text style={[FONT.tiny, { color: '#64748B', marginTop: 2, fontSize: 8 }]} numberOfLines={1}>
+                  {rw.day}· {rw.type === 'gold' ? `${rw.amount}G` : rw.type === 'cash' ? inrShort(rw.amount) : rw.type === 'mega' ? 'MEGA' : rw.type === 'speed' ? '2×spd' : rw.type === 'shield' ? 'shield' : '2×trip'}
+                </Text>
               </View>
             );
           })}
-        </Row>
+        </View>
         <Text style={[FONT.tiny, { color: '#64748B', marginTop: 8, textAlign: 'center' }]}>
-          Best streak: {Math.max(login.bestStreak || 0, streak)} days · miss a day and the flame resets
+          Best streak: {Math.max(login.bestStreak || 0, streak)} days · miss a day and the flame resets to day 1
         </Text>
       </Card>
 
@@ -1400,7 +1488,7 @@ export function RewardsTab({ onOpenGames }) {
         <Row style={{ marginTop: 8, backgroundColor: C.amberSoft, borderRadius: RADIUS.md, padding: 10 }}>
           <Icon name="trophy-award" size={16} color={C.gold} />
           <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.text }]}>
-            Clean sweep bonus: finish all 3 this week for an extra +{WEEKLY_JACKPOT.gold} Gold + {inrShort(WEEKLY_JACKPOT.cash)}!
+            Counts LIVE across the whole fleet — km and ₹ tick up while trucks are still driving. Clean sweep bonus: finish all 3 this week for an extra +{WEEKLY_JACKPOT.gold} Gold + {inrShort(WEEKLY_JACKPOT.cash)}!
           </Text>
         </Row>
       </Card>

@@ -9,7 +9,7 @@ import { CITIES } from '../data/cities';
 import { STATIONS } from '../engine/stations';
 import { pointAlong } from '../engine/geo';
 import { C } from './theme';
-import { useGame, modelById, deliveryPhase, WEATHER_KINDS } from '../store/gameStore';
+import { useGame, modelById, deliveryPhase, WEATHER_KINDS, weatherPolygon } from '../store/gameStore';
 import { cityById, ferryPorts } from '../engine/routing';
 import { statusMeta, useEasterEggTap } from './components';
 import { haptic } from '../engine/haptics';
@@ -22,6 +22,7 @@ const PORT_DATA = ferryPorts();
 export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focus, onTruckTap, onHubTap, onReady, onOffline }) {
   const tapPortEgg = useEasterEggTap('port_master', 6);
   const tapFuelEgg = useEasterEggTap('fuel_sniffer', 7);
+  const tapHqEgg = useEasterEggTap('hq_home', 5); // was only wired on the old offline map
   const ref = useRef(null);
   const company = useGame(s => s.company);
   const trucks = useGame(s => s.trucks);
@@ -130,7 +131,10 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
     const zones = weather.map(z => {
       const k = WEATHER_KINDS[z.kind] || {};
       return {
-        lat: z.lat, lng: z.lng, radiusKm: z.radiusKm, kind: z.kind,
+        lat: z.lat, lng: z.lng, kind: z.kind,
+        // Irregular blob outline (state-boundary style) — same boundary the
+        // speed penalty uses, so the visual IS the gameplay.
+        outline: weatherPolygon(z).map(pt => [+pt.lat.toFixed(3), +pt.lng.toFixed(3)]),
         label: `${k.label || z.kind} — ${z.name}`, color: k.color || '#2563EB',
         slowPct: Math.round((1 - (k.slow || 1)) * 100),
       };
@@ -195,7 +199,7 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
         </View>
       )}
       <View style={st.controls}>
-        <Ctl icon="crosshairs-gps" onPress={() => inject('window.centerHQ()')} />
+        <Ctl icon="crosshairs-gps" onPress={() => { inject('window.centerHQ()'); tapHqEgg(); }} />
         <Ctl icon="gas-station" onPress={() => { inject('window.toggleStations()'); tapFuelEgg(); }} />
         <Ctl icon="city-variant-outline" onPress={() => inject('window.toggleCities()')} />
         <Ctl icon="anchor" onPress={() => {
