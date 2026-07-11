@@ -1,7 +1,7 @@
 // Modal flows — all rendered inside the shared <Sheet>. New delivery, truck
 // detail, buy truck, contracts, power-ups, notifications, settings.
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Switch, Animated, Easing, Linking } from 'react-native';
+import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Switch, Animated, Easing, Linking, Share } from 'react-native';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider } from '../components';
@@ -127,7 +127,12 @@ function deliveryStop(d, model, now = Date.now()) {
     return { stopped: true, label: PHASE_LABELS[ph.phase], atKm };
   }
   const DWELL = { fuel: 60 * 1000, sleep: 2 * GAME_HOUR_MS, short: (5 / 60) * GAME_HOUR_MS };
-  const j = buildJourney(d, model, now);
+  // CRITICAL: pass [] so buildJourney skips the expensive per-city route scan
+  // — deliveryStop only needs fuel/sleep/short waypoints (never city ones),
+  // but this call runs every second from the live panel, so it silently
+  // re-triggered the same lag JourneyTracker had, on every tick, on every
+  // truck, even when the timeline was never opened.
+  const j = buildJourney(d, model, now, []);
   for (const w of j.waypoints) {
     const dwell = DWELL[w.type];
     if (dwell && now >= w.ts && now < w.ts + dwell) {
@@ -203,7 +208,14 @@ const LOADING_GAGS = [
 ];
 const gagFor = (id) => { let h = 0; for (let i = 0; i < (id || '').length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0; return LOADING_GAGS[h % LOADING_GAGS.length]; };
 
-function buildJourney(d, model, now = Date.now()) {
+// EXPENSIVE part isolated: routeCities() scans every city in the game
+// against every point of the route (can be O(cities × route points) — huge
+// on a long haul). Callers MUST memoize this per delivery id so it runs
+// once, not on every 1s tick (that was the "opens after 3s then lags" bug).
+function journeyRouteCities(d) {
+  try { return routeCities(d.route); } catch (e) { return []; }
+}
+function buildJourney(d, model, now = Date.now(), cachedCities = null) {
   const total = d.route.roadKm;
   const dur = d.endsAt - d.startedAt;
   const prog = dur > 0 ? Math.min(1, Math.max(0, (now - d.startedAt) / dur)) : 0;
@@ -220,11 +232,9 @@ function buildJourney(d, model, now = Date.now()) {
     tsOverride: d.startedAt, passedOverride: now >= loadDoneTs });
   wp.push({ type: 'origin', atKm: 0, title: `Picked up · ${cityById(d.fromCityId)?.name || 'Origin'}`, sub: 'Departed origin', icon: 'package-variant-closed', color: C.green,
     tsOverride: loadDoneTs, passedOverride: now >= loadDoneTs });
-  try {
-    for (const rc of routeCities(d.route)) {
-      wp.push({ type: 'city', atKm: rc.atKm, title: rc.city.name, sub: `${rc.city.state} · on route`, icon: 'map-marker', color: C.blue });
-    }
-  } catch (e) { /* routing edge cases — skip cities */ }
+  for (const rc of (cachedCities || journeyRouteCities(d))) {
+    wp.push({ type: 'city', atKm: rc.atKm, title: rc.city.name, sub: `${rc.city.state} · on route`, icon: 'map-marker', color: C.blue });
+  }
   (d.stops || []).forEach((s, i) => {
     wp.push({ type: 'fuel', atKm: s.atKm, title: s.station?.name || `Fuel stop ${i + 1}`,
       sub: model.propulsion === 'electric' ? 'Charging halt' : 'Refuel halt', icon: 'gas-station', color: C.amber });
@@ -275,7 +285,11 @@ function buildJourney(d, model, now = Date.now()) {
 // box instead of growing the whole sheet.
 const TIMELINE_COLLAPSED_COUNT = 3;
 function JourneyTracker({ delivery, model }) {
-  const j = buildJourney(delivery, model);
+  // Memoized per delivery id — the expensive city scan runs ONCE for this
+  // trip, not on every re-render/tick. Route is fixed for the life of a
+  // delivery, so this is always safe to cache.
+  const cachedCities = useMemo(() => journeyRouteCities(delivery), [delivery.id]);
+  const j = buildJourney(delivery, model, Date.now(), cachedCities);
   const eta = fmtDur((delivery.endsAt - Date.now()) / 1000);
   const phase = deliveryPhase(delivery);
   const [expanded, setExpanded] = useState(false);
@@ -670,6 +684,13 @@ const TruckLivePanel = React.memo(function TruckLivePanel({ truckId }) {
   const incident = d && d.incident;
   const incidentLeft = incident ? Math.max(0, (incident.resolveAt - now) / 1000) : 0;
   const doCallMechanic = () => { const r = callMechanic(d.id); toast(r.ok ? 'Mechanic on the way — delay cut short.' : r.err, r.ok ? 'success' : 'error'); };
+  const [timelineOpen, setTimelineOpen] = useState(false);
+  // Cheap "what's happening / what's next" line — no route/city scanning at
+  // all, safe to recompute every tick even on the longest haul in the game.
+  const nextAction = d ? (
+    stopInfo?.stopped ? stopInfo.label
+      : `En route to ${cityById(d.toCityId)?.name || 'destination'} · arrives in ${eta}`
+  ) : null;
 
   return (
     <>
@@ -699,18 +720,37 @@ const TruckLivePanel = React.memo(function TruckLivePanel({ truckId }) {
         </Card>
       )}
 
+      {/* Default view: cheap current-status card only — no route/city scan.
+          The full stop-by-stop timeline (which scans every city against the
+          route) now loads ONLY when explicitly opened, in its own sheet. */}
       {truck.status === 'delivering' && d && (
         <Card style={{ marginBottom: 12 }}>
-          <Row style={{ justifyContent: 'space-between', marginBottom: 10 }}>
-            <Text style={FONT.h3}>Shipment Tracking</Text>
+          <Row style={{ justifyContent: 'space-between', marginBottom: 8 }}>
+            <Text style={FONT.h3}>Current Status</Text>
             <Row style={{ gap: 10 }}>
               <Row><Icon name="sleep" size={13} color={C.blue} /><Text style={[FONT.tiny, { marginLeft: 3 }]}>{d.sleepBreaks || 0} sleep</Text></Row>
               <Row><Icon name="coffee-outline" size={13} color={C.sub} /><Text style={[FONT.tiny, { marginLeft: 3 }]}>{d.shortBreaks || 0} short</Text></Row>
               <Row><Icon name="gas-station" size={13} color={C.amber} /><Text style={[FONT.tiny, { marginLeft: 3 }]}>{d.refuelCount || (d.stops || []).length || 0} fuel</Text></Row>
             </Row>
           </Row>
-          <JourneyTracker delivery={d} model={m} />
+          <Row style={{ backgroundColor: C.blueSoft, borderRadius: RADIUS.md, padding: 10 }}>
+            <Icon name={stopInfo?.stopped ? 'pause-circle-outline' : 'truck-fast'} size={18} color={C.blue} />
+            <View style={{ flex: 1, marginLeft: 8 }}>
+              <Text style={[FONT.sub, { fontWeight: '800', color: C.text }]}>Next: {nextAction}</Text>
+            </View>
+          </Row>
+          <Btn title="View Full Timeline" kind="soft" icon="map-marker-path" small style={{ marginTop: 10 }}
+            onPress={() => setTimelineOpen(true)} />
         </Card>
+      )}
+      {/* Mounted only while open — buildJourney's city scan runs once here,
+          never inside the always-on live panel above. */}
+      {timelineOpen && (
+        <Sheet visible={timelineOpen} onClose={() => setTimelineOpen(false)} title="Full Shipment Timeline" height="80%">
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {d && <JourneyTracker delivery={d} model={m} />}
+          </ScrollView>
+        </Sheet>
       )}
 
       {truck.status === 'building' && (
@@ -747,6 +787,93 @@ const TruckLivePanel = React.memo(function TruckLivePanel({ truckId }) {
   );
 });
 
+// Route History — its own on-demand sheet (mounts only when opened). Shows
+// 3 trips at a time with a "Show more" footer; each trip expands in place to
+// its own mini-timeline: the same fuel/maintenance/tolls/customs/driver
+// breakdown the Routes tab shows, scoped to this one truck's log.
+const HIST_PAGE = 3;
+function TruckHistorySheet({ visible, onClose, log }) {
+  const [page, setPage] = useState(1);
+  const [openId, setOpenId] = useState(null);
+  useEffect(() => { if (visible) { setPage(1); setOpenId(null); } }, [visible]);
+  const shown = log.slice(0, page * HIST_PAGE);
+  return (
+    <Sheet visible={visible} onClose={onClose} title="Route History" height="80%">
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+        {log.length === 0 ? (
+          <Text style={[FONT.sub, { textAlign: 'center', paddingVertical: 20 }]}>No completed trips yet.</Text>
+        ) : shown.map(h => {
+          const f = cityById(h.fromCityId), t2 = cityById(h.toCityId);
+          const expanded = openId === h.id;
+          const hasDetail = h.fuel != null;
+          const costs = (h.fuel || 0) + (h.maint || 0) + (h.tolls || 0) + (h.customs || 0);
+          return (
+            <Card key={h.id} style={{ marginBottom: 8, padding: 12 }}>
+              <Pressable onPress={() => setOpenId(expanded ? null : h.id)}>
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Row><Text style={FONT.body} numberOfLines={1}>{f?.name || '?'}</Text>
+                      <Icon name={h.ferry ? 'ferry' : 'arrow-right'} size={12} color={h.ferry ? C.blue : C.faint} style={{ marginHorizontal: 4 }} />
+                      <Text style={FONT.body} numberOfLines={1}>{t2?.name || '?'}</Text>
+                    </Row>
+                    <Text style={FONT.tiny}>{h.km} km{h.driver ? ` · ${h.driver}` : ''} · {relTime(h.ts)}</Text>
+                  </View>
+                  <Row>
+                    <Text style={[FONT.mono, { fontWeight: '700', color: h.net >= 0 ? C.green : C.red }]}>{inr(h.net)}</Text>
+                    <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={15} color={C.faint} style={{ marginLeft: 6 }} />
+                  </Row>
+                </Row>
+              </Pressable>
+              {expanded && (
+                <View style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 10 }}>
+                  {hasDetail ? (
+                    <>
+                      <Row style={{ justifyContent: 'space-between', paddingVertical: 4 }}>
+                        <Text style={FONT.sub}>Freight earned (gross)</Text>
+                        <Text style={[FONT.mono, { fontWeight: '700', color: C.green }]}>+{inr(h.gross)}</Text>
+                      </Row>
+                      {h.reward ? (
+                        <Row style={{ justifyContent: 'space-between', paddingVertical: 4 }}>
+                          <Text style={FONT.sub}>Contract bonus</Text>
+                          <Text style={[FONT.mono, { fontWeight: '700', color: C.green }]}>+{inr(h.reward)}</Text>
+                        </Row>
+                      ) : null}
+                      <Row style={{ justifyContent: 'space-between', paddingVertical: 4 }}>
+                        <Text style={FONT.sub}>Fuel</Text><Text style={[FONT.mono, { color: C.red }]}>−{inr(h.fuel)}</Text>
+                      </Row>
+                      <Row style={{ justifyContent: 'space-between', paddingVertical: 4 }}>
+                        <Text style={FONT.sub}>Maintenance</Text><Text style={[FONT.mono, { color: C.red }]}>−{inr(h.maint)}</Text>
+                      </Row>
+                      <Row style={{ justifyContent: 'space-between', paddingVertical: 4 }}>
+                        <Text style={FONT.sub}>Tolls</Text><Text style={[FONT.mono, { color: C.red }]}>−{inr(h.tolls)}</Text>
+                      </Row>
+                      {h.customs ? (
+                        <Row style={{ justifyContent: 'space-between', paddingVertical: 4 }}>
+                          <Text style={FONT.sub}>Customs (borders)</Text><Text style={[FONT.mono, { color: C.red }]}>−{inr(h.customs)}</Text>
+                        </Row>
+                      ) : null}
+                      <Row style={{ justifyContent: 'space-between', paddingVertical: 6, borderTopWidth: 1, borderTopColor: C.border, marginTop: 2 }}>
+                        <Text style={[FONT.body, { fontWeight: '800' }]}>Net profit</Text>
+                        <Text style={[FONT.mono, { fontWeight: '800', color: h.net >= 0 ? C.green : C.red }]}>{inr(h.net)}</Text>
+                      </Row>
+                      <Text style={[FONT.tiny, { marginTop: 4 }]}>Cost per km: ₹{h.km ? (costs / h.km).toFixed(1) : '—'} · margin {h.gross ? Math.round((h.net / h.gross) * 100) : 0}%</Text>
+                    </>
+                  ) : (
+                    <Text style={FONT.tiny}>Older trip — full expense breakdown is recorded for every new delivery from v3.1.0 onward.</Text>
+                  )}
+                </View>
+              )}
+            </Card>
+          );
+        })}
+        {shown.length < log.length && (
+          <Btn title={`Show more (${log.length - shown.length})`} kind="soft" icon="chevron-down" onPress={() => setPage(p => p + 1)} />
+        )}
+      </ScrollView>
+    </Sheet>
+  );
+}
+
 export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onShowOnMap }) {
   const toast = useToast();
   const trucks = useGame(s => s.trucks);
@@ -756,8 +883,8 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
   const sellTruck = useGame(s => s.sellTruck);
   const truckResale = useGame(s => s.truckResale);
   const [confirmSell, setConfirmSell] = useState(false);
-  const [histAll, setHistAll] = useState(false);
-  useEffect(() => { if (!visible) { setConfirmSell(false); setHistAll(false); } }, [visible]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  useEffect(() => { if (!visible) { setConfirmSell(false); setHistoryOpen(false); } }, [visible]);
   const truck = trucks.find(t => t.id === truckId);
   if (!visible || !truck) return <Sheet visible={visible && !!truck} onClose={onClose} title="Truck" height="50%"><View /></Sheet>;
   // Everything below renders ONCE per open (plus on real state changes) —
@@ -832,43 +959,13 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
           <SpecRow icon="map-marker" label="Location" value={cityById(truck.cityId)?.name || '—'} />
         </Card>
 
-        {(truck.log || []).length > 0 && (() => {
-          const log = truck.log || [];
-          const shownLog = histAll ? log : log.slice(0, 5);
-          const moreCount = log.length - shownLog.length;
-          return (
-          <Card style={{ marginTop: 10 }}>
-            <Row style={{ justifyContent: 'space-between', marginBottom: 8 }}>
-              <Text style={FONT.h3}>Route History</Text>
-              <Pill text={`${log.length} trip${log.length === 1 ? '' : 's'}`} icon="map-marker-path" color={C.blue} bg={C.blueSoft} />
-            </Row>
-            {shownLog.map(h => {
-              const f = cityById(h.fromCityId), t2 = cityById(h.toCityId);
-              return (
-                <Row key={h.id} style={{ justifyContent: 'space-between', paddingVertical: 6, borderTopWidth: 1, borderTopColor: C.border }}>
-                  <View style={{ flex: 1, marginRight: 8 }}>
-                    <Row><Text style={FONT.body} numberOfLines={1}>{f?.name || '?'}</Text>
-                      <Icon name="arrow-right" size={12} color={C.faint} style={{ marginHorizontal: 4 }} />
-                      <Text style={FONT.body} numberOfLines={1}>{t2?.name || '?'}</Text>
-                    </Row>
-                    <Text style={FONT.tiny}>{h.km} km · {h.hours ? `${h.hours}h · ` : ''}{relTime(h.ts)}</Text>
-                  </View>
-                  <Text style={[FONT.mono, { fontWeight: '700', color: h.net >= 0 ? C.green : C.red }]}>{inr(h.net)}</Text>
-                </Row>
-              );
-            })}
-            {(moreCount > 0 || histAll) && (
-              <Pressable onPress={() => setHistAll(v => !v)}
-                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingTop: 10, borderTopWidth: 1, borderTopColor: C.border }}>
-                <Icon name={histAll ? 'chevron-up' : 'chevron-down'} size={16} color={C.blue} />
-                <Text style={{ color: C.blue, fontWeight: '700', marginLeft: 4 }}>
-                  {histAll ? 'Show less' : `Show full history (${moreCount} more trip${moreCount === 1 ? '' : 's'})`}
-                </Text>
-              </Pressable>
-            )}
-          </Card>
-          );
-        })()}
+        {/* Route History lives in its own on-demand sheet now — nothing here
+            renders or computes until the button is tapped. */}
+        {(truck.log || []).length > 0 && (
+          <Btn title={`Route History · ${(truck.log || []).length} trip${(truck.log || []).length === 1 ? '' : 's'}`}
+            kind="soft" icon="history" style={{ marginTop: 10 }} onPress={() => setHistoryOpen(true)} />
+        )}
+        {historyOpen && <TruckHistorySheet visible={historyOpen} onClose={() => setHistoryOpen(false)} log={truck.log || []} />}
 
         <Card style={{ marginTop: 10 }}>
           <Text style={[FONT.h3, { marginBottom: 8 }]}>Customize</Text>
@@ -1894,6 +1991,7 @@ export function MiniGamesModal({ visible, onClose }) {
 // Tap a driver → full A→Z picture: profile, current delivery, live route with
 // where they've reached, next break, ETA and career stats.
 export function DriverDetailModal({ visible, onClose, staffId, onShowOnMap }) {
+  const [driverTimelineOpen, setDriverTimelineOpen] = useState(false);
   const toast = useToast();
   const staff = useGame(s => s.staff);
   const trucks = useGame(s => s.trucks);
@@ -1981,9 +2079,18 @@ export function DriverDetailModal({ visible, onClose, staffId, onShowOnMap }) {
               </Row>
             </Card>
             <Card style={{ marginBottom: 12 }}>
-              <Text style={[FONT.h3, { marginBottom: 10 }]}>Live Route</Text>
-              <JourneyTracker delivery={d} model={m} />
+              <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={FONT.h3}>Live Route</Text>
+                <Btn title="Full Timeline" kind="soft" small icon="map-marker-path" onPress={() => setDriverTimelineOpen(true)} />
+              </Row>
             </Card>
+            {driverTimelineOpen && (
+              <Sheet visible={driverTimelineOpen} onClose={() => setDriverTimelineOpen(false)} title="Full Shipment Timeline" height="80%">
+                <ScrollView showsVerticalScrollIndicator={false}>
+                  <JourneyTracker delivery={d} model={m} />
+                </ScrollView>
+              </Sheet>
+            )}
           </>
         ) : (
           <Card style={{ marginBottom: 12, alignItems: 'center', padding: 20 }}>
@@ -2083,6 +2190,52 @@ const EGGS_INITIAL = 6;
 // countries, achievements, eggs, settings, everything — as versioned JSON
 // (see engine/backup.js). Importable on any device running the same or a
 // newer app version.
+// Before/after comparison for a restore (auto-backup or picked file) — shows
+// exactly what changes, current vs incoming, before anything is touched.
+function buildRestoreDiff(current, incoming) {
+  if (!current || !incoming) return [];
+  const hubNames = (s) => (s?.hubs || []).map(h => h.name).join(', ') || '—';
+  const rows = [
+    { icon: 'cash-multiple', label: 'Cash Balance', before: inr(current.balance || 0), after: inr(incoming.balance || 0) },
+    { icon: 'gold', label: 'Gold', before: String(current.gold || 0), after: String(incoming.gold || 0) },
+    { icon: 'domain', label: 'Company', before: current.company?.name || '—', after: incoming.company?.name || '—' },
+    { icon: 'truck', label: 'Fleet Size', before: String((current.trucks || []).length), after: String((incoming.trucks || []).length) },
+    { icon: 'account-group', label: 'Staff', before: String((current.staff || []).length), after: String((incoming.staff || []).length) },
+    { icon: 'garage', label: 'HQ & Garages', before: hubNames(current), after: hubNames(incoming) },
+    { icon: 'earth', label: 'Countries Unlocked', before: String((current.unlockedCountries || ['IN']).length), after: String((incoming.unlockedCountries || ['IN']).length) },
+    { icon: 'diamond-stone', label: 'Hidden Gems Found', before: String((current.easterEggs?.found || []).length), after: String((incoming.easterEggs?.found || []).length) },
+    { icon: 'chart-line', label: 'Lifetime Revenue', before: inrShort(current.stats?.revenue || 0), after: inrShort(incoming.stats?.revenue || 0) },
+    { icon: 'map-marker-distance', label: 'Lifetime Distance', before: `${Math.round(current.stats?.km || 0).toLocaleString()} km`, after: `${Math.round(incoming.stats?.km || 0).toLocaleString()} km` },
+  ];
+  return rows.map(r => ({ ...r, changed: r.before !== r.after }));
+}
+function RestoreDiffCard({ current, incoming }) {
+  const rows = useMemo(() => buildRestoreDiff(current, incoming), [current, incoming]);
+  return (
+    <Card style={{ marginTop: 10, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
+      <Row style={{ marginBottom: 8 }}>
+        <Icon name="compare-horizontal" size={16} color="#5B8DF0" />
+        <Text style={[FONT.body, { fontWeight: '800', marginLeft: 6, color: '#F8FAFC' }]}>What Changes If You Restore</Text>
+      </Row>
+      {rows.map((r, i) => (
+        <View key={r.label} style={[{ paddingVertical: 7 }, i > 0 && { borderTopWidth: 1, borderTopColor: '#1E293B' }]}>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <Row style={{ flex: 1 }}>
+              <Icon name={r.icon} size={14} color="#64748B" />
+              <Text style={[FONT.tiny, { marginLeft: 6, color: '#94A3B8' }]}>{r.label}</Text>
+            </Row>
+          </Row>
+          <Row style={{ marginTop: 2 }}>
+            <Text style={[FONT.tiny, { color: r.changed ? '#F87171' : '#94A3B8', flex: 1 }]} numberOfLines={1}>Now: {r.before}</Text>
+            <Icon name="arrow-right" size={12} color="#64748B" style={{ marginHorizontal: 4 }} />
+            <Text style={[FONT.tiny, { color: r.changed ? '#4ADE80' : '#94A3B8', fontWeight: r.changed ? '800' : '400', flex: 1, textAlign: 'right' }]} numberOfLines={1}>After: {r.after}</Text>
+          </Row>
+        </View>
+      ))}
+    </Card>
+  );
+}
+
 function BackupTab({ onClose }) {
   const toast = useToast();
   const lastBackupAt = useGame(s => s.lastBackupAt);
@@ -2091,7 +2244,6 @@ function BackupTab({ onClose }) {
   const backupNow = useGame(s => s.backupNow);
   // pending = a picked & validated file waiting for the confirm tap.
   const [pending, setPending] = useState(null); // {data, meta, fileName}
-  const [confirmRestore, setConfirmRestore] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const doExport = async () => {
@@ -2124,13 +2276,21 @@ function BackupTab({ onClose }) {
     onClose && onClose();
   };
 
-  const doRestoreAuto = async () => {
-    if (!confirmRestore) { setConfirmRestore(true); return; }
-    setConfirmRestore(false);
+  // Two-step: first tap FETCHES the auto-backup and shows the diff (nothing
+  // touched yet); second, explicit tap actually restores it.
+  const [pendingAuto, setPendingAuto] = useState(null);
+  const doFetchAuto = async () => {
+    setBusy(true);
     const p = await readAutoBackup();
+    setBusy(false);
     if (!p) { toast('No auto-backup found on this device yet', 'error'); return; }
-    applyCloudState(p.data);
+    setPendingAuto(p.data);
+  };
+  const doRestoreAuto = () => {
+    if (!pendingAuto) return;
+    applyCloudState(pendingAuto);
     toast('Auto-backup restored', 'success');
+    setPendingAuto(null);
     onClose && onClose();
   };
 
@@ -2160,8 +2320,17 @@ function BackupTab({ onClose }) {
           <Btn title="Back up now" small kind="soft" icon="content-save-outline"
             onPress={() => { backupNow(); toast('Snapshot saved on this device', 'success'); }} />
         </Row>
-        <Btn title={confirmRestore ? 'Tap again to overwrite current game' : 'Restore auto-backup'}
-          kind={confirmRestore ? 'danger' : 'soft'} icon="backup-restore" onPress={doRestoreAuto} style={{ marginTop: 12 }} />
+        {!pendingAuto ? (
+          <Btn title={busy ? 'Checking…' : 'Check auto-backup'} kind="soft" icon="backup-restore" disabled={busy} onPress={doFetchAuto} style={{ marginTop: 12 }} />
+        ) : (
+          <>
+            <RestoreDiffCard current={cloudSnapshot()} incoming={pendingAuto} />
+            <Row style={{ marginTop: 10, gap: 8 }}>
+              <View style={{ flex: 1 }}><Btn title="Cancel" kind="ghost" onPress={() => setPendingAuto(null)} /></View>
+              <View style={{ flex: 1 }}><Btn title="Restore This" kind="danger" icon="backup-restore" onPress={doRestoreAuto} /></View>
+            </Row>
+          </>
+        )}
       </Card>
 
       <SectionTitle icon="database-import" text="Import" />
@@ -2179,6 +2348,7 @@ function BackupTab({ onClose }) {
               Valid backup · from {pending.meta.version}{pending.meta.savedAt ? ` · saved ${relTime(new Date(pending.meta.savedAt).getTime())}` : ''}
               {pending.data.company?.name ? ` · company "${pending.data.company.name}"` : ''}
             </Text>
+            <RestoreDiffCard current={cloudSnapshot()} incoming={pending.data} />
             <Btn title="Import — replaces the current game" kind="danger" icon="database-import" onPress={doImport} style={{ marginTop: 8 }} />
           </View>
         )}
@@ -2288,8 +2458,8 @@ const ROADMAP_ITEMS = [
     desc: 'Level up garages: bigger fuel discounts, faster loading, covered parking that slows condition wear.' },
   { icon: 'school', title: 'Driver Academy', status: 'exploring',
     desc: 'Send drivers to training between trips — buy XP with time and cash instead of only earning it on the road.' },
-  { icon: 'camera', title: 'Photo / Share Card', status: 'someday',
-    desc: 'One-tap company stats card (fleet, net worth, km) to share on WhatsApp.' },
+  { icon: 'camera', title: 'Photo Mode — Empire Report Card', status: 'shipped',
+    desc: 'SHIPPED — open from Company Insights (tap your profile pill): a trophy-style stats card with records (longest haul, best trip) and one-tap share.' },
   { icon: 'music', title: 'Sound & Music Pass', status: 'someday',
     desc: 'Ambient highway audio, per-country map music, and a horn on tap-and-hold — Horn OK Please.' },
   { icon: 'content-save-all', title: 'Multiple Save Slots', status: 'someday',
@@ -2612,18 +2782,23 @@ export function SettingsModal({ visible, onClose, initialTab }) {
 
 // Credits — the open data / open source that makes the game possible.
 const CREDITS = [
-  { icon: 'map', name: 'OpenStreetMap', role: 'Map data & tiles', by: '© OpenStreetMap contributors (ODbL)' },
+  { icon: 'map', name: 'OpenStreetMap', role: 'Map & road data', by: '© OpenStreetMap contributors (ODbL)' },
   { icon: 'layers', name: 'Leaflet', role: 'Interactive map engine', by: 'Vladimir Agafonkin & contributors' },
-  { icon: 'satellite-variant', name: 'Esri World Imagery', role: 'Satellite basemap', by: 'Esri, Maxar, Earthstar Geographics' },
+  { icon: 'earth', name: 'CARTO Basemaps', role: 'Map tile styling', by: '© CARTO — basemaps.cartocdn.com' },
+  { icon: 'routes', name: 'OSRM Routing Engine', role: 'Real road paths (beta)', by: 'Project OSRM — router.project-osrm.org' },
   { icon: 'react', name: 'React Native', role: 'App framework', by: 'Meta Open Source' },
   { icon: 'vector-square', name: 'Material Community Icons', role: 'Iconography', by: 'Pictogrammers (Apache 2.0)' },
   { icon: 'road-variant', name: 'National Highways data', role: 'Route network', by: 'Compiled from public NHAI references' },
+  { icon: 'creation', name: 'Claude (Anthropic)', role: 'AI development partner', by: 'Every line, every fix, every 2am idea — built together' },
 ];
 
-// The team.
+// The team — every card is rendered identically (same badge size, same fixed
+// title/subtitle height) so the row always lines up, no matter how long a
+// title is.
 const DEVELOPERS = [
   { name: 'Parth Vasoya', title: 'Lead Developer & Designer', icon: 'account-star', color: C.blue, bg: C.blueSoft },
   { name: 'Jeel Gajera', title: 'Developer', icon: 'account-tie', color: C.green, bg: C.greenSoft },
+  { name: 'Claude', title: '24/7 AI Coding Partner', icon: 'creation', color: '#C0161C', bg: '#C0161C1A', eggId: 'hello_claude', tapCount: 9 },
 ];
 
 // A shimmering placeholder row (icon block + two text lines) used while remote
@@ -2654,6 +2829,7 @@ function AboutTab({ onReplayTutorial }) {
   const [allHistory, setAllHistory] = useState(false);
   const tapVersionEgg = useEasterEggTap('version_detective', 6);
   const tapMakerEgg = useEasterEggTap('meet_the_maker', 7);
+  const tapClaudeEgg = useEasterEggTap('hello_claude', 9);
 
   const check = async () => {
     setState({ status: 'checking', data: null, err: null });
@@ -2770,18 +2946,23 @@ function AboutTab({ onReplayTutorial }) {
         </>
       ) : null}
 
-      {/* Developers */}
+      {/* Developers — every card is IDENTICAL height/layout (fixed badge size,
+          two-line title slot) regardless of name/title length, so the row
+          always lines up perfectly instead of drifting with text wrap. */}
       <Text style={cs.section}>Developed By</Text>
-      <Row style={{ gap: 10 }}>
-        {DEVELOPERS.map((dev, i) => (
-          <Card key={dev.name} style={{ flex: 1, padding: 0 }}>
-            <Pressable onPress={() => { if (i === 0) tapMakerEgg(); }} style={{ alignItems: 'center', padding: 16 }}>
-              <View style={[cs.heroIcon, { width: 52, height: 52, backgroundColor: dev.bg }]}><Icon name={dev.icon} size={28} color={dev.color} /></View>
-              <Text style={[FONT.body, { fontWeight: '800', marginTop: 8, textAlign: 'center' }]}>{dev.name}</Text>
-              <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 2 }]}>{dev.title}</Text>
-            </Pressable>
-          </Card>
-        ))}
+      <Row style={{ gap: 10, alignItems: 'stretch' }}>
+        {DEVELOPERS.map((dev, i) => {
+          const tapEgg = i === 0 ? tapMakerEgg : dev.eggId === 'hello_claude' ? tapClaudeEgg : null;
+          return (
+            <Card key={dev.name} style={{ flex: 1, padding: 0 }}>
+              <Pressable onPress={() => { if (tapEgg) tapEgg(); }} style={{ alignItems: 'center', padding: 14, minHeight: 138, justifyContent: 'center' }}>
+                <View style={[cs.heroIcon, { width: 52, height: 52, backgroundColor: dev.bg }]}><Icon name={dev.icon} size={28} color={dev.color} /></View>
+                <Text style={[FONT.body, { fontWeight: '800', marginTop: 8, textAlign: 'center' }]} numberOfLines={1}>{dev.name}</Text>
+                <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 2 }]} numberOfLines={2}>{dev.title}</Text>
+              </Pressable>
+            </Card>
+          );
+        })}
       </Row>
 
       {/* Credits */}
@@ -2797,6 +2978,22 @@ function AboutTab({ onReplayTutorial }) {
             </View>
           </Row>
         ))}
+      </Card>
+
+      {/* Tribute / trademark disclaimer — the fleet's brand names are our own
+          fictional creations, inspired by (and paying tribute to) the real
+          trucking manufacturers whose work shaped this game's world. */}
+      <Text style={cs.section}>A Note on Vehicle Names</Text>
+      <Card style={{ backgroundColor: C.bgSoft }}>
+        <Row>
+          <Icon name="hand-heart-outline" size={16} color={C.sub} style={{ marginTop: 1 }} />
+          <Text style={[FONT.tiny, { marginLeft: 8, flex: 1, lineHeight: 17 }]}>
+            The truck brands and model names in this game (Tatrax, Ashok Logistics, Voltra, Scanix and others) are original,
+            fictional creations — a respectful tribute to the real manufacturers who inspire the world of trucking we love.
+            Any resemblance is intentional homage, not affiliation; all real trademarks remain the property of their
+            rightful owners.
+          </Text>
+        </Row>
       </Card>
 
       <Btn title="Replay Tutorial" kind="soft" icon="school-outline" style={{ marginTop: 14 }} onPress={onReplayTutorial} />
@@ -3133,7 +3330,113 @@ export function HubInfoModal({ visible, onClose, cityId, onNewDelivery, onOpenTr
 // ============ Company Insights (tap the profile capsule) ============
 // The company's own page: identity, level, health scorecard and smart tips —
 // a real dashboard, not a shortcut into Settings.
-export function CompanyInsightsModal({ visible, onClose, onOpenSettings }) {
+// Photo Mode — a big shareable achievement/trophy card: totals, records
+// (longest route, most profitable trip), level and title, all in one shot.
+// No image-export library in this project (would need a new native module),
+// so 'share' uses the OS Share sheet with a formatted text summary — still
+// genuinely shareable to WhatsApp/anywhere, just text instead of a PNG.
+function StatTile({ icon, label, value, color = '#F8FAFC' }) {
+  return (
+    <View style={{ width: '33.3%', alignItems: 'center', paddingVertical: 10 }}>
+      <Icon name={icon} size={20} color="#5B8DF0" />
+      <Text style={[FONT.h3, { color, marginTop: 4 }]} numberOfLines={1}>{value}</Text>
+      <Text style={[FONT.tiny, { color: '#64748B', textAlign: 'center' }]} numberOfLines={1}>{label}</Text>
+    </View>
+  );
+}
+export function PhotoModeModal({ visible, onClose }) {
+  const state = useGame(s => s);
+  if (!visible) return <Sheet visible={false} onClose={onClose} title="Photo Mode" height="88%"><View /></Sheet>;
+  const company = state.company;
+  if (!company) return <Sheet visible={visible} onClose={onClose} title="Photo Mode" height="40%"><View /></Sheet>;
+  const hq = cityById(company.hqCityId);
+  const xp = companyXP(state);
+  const level = companyLevelOf(xp);
+  const ageDays = Math.max(1, Math.round((Date.now() - company.createdAt) / 86400000));
+  const history = state.history || [];
+  const longest = history.length ? [...history].sort((a, b) => b.km - a.km)[0] : null;
+  const bestTrip = history.length ? [...history].sort((a, b) => b.net - a.net)[0] : null;
+  const gemsFound = (state.easterEggs?.found || []).length;
+  const tiersUnlocked = Object.keys(state.achievements?.unlocked || {}).length;
+  const totalTiers = ACHIEVEMENTS.length * 5;
+
+  const shareText = () => {
+    const lines = [
+      `${company.name} — Empire Report Card`,
+      `Level ${level} · ${companyTitleOf(level)} · Day ${ageDays}`,
+      ``,
+      `Fleet: ${state.trucks.length} trucks · ${state.staff.length} staff`,
+      `${state.stats.deliveries.toLocaleString('en-IN')} deliveries · ${Math.round(state.stats.km).toLocaleString('en-IN')} km driven`,
+      `Lifetime revenue: ${inrShort(state.stats.revenue)}`,
+      `${(state.unlockedCountries || ['IN']).length} countries unlocked · ${gemsFound} hidden gems found`,
+      `${tiersUnlocked}/${totalTiers} achievement tiers unlocked`,
+    ];
+    if (longest) lines.push(``, `Longest haul: ${cityById(longest.fromCityId)?.name} → ${cityById(longest.toCityId)?.name} · ${longest.km} km`);
+    if (bestTrip) lines.push(`Best trip ever: ${cityById(bestTrip.fromCityId)?.name} → ${cityById(bestTrip.toCityId)?.name} · ${inr(bestTrip.net)} profit`);
+    lines.push(``, `Built in Truck Empire Tycoon`);
+    return lines.join('\n');
+  };
+  const doShare = () => { Share.share({ message: shareText() }).catch(() => {}); };
+
+  return (
+    <Sheet visible={visible} onClose={onClose} title="Photo Mode" height="90%">
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+        <Card style={{ backgroundColor: '#0F172A', borderColor: '#1E293B', padding: 20 }}>
+          <View style={{ alignItems: 'center' }}>
+            <View style={[cs.heroIcon, { width: 64, height: 64, backgroundColor: '#1E293B' }]}>
+              <Icon name={company.logo || 'truck'} size={34} color="#5B8DF0" />
+            </View>
+            <Text style={[FONT.h2, { color: '#F8FAFC', marginTop: 10 }]}>{company.name}</Text>
+            <Text style={[FONT.tiny, { color: '#94A3B8', marginTop: 2 }]}>CEO {company.ceo} · HQ {hq?.name}</Text>
+            <View style={{ marginTop: 10, backgroundColor: '#1E293B', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 6 }}>
+              <Text style={[FONT.body, { color: '#F4D35E', fontWeight: '800' }]}>Level {level} · {companyTitleOf(level)}</Text>
+            </View>
+            <Text style={[FONT.tiny, { color: '#64748B', marginTop: 8 }]}>Day {ageDays} of the empire</Text>
+          </View>
+
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 16, borderTopWidth: 1, borderTopColor: '#1E293B', paddingTop: 6 }}>
+            <StatTile icon="map-marker-distance" label="Total KM" value={`${Math.round(state.stats.km).toLocaleString('en-IN')}`} />
+            <StatTile icon="cash-multiple" label="Lifetime Revenue" value={inrShort(state.stats.revenue)} color="#4ADE80" />
+            <StatTile icon="package-variant-closed-check" label="Deliveries" value={String(state.stats.deliveries)} />
+            <StatTile icon="truck" label="Fleet Size" value={String(state.trucks.length)} />
+            <StatTile icon="account-group" label="Staff" value={String(state.staff.length)} />
+            <StatTile icon="earth" label="Countries" value={String((state.unlockedCountries || ['IN']).length)} />
+            <StatTile icon="diamond-stone" label="Gems Found" value={String(gemsFound)} color="#F4D35E" />
+            <StatTile icon="trophy" label="Achievements" value={`${tiersUnlocked}/${totalTiers}`} color="#F4D35E" />
+            <StatTile icon="garage" label="Garages" value={String((state.hubs || []).length)} />
+          </View>
+
+          {(longest || bestTrip) && (
+            <View style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: '#1E293B', paddingTop: 12 }}>
+              {longest && (
+                <Row style={{ marginBottom: 8 }}>
+                  <Icon name="highway" size={16} color="#5B8DF0" />
+                  <Text style={[FONT.tiny, { color: '#94A3B8', marginLeft: 8, flex: 1 }]}>
+                    Longest haul ever: <Text style={{ color: '#F8FAFC', fontWeight: '700' }}>{cityById(longest.fromCityId)?.name} → {cityById(longest.toCityId)?.name}</Text> · {longest.km} km
+                  </Text>
+                </Row>
+              )}
+              {bestTrip && (
+                <Row>
+                  <Icon name="star-circle" size={16} color="#F4D35E" />
+                  <Text style={[FONT.tiny, { color: '#94A3B8', marginLeft: 8, flex: 1 }]}>
+                    Most profitable trip: <Text style={{ color: '#4ADE80', fontWeight: '700' }}>{cityById(bestTrip.fromCityId)?.name} → {cityById(bestTrip.toCityId)?.name}</Text> · {inr(bestTrip.net)}
+                  </Text>
+                </Row>
+              )}
+            </View>
+          )}
+        </Card>
+        <Btn title="Share Report Card" kind="green" icon="share-variant" style={{ marginTop: 14 }} onPress={doShare} />
+        <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 10 }]}>
+          Shares as text (WhatsApp, anywhere) — a full image export would need an extra native library, on the roadmap.
+        </Text>
+      </ScrollView>
+    </Sheet>
+  );
+}
+
+export function CompanyInsightsModal({ visible, onClose, onOpenSettings, onOpenPhotoMode }) {
   const state = useGame(s => s);
   // PERF: once opened these sheets stay mounted; skip all the analytics work
   // (and the whole render tree) while hidden.
@@ -3216,6 +3519,8 @@ export function CompanyInsightsModal({ visible, onClose, onOpenSettings }) {
           ))}
         </Card>
 
+        <Btn title="Photo Mode — Empire Report Card" kind="blue" icon="trophy-award" style={{ marginBottom: 10 }}
+          onPress={() => { onClose(); onOpenPhotoMode && onOpenPhotoMode(); }} />
         <Btn title="Edit company (Settings)" kind="soft" icon="cog-outline" onPress={() => { onClose(); onOpenSettings && onOpenSettings(); }} />
       </ScrollView>
     </Sheet>
@@ -3238,14 +3543,22 @@ export function NewsModal({ visible, onClose }) {
   const events = state.mapEvents || [];
   const unlocked = state.unlockedCountries || ['IN'];
 
-  // Cities affected by each weather zone (big cities inside the blob).
-  const affected = (z) => CITIES.filter(c => {
-    if (c.tier > 2 || (c.country || 'IN') !== 'IN' && !unlocked.includes(c.country)) return false;
-    const kLat = 111, kLng = 111 * Math.cos((z.lat * Math.PI) / 180);
-    const dy = (c.lat - z.lat) * kLat, dx = (c.lng - z.lng) * kLng;
-    const d = Math.sqrt(dx * dx + dy * dy);
-    return d <= weatherRadiusAt(z, Math.atan2(dy, dx));
-  }).slice(0, 4);
+  // Cities affected by each weather zone (big cities inside the blob) —
+  // memoized per zone set so any unrelated re-render (a toast, a tick
+  // elsewhere) doesn't re-scan every city again.
+  const affectedCache = useMemo(() => {
+    const m = new Map();
+    for (const z of zones) {
+      m.set(z.id, CITIES.filter(c => {
+        if (c.tier > 2 || ((c.country || 'IN') !== 'IN' && !unlocked.includes(c.country))) return false;
+        const kLat = 111, kLng = 111 * Math.cos((z.lat * Math.PI) / 180);
+        const dy = (c.lat - z.lat) * kLat, dx = (c.lng - z.lng) * kLng;
+        return Math.sqrt(dx * dx + dy * dy) <= weatherRadiusAt(z, Math.atan2(dy, dx));
+      }).slice(0, 4));
+    }
+    return m;
+  }, [zones, unlocked]);
+  const affected = (z) => affectedCache.get(z.id) || [];
 
   // Suggested destinations: busy tier-1/2 unlocked cities with CLEAR skies.
   const suggestions = useMemo(() => {

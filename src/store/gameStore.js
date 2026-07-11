@@ -204,6 +204,32 @@ export function staffMood(member, { trucks = [], deliveries = [] } = {}, now = D
 let idSeq = 1;
 const uid = p => `${p}-${Date.now().toString(36)}-${(idSeq++).toString(36)}`;
 
+// Rescale every active delivery to run at 2x pace WITHOUT a position jump.
+// Naively halving `endsAt` shrinks the total duration while `startedAt` stays
+// put, so frac = elapsed/total suddenly jumps forward — the truck teleports
+// ahead on the map. Instead we solve for a new startedAt/endsAt pair that
+// keeps frac continuous at the moment of the boost, then doubles the rate of
+// change thereafter — the truck visibly speeds up along the same path
+// instead of skipping forward.
+function rescaleDeliveriesFaster(deliveries, now, factor = 2) {
+  return deliveries.map(d => {
+    const oldTotal = Math.max(1, d.endsAt - d.startedAt);
+    const f0 = Math.min(1, Math.max(0, (now - d.startedAt) / oldTotal));
+    const newTotal = oldTotal / factor;
+    const newStartedAt = now - f0 * newTotal;
+    // Every sub-duration deliveryPhase uses to build its piecewise timeline
+    // (load/unload/ferry board-unboard, in absolute seconds) must shrink by
+    // the SAME factor as the total, or the phase boundaries shift relative
+    // to the new total and frac still jumps a little at the seam. Scaling
+    // them all together keeps deliveryPhase's output perfectly continuous.
+    return {
+      ...d, startedAt: newStartedAt, endsAt: newStartedAt + newTotal,
+      loadSec: (d.loadSec || 0) / factor, unloadSec: (d.unloadSec || 0) / factor,
+      ferryBoardSec: (d.ferryBoardSec || 0) / factor, ferryUnboardSec: (d.ferryUnboardSec || 0) / factor,
+    };
+  });
+}
+
 export const modelById = id => TRUCK_MODELS.find(m => m.id === id);
 export const cargoById = id => CARGO_TYPES.find(c => c.id === id);
 
@@ -528,6 +554,7 @@ export const EASTER_EGGS = [
   { id: 'number_cruncher', title: 'Number Cruncher', hint: 'Some people really love spreadsheets.', where: 'Tap the "Economy" tab in the bottom bar 7 times fast.' },
   { id: 'speed_demon', title: 'Speed Demon', hint: 'Life in the fast lane, always.', where: 'Tap "Very Fast" game speed in Settings → Gameplay 5 times fast.' },
   { id: 'meet_the_maker', title: 'Meet the Maker', hint: 'Say hello to the person behind the wheel of the code.', where: 'Tap the Lead Developer card in Settings → About 7 times fast.' },
+  { id: 'hello_claude', title: 'Hello, Claude', hint: 'Someone else never clocked off building this.', where: 'Tap the Claude card in Settings → About 9 times fast.' },
   // v2.3.0 — the tough five. High tap counts, obscure corners: these are meant
   // to survive weeks of hunting.
   { id: 'ghost_rider', title: 'Ghost Rider', hint: 'Only night owls notice the sky change.', where: 'Tap the day/night weather icon in the top header 9 times fast.' },
@@ -1945,7 +1972,7 @@ export const useGame = create(
         if (seg.type === 'gold') { set({ gold: get().gold + seg.amount }); play('coin', 0.8); }
         else if (seg.type === 'speed') {
           set({ boosts: { ...get().boosts, speedUntil: now + 3600 * 1000 } });
-          set({ deliveries: get().deliveries.map(d => ({ ...d, endsAt: now + (d.endsAt - now) / 2 })) });
+          set({ deliveries: rescaleDeliveriesFaster(get().deliveries, now) });
         } else if (seg.type === 'double') {
           set({ boosts: { ...get().boosts, doubleNext: true } });
         }
@@ -2202,9 +2229,9 @@ export const useGame = create(
           set({ gold: s.gold - p.gold, trucks: s.trucks.map(t => t.id === truckId ? { ...t, fuelPct: 100 } : t) });
         } else if (pid === 'speed') {
           set({ gold: s.gold - p.gold, boosts: { ...s.boosts, speedUntil: Date.now() + 3600 * 1000 } });
-          // retime active deliveries 2x faster for remaining distance
-          const now = Date.now();
-          set({ deliveries: get().deliveries.map(d => ({ ...d, endsAt: now + (d.endsAt - now) / 2 })) });
+          // Retime active deliveries 2x faster — truck visibly speeds up
+          // along the same path, no jump-ahead (rescaleDeliveriesFaster).
+          set({ deliveries: rescaleDeliveriesFaster(get().deliveries, Date.now()) });
         } else if (pid === 'repair') {
           const r = get().repairTruck(truckId, true);
           if (!r.ok) return r;
