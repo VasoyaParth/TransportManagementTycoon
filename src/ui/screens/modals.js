@@ -5,7 +5,7 @@ import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Swi
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, CONVOY_SYMBOLS, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, CONVOY_SYMBOLS, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
@@ -933,7 +933,11 @@ export function BuyTruckModal({ visible, onClose }) {
   const [tier, setTier] = useState(0);
   const [sort, setSort] = useState('default');
   const [page, setPage] = useState(1); // showroom loads 10 trucks at a time
+  const [confirmModel, setConfirmModel] = useState(null); // full-detail confirm sheet before buying
+  const gameDay = useGame(st => st.gameDay);
+  const day = gameDay().day;
   useEffect(() => { setPage(1); }, [tier, sort]);
+  useEffect(() => { if (!visible) setConfirmModel(null); }, [visible]);
   const tapWindowShopperEgg = useEasterEggTap('window_shopper', 8);
   const SORTS = [
     ['default', 'Default'],
@@ -953,7 +957,7 @@ export function BuyTruckModal({ visible, onClose }) {
   }, [tier, sort]);
   const buy = (m) => {
     const r = buyTruck(m.id);
-    if (r.ok) { toast(`${m.name} ordered — building at HQ`, 'success'); }
+    if (r.ok) { toast(`${m.name} ordered — building at HQ`, 'success'); setConfirmModel(null); }
     else toast(r.err, 'error');
   };
   return (
@@ -980,9 +984,16 @@ export function BuyTruckModal({ visible, onClose }) {
         ) : null}
         renderItem={({ item: m }) => {
           const pm = propMeta[m.propulsion];
-          const afford = balance >= m.price;
+          const deal = truckDealFor(m.id, day);
+          const price = dealPriceFor(m, day);
+          const afford = balance >= price;
           return (
-            <Card style={{ marginBottom: 10 }}>
+            <Card style={{ marginBottom: 10, borderColor: deal > 0 ? C.green : C.border }}>
+              {deal > 0 && (
+                <View style={{ position: 'absolute', top: -1, right: 12, backgroundColor: C.red, borderBottomLeftRadius: 8, borderBottomRightRadius: 8, paddingHorizontal: 8, paddingVertical: 3 }}>
+                  <Text style={{ color: '#fff', fontWeight: '900', fontSize: 10 }}>{Math.round(deal * 100)}% OFF</Text>
+                </View>
+              )}
               <Row>
                 <TruckArtBadge model={m} size={52} bg={pm.bg} />
                 <View style={{ marginLeft: 12, flex: 1 }}>
@@ -998,13 +1009,74 @@ export function BuyTruckModal({ visible, onClose }) {
                 <MiniSpec icon="wrench" v={`${m.maint}/km`} />
               </Row>
               <Row style={{ justifyContent: 'space-between', alignItems: 'center', marginTop: 10 }}>
-                <Text style={[FONT.h3, { color: C.text }]}>{inr(m.price)}</Text>
-                <Btn title={afford ? 'Buy' : 'Insufficient funds'} kind={afford ? 'primary' : 'soft'} small disabled={!afford} onPress={() => buy(m)} />
+                <View>
+                  {deal > 0 ? (
+                    <Row style={{ gap: 6, alignItems: 'center' }}>
+                      <Text style={[FONT.tiny, { textDecorationLine: 'line-through', color: C.faint }]}>{inrShort(m.price)}</Text>
+                      <Text style={[FONT.h3, { color: C.green }]}>{inr(price)}</Text>
+                    </Row>
+                  ) : <Text style={[FONT.h3, { color: C.text }]}>{inr(price)}</Text>}
+                </View>
+                <Btn title={afford ? 'View & Buy' : 'Insufficient funds'} kind={afford ? 'primary' : 'soft'} small disabled={!afford} onPress={() => setConfirmModel(m)} />
               </Row>
             </Card>
           );
         }}
       />
+
+      {/* ---- Confirm sheet: the full picture before money leaves the account ---- */}
+      <Sheet visible={!!confirmModel} onClose={() => setConfirmModel(null)} title="Confirm Purchase" height="72%">
+        {confirmModel && (() => {
+          const m = confirmModel;
+          const deal = truckDealFor(m.id, day);
+          const price = dealPriceFor(m, day);
+          const pm = propMeta[m.propulsion];
+          const afford = balance >= price;
+          return (
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+              <Card style={{ alignItems: 'center', paddingVertical: 18, marginBottom: 12 }}>
+                <TruckArtBadge model={m} size={84} bg={pm.bg} />
+                <Text style={[FONT.h2, { marginTop: 8 }]}>{m.name}</Text>
+                <Text style={FONT.tiny}>{m.brand}</Text>
+                <Row style={{ marginTop: 6, gap: 6 }}>
+                  <Pill text={pm.label} icon={pm.icon} color={pm.color} bg={pm.bg} />
+                  <Stars rating={m.rating} size={12} />
+                  {deal > 0 ? <Pill text={`${Math.round(deal * 100)}% OFF today`} icon="tag" color="#fff" bg={C.red} /> : null}
+                </Row>
+                <Text style={[FONT.sub, { textAlign: 'center', marginTop: 8 }]}>{m.desc}</Text>
+              </Card>
+              <SectionTitle icon="clipboard-list-outline" text="Full Specifications" />
+              <Card style={{ marginBottom: 12 }}>
+                <SpecRow icon="speedometer" label="Top speed" value={`${m.speed} km/h`} />
+                <SpecRow icon="weight" label="Cargo capacity" value={`${m.cargo} tons`} />
+                <SpecRow icon="map-marker-distance" label="Range (full tank)" value={`${m.range} km`} />
+                {m.propulsion === 'electric'
+                  ? <SpecRow icon="battery-charging" label="Battery" value={`${m.battery} kWh`} />
+                  : <SpecRow icon="gas-station" label="Fuel tank" value={`${m.tank} L (${m.eff} km/L)`} />}
+                <SpecRow icon="wrench" label="Maintenance" value={`₹${m.maint}/km`} />
+                <SpecRow icon="factory" label="Build time" value={`${Math.round(m.build / 60)} min at HQ`} />
+              </Card>
+              <Card style={{ marginBottom: 12, backgroundColor: C.bgSoft }}>
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <Text style={FONT.body}>Price today</Text>
+                  <Row style={{ gap: 8, alignItems: 'center' }}>
+                    {deal > 0 ? <Text style={[FONT.tiny, { textDecorationLine: 'line-through', color: C.faint }]}>{inr(m.price)}</Text> : null}
+                    <Text style={[FONT.h3, { color: deal > 0 ? C.green : C.text }]}>{inr(price)}</Text>
+                  </Row>
+                </Row>
+                <Row style={{ justifyContent: 'space-between', marginTop: 6 }}>
+                  <Text style={FONT.tiny}>Balance after purchase</Text>
+                  <Text style={[FONT.tiny, { fontWeight: '800', color: afford ? C.text : C.red }]}>{inrShort(balance - price)}</Text>
+                </Row>
+                {deal > 0 ? <Text style={[FONT.tiny, { marginTop: 6, color: C.green }]}>Deals rotate every game day — this one is gone tomorrow.</Text> : null}
+              </Card>
+              <Btn title={afford ? `Confirm — buy for ${inrShort(price)}` : 'Insufficient funds'} kind={afford ? 'green' : 'soft'}
+                icon="cart-check" disabled={!afford} onPress={() => buy(m)} />
+              <Btn title="Cancel" kind="ghost" style={{ marginTop: 8 }} onPress={() => setConfirmModel(null)} />
+            </ScrollView>
+          );
+        })()}
+      </Sheet>
     </Sheet>
   );
 }
@@ -2205,6 +2277,8 @@ const ROADMAP_ITEMS = [
     desc: 'Book train wagons and air freight for long hauls — cheaper/faster trade-offs against your own trucks.' },
   { icon: 'star-circle', title: 'City Reputation', status: 'someday',
     desc: 'Deliver often to a city and it starts trusting you: better rates, faster loading, exclusive contracts.' },
+  { icon: 'newspaper-variant', title: 'Apna News Channel', status: 'shipped',
+    desc: 'SHIPPED in v3.0.0 — fuel desk, weather bulletins, trip advice and the gossip column, live on the map.' },
   { icon: 'routes', title: 'Real Roads (Google-Maps style)', status: 'beta',
     desc: 'Trucks following actual highway geometry bend by bend. Already LIVE in the private beta build — graduating here soon.' },
   { icon: 'shield-home', title: 'Garage Upgrades', status: 'exploring',
@@ -2223,6 +2297,7 @@ const ROADMAP_ITEMS = [
     desc: 'True partner play — shared convoys and cargo exchange. Needs a server, so it lives at the very end of this list.' },
 ];
 const ROADMAP_STATUS = {
+  shipped: { label: 'Shipped ✓', color: C.green, bg: C.greenSoft },
   beta: { label: 'In Beta', color: '#C0161C', bg: '#C0161C22' },
   planned: { label: 'Planned', color: C.green, bg: C.greenSoft },
   exploring: { label: 'Exploring', color: C.blue, bg: C.blueSoft },
@@ -2832,6 +2907,7 @@ export function HubsModal({ visible, onClose, onShowOnMap }) {
 // you operate the trucks parked there — refuel, dispatch, fast-travel in.
 export function HubInfoModal({ visible, onClose, cityId, onNewDelivery, onOpenTruck }) {
   const toast = useToast();
+  const tapHqHomeEgg = useEasterEggTap('hq_home', 5);
   const hubs = useGame(s => s.hubs || []);
   const trucks = useGame(s => s.trucks);
   const deliveries = useGame(s => s.deliveries);
@@ -2869,9 +2945,11 @@ export function HubInfoModal({ visible, onClose, cityId, onNewDelivery, onOpenTr
         {/* Hero */}
         <Card style={{ marginBottom: 12, backgroundColor: isHQ ? '#0F172A' : C.bgSoft, borderColor: isHQ ? '#1E293B' : C.border }}>
           <Row>
-            <View style={[cs.heroIcon, { width: 52, height: 52, backgroundColor: isHQ ? '#1E293B' : C.blueSoft }]}>
-              <Icon name={isHQ ? 'office-building-marker' : 'garage-variant'} size={28} color={isHQ ? '#5B8DF0' : C.blue} />
-            </View>
+            <Pressable onPress={() => { if (isHQ) tapHqHomeEgg(); }}>
+              <View style={[cs.heroIcon, { width: 52, height: 52, backgroundColor: isHQ ? '#1E293B' : C.blueSoft }]}>
+                <Icon name={isHQ ? 'office-building-marker' : 'garage-variant'} size={28} color={isHQ ? '#5B8DF0' : C.blue} />
+              </View>
+            </Pressable>
             <View style={{ marginLeft: 12, flex: 1 }}>
               <Text style={[FONT.h2, isHQ && { color: '#F8FAFC' }]}>{isHQ ? company?.name : hub.name}</Text>
               <Text style={[FONT.tiny, isHQ && { color: '#94A3B8' }]}>
