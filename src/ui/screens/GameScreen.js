@@ -12,7 +12,7 @@ import { FleetTab, RoutesTab, StaffTab, EconomyTab, MarketingTab, RewardsTab } f
 import {
   NewDeliveryModal, TruckDetailModal, BuyTruckModal, ContractsModal,
   PowerupsModal, NotificationsModal, SettingsModal, HubsModal, DriverDetailModal, CountriesModal, MiniGamesModal, HubInfoModal,
-  CompanyInsightsModal, NewsModal,
+  CompanyInsightsModal, NewsModal, PhotoModeModal,
 } from './modals';
 import { haptic } from '../../engine/haptics';
 import Tutorial from './Tutorial';
@@ -304,7 +304,9 @@ export default function GameScreen() {
       />}
       {mounted('settings') && <SettingsModal visible={modal?.kind === 'settings'} onClose={() => setModal(null)} initialTab={modal?.tab} />}
       {mounted('company') && <CompanyInsightsModal visible={modal?.kind === 'company'} onClose={() => setModal(null)}
-        onOpenSettings={() => setModal({ kind: 'settings', tab: 'company' })} />}
+        onOpenSettings={() => setModal({ kind: 'settings', tab: 'company' })}
+        onOpenPhotoMode={() => setModal({ kind: 'photomode' })} />}
+      {mounted('photomode') && <PhotoModeModal visible={modal?.kind === 'photomode'} onClose={() => setModal(null)} />}
       {mounted('news') && <NewsModal visible={modal?.kind === 'news'} onClose={() => setModal(null)} />}
 
       {/* First-time guided tour */}

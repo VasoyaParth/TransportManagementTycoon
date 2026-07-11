@@ -1,7 +1,7 @@
 // Modal flows — all rendered inside the shared <Sheet>. New delivery, truck
 // detail, buy truck, contracts, power-ups, notifications, settings.
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Switch, Animated, Easing, Linking } from 'react-native';
+import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Switch, Animated, Easing, Linking, Share } from 'react-native';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider } from '../components';
@@ -2458,8 +2458,8 @@ const ROADMAP_ITEMS = [
     desc: 'Level up garages: bigger fuel discounts, faster loading, covered parking that slows condition wear.' },
   { icon: 'school', title: 'Driver Academy', status: 'exploring',
     desc: 'Send drivers to training between trips — buy XP with time and cash instead of only earning it on the road.' },
-  { icon: 'camera', title: 'Photo / Share Card', status: 'someday',
-    desc: 'One-tap company stats card (fleet, net worth, km) to share on WhatsApp.' },
+  { icon: 'camera', title: 'Photo Mode — Empire Report Card', status: 'shipped',
+    desc: 'SHIPPED — open from Company Insights (tap your profile pill): a trophy-style stats card with records (longest haul, best trip) and one-tap share.' },
   { icon: 'music', title: 'Sound & Music Pass', status: 'someday',
     desc: 'Ambient highway audio, per-country map music, and a horn on tap-and-hold — Horn OK Please.' },
   { icon: 'content-save-all', title: 'Multiple Save Slots', status: 'someday',
@@ -2782,18 +2782,23 @@ export function SettingsModal({ visible, onClose, initialTab }) {
 
 // Credits — the open data / open source that makes the game possible.
 const CREDITS = [
-  { icon: 'map', name: 'OpenStreetMap', role: 'Map data & tiles', by: '© OpenStreetMap contributors (ODbL)' },
+  { icon: 'map', name: 'OpenStreetMap', role: 'Map & road data', by: '© OpenStreetMap contributors (ODbL)' },
   { icon: 'layers', name: 'Leaflet', role: 'Interactive map engine', by: 'Vladimir Agafonkin & contributors' },
-  { icon: 'satellite-variant', name: 'Esri World Imagery', role: 'Satellite basemap', by: 'Esri, Maxar, Earthstar Geographics' },
+  { icon: 'earth', name: 'CARTO Basemaps', role: 'Map tile styling', by: '© CARTO — basemaps.cartocdn.com' },
+  { icon: 'routes', name: 'OSRM Routing Engine', role: 'Real road paths (beta)', by: 'Project OSRM — router.project-osrm.org' },
   { icon: 'react', name: 'React Native', role: 'App framework', by: 'Meta Open Source' },
   { icon: 'vector-square', name: 'Material Community Icons', role: 'Iconography', by: 'Pictogrammers (Apache 2.0)' },
   { icon: 'road-variant', name: 'National Highways data', role: 'Route network', by: 'Compiled from public NHAI references' },
+  { icon: 'creation', name: 'Claude (Anthropic)', role: 'AI development partner', by: 'Every line, every fix, every 2am idea — built together' },
 ];
 
-// The team.
+// The team — every card is rendered identically (same badge size, same fixed
+// title/subtitle height) so the row always lines up, no matter how long a
+// title is.
 const DEVELOPERS = [
   { name: 'Parth Vasoya', title: 'Lead Developer & Designer', icon: 'account-star', color: C.blue, bg: C.blueSoft },
   { name: 'Jeel Gajera', title: 'Developer', icon: 'account-tie', color: C.green, bg: C.greenSoft },
+  { name: 'Claude', title: '24/7 AI Coding Partner', icon: 'creation', color: '#C0161C', bg: '#C0161C1A', eggId: 'hello_claude', tapCount: 9 },
 ];
 
 // A shimmering placeholder row (icon block + two text lines) used while remote
@@ -2824,6 +2829,7 @@ function AboutTab({ onReplayTutorial }) {
   const [allHistory, setAllHistory] = useState(false);
   const tapVersionEgg = useEasterEggTap('version_detective', 6);
   const tapMakerEgg = useEasterEggTap('meet_the_maker', 7);
+  const tapClaudeEgg = useEasterEggTap('hello_claude', 9);
 
   const check = async () => {
     setState({ status: 'checking', data: null, err: null });
@@ -2940,18 +2946,23 @@ function AboutTab({ onReplayTutorial }) {
         </>
       ) : null}
 
-      {/* Developers */}
+      {/* Developers — every card is IDENTICAL height/layout (fixed badge size,
+          two-line title slot) regardless of name/title length, so the row
+          always lines up perfectly instead of drifting with text wrap. */}
       <Text style={cs.section}>Developed By</Text>
-      <Row style={{ gap: 10 }}>
-        {DEVELOPERS.map((dev, i) => (
-          <Card key={dev.name} style={{ flex: 1, padding: 0 }}>
-            <Pressable onPress={() => { if (i === 0) tapMakerEgg(); }} style={{ alignItems: 'center', padding: 16 }}>
-              <View style={[cs.heroIcon, { width: 52, height: 52, backgroundColor: dev.bg }]}><Icon name={dev.icon} size={28} color={dev.color} /></View>
-              <Text style={[FONT.body, { fontWeight: '800', marginTop: 8, textAlign: 'center' }]}>{dev.name}</Text>
-              <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 2 }]}>{dev.title}</Text>
-            </Pressable>
-          </Card>
-        ))}
+      <Row style={{ gap: 10, alignItems: 'stretch' }}>
+        {DEVELOPERS.map((dev, i) => {
+          const tapEgg = i === 0 ? tapMakerEgg : dev.eggId === 'hello_claude' ? tapClaudeEgg : null;
+          return (
+            <Card key={dev.name} style={{ flex: 1, padding: 0 }}>
+              <Pressable onPress={() => { if (tapEgg) tapEgg(); }} style={{ alignItems: 'center', padding: 14, minHeight: 138, justifyContent: 'center' }}>
+                <View style={[cs.heroIcon, { width: 52, height: 52, backgroundColor: dev.bg }]}><Icon name={dev.icon} size={28} color={dev.color} /></View>
+                <Text style={[FONT.body, { fontWeight: '800', marginTop: 8, textAlign: 'center' }]} numberOfLines={1}>{dev.name}</Text>
+                <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 2 }]} numberOfLines={2}>{dev.title}</Text>
+              </Pressable>
+            </Card>
+          );
+        })}
       </Row>
 
       {/* Credits */}
@@ -3319,7 +3330,113 @@ export function HubInfoModal({ visible, onClose, cityId, onNewDelivery, onOpenTr
 // ============ Company Insights (tap the profile capsule) ============
 // The company's own page: identity, level, health scorecard and smart tips —
 // a real dashboard, not a shortcut into Settings.
-export function CompanyInsightsModal({ visible, onClose, onOpenSettings }) {
+// Photo Mode — a big shareable achievement/trophy card: totals, records
+// (longest route, most profitable trip), level and title, all in one shot.
+// No image-export library in this project (would need a new native module),
+// so 'share' uses the OS Share sheet with a formatted text summary — still
+// genuinely shareable to WhatsApp/anywhere, just text instead of a PNG.
+function StatTile({ icon, label, value, color = '#F8FAFC' }) {
+  return (
+    <View style={{ width: '33.3%', alignItems: 'center', paddingVertical: 10 }}>
+      <Icon name={icon} size={20} color="#5B8DF0" />
+      <Text style={[FONT.h3, { color, marginTop: 4 }]} numberOfLines={1}>{value}</Text>
+      <Text style={[FONT.tiny, { color: '#64748B', textAlign: 'center' }]} numberOfLines={1}>{label}</Text>
+    </View>
+  );
+}
+export function PhotoModeModal({ visible, onClose }) {
+  const state = useGame(s => s);
+  if (!visible) return <Sheet visible={false} onClose={onClose} title="Photo Mode" height="88%"><View /></Sheet>;
+  const company = state.company;
+  if (!company) return <Sheet visible={visible} onClose={onClose} title="Photo Mode" height="40%"><View /></Sheet>;
+  const hq = cityById(company.hqCityId);
+  const xp = companyXP(state);
+  const level = companyLevelOf(xp);
+  const ageDays = Math.max(1, Math.round((Date.now() - company.createdAt) / 86400000));
+  const history = state.history || [];
+  const longest = history.length ? [...history].sort((a, b) => b.km - a.km)[0] : null;
+  const bestTrip = history.length ? [...history].sort((a, b) => b.net - a.net)[0] : null;
+  const gemsFound = (state.easterEggs?.found || []).length;
+  const tiersUnlocked = Object.keys(state.achievements?.unlocked || {}).length;
+  const totalTiers = ACHIEVEMENTS.length * 5;
+
+  const shareText = () => {
+    const lines = [
+      `${company.name} — Empire Report Card`,
+      `Level ${level} · ${companyTitleOf(level)} · Day ${ageDays}`,
+      ``,
+      `Fleet: ${state.trucks.length} trucks · ${state.staff.length} staff`,
+      `${state.stats.deliveries.toLocaleString('en-IN')} deliveries · ${Math.round(state.stats.km).toLocaleString('en-IN')} km driven`,
+      `Lifetime revenue: ${inrShort(state.stats.revenue)}`,
+      `${(state.unlockedCountries || ['IN']).length} countries unlocked · ${gemsFound} hidden gems found`,
+      `${tiersUnlocked}/${totalTiers} achievement tiers unlocked`,
+    ];
+    if (longest) lines.push(``, `Longest haul: ${cityById(longest.fromCityId)?.name} → ${cityById(longest.toCityId)?.name} · ${longest.km} km`);
+    if (bestTrip) lines.push(`Best trip ever: ${cityById(bestTrip.fromCityId)?.name} → ${cityById(bestTrip.toCityId)?.name} · ${inr(bestTrip.net)} profit`);
+    lines.push(``, `Built in Truck Empire Tycoon`);
+    return lines.join('\n');
+  };
+  const doShare = () => { Share.share({ message: shareText() }).catch(() => {}); };
+
+  return (
+    <Sheet visible={visible} onClose={onClose} title="Photo Mode" height="90%">
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+        <Card style={{ backgroundColor: '#0F172A', borderColor: '#1E293B', padding: 20 }}>
+          <View style={{ alignItems: 'center' }}>
+            <View style={[cs.heroIcon, { width: 64, height: 64, backgroundColor: '#1E293B' }]}>
+              <Icon name={company.logo || 'truck'} size={34} color="#5B8DF0" />
+            </View>
+            <Text style={[FONT.h2, { color: '#F8FAFC', marginTop: 10 }]}>{company.name}</Text>
+            <Text style={[FONT.tiny, { color: '#94A3B8', marginTop: 2 }]}>CEO {company.ceo} · HQ {hq?.name}</Text>
+            <View style={{ marginTop: 10, backgroundColor: '#1E293B', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 6 }}>
+              <Text style={[FONT.body, { color: '#F4D35E', fontWeight: '800' }]}>Level {level} · {companyTitleOf(level)}</Text>
+            </View>
+            <Text style={[FONT.tiny, { color: '#64748B', marginTop: 8 }]}>Day {ageDays} of the empire</Text>
+          </View>
+
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 16, borderTopWidth: 1, borderTopColor: '#1E293B', paddingTop: 6 }}>
+            <StatTile icon="map-marker-distance" label="Total KM" value={`${Math.round(state.stats.km).toLocaleString('en-IN')}`} />
+            <StatTile icon="cash-multiple" label="Lifetime Revenue" value={inrShort(state.stats.revenue)} color="#4ADE80" />
+            <StatTile icon="package-variant-closed-check" label="Deliveries" value={String(state.stats.deliveries)} />
+            <StatTile icon="truck" label="Fleet Size" value={String(state.trucks.length)} />
+            <StatTile icon="account-group" label="Staff" value={String(state.staff.length)} />
+            <StatTile icon="earth" label="Countries" value={String((state.unlockedCountries || ['IN']).length)} />
+            <StatTile icon="diamond-stone" label="Gems Found" value={String(gemsFound)} color="#F4D35E" />
+            <StatTile icon="trophy" label="Achievements" value={`${tiersUnlocked}/${totalTiers}`} color="#F4D35E" />
+            <StatTile icon="garage" label="Garages" value={String((state.hubs || []).length)} />
+          </View>
+
+          {(longest || bestTrip) && (
+            <View style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: '#1E293B', paddingTop: 12 }}>
+              {longest && (
+                <Row style={{ marginBottom: 8 }}>
+                  <Icon name="highway" size={16} color="#5B8DF0" />
+                  <Text style={[FONT.tiny, { color: '#94A3B8', marginLeft: 8, flex: 1 }]}>
+                    Longest haul ever: <Text style={{ color: '#F8FAFC', fontWeight: '700' }}>{cityById(longest.fromCityId)?.name} → {cityById(longest.toCityId)?.name}</Text> · {longest.km} km
+                  </Text>
+                </Row>
+              )}
+              {bestTrip && (
+                <Row>
+                  <Icon name="star-circle" size={16} color="#F4D35E" />
+                  <Text style={[FONT.tiny, { color: '#94A3B8', marginLeft: 8, flex: 1 }]}>
+                    Most profitable trip: <Text style={{ color: '#4ADE80', fontWeight: '700' }}>{cityById(bestTrip.fromCityId)?.name} → {cityById(bestTrip.toCityId)?.name}</Text> · {inr(bestTrip.net)}
+                  </Text>
+                </Row>
+              )}
+            </View>
+          )}
+        </Card>
+        <Btn title="Share Report Card" kind="green" icon="share-variant" style={{ marginTop: 14 }} onPress={doShare} />
+        <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 10 }]}>
+          Shares as text (WhatsApp, anywhere) — a full image export would need an extra native library, on the roadmap.
+        </Text>
+      </ScrollView>
+    </Sheet>
+  );
+}
+
+export function CompanyInsightsModal({ visible, onClose, onOpenSettings, onOpenPhotoMode }) {
   const state = useGame(s => s);
   // PERF: once opened these sheets stay mounted; skip all the analytics work
   // (and the whole render tree) while hidden.
@@ -3402,6 +3519,8 @@ export function CompanyInsightsModal({ visible, onClose, onOpenSettings }) {
           ))}
         </Card>
 
+        <Btn title="Photo Mode — Empire Report Card" kind="blue" icon="trophy-award" style={{ marginBottom: 10 }}
+          onPress={() => { onClose(); onOpenPhotoMode && onOpenPhotoMode(); }} />
         <Btn title="Edit company (Settings)" kind="soft" icon="cog-outline" onPress={() => { onClose(); onOpenSettings && onOpenSettings(); }} />
       </ScrollView>
     </Sheet>

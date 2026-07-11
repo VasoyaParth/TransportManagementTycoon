@@ -554,6 +554,7 @@ export const EASTER_EGGS = [
   { id: 'number_cruncher', title: 'Number Cruncher', hint: 'Some people really love spreadsheets.', where: 'Tap the "Economy" tab in the bottom bar 7 times fast.' },
   { id: 'speed_demon', title: 'Speed Demon', hint: 'Life in the fast lane, always.', where: 'Tap "Very Fast" game speed in Settings → Gameplay 5 times fast.' },
   { id: 'meet_the_maker', title: 'Meet the Maker', hint: 'Say hello to the person behind the wheel of the code.', where: 'Tap the Lead Developer card in Settings → About 7 times fast.' },
+  { id: 'hello_claude', title: 'Hello, Claude', hint: 'Someone else never clocked off building this.', where: 'Tap the Claude card in Settings → About 9 times fast.' },
   // v2.3.0 — the tough five. High tap counts, obscure corners: these are meant
   // to survive weeks of hunting.
   { id: 'ghost_rider', title: 'Ghost Rider', hint: 'Only night owls notice the sky change.', where: 'Tap the day/night weather icon in the top header 9 times fast.' },
