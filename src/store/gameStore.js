@@ -705,6 +705,7 @@ const initialState = {
   credit: { paid: 0, missed: 0 }, // EMI track record → credit score
   weather: [], // today's active weather zones (regenerated each game day)
   weatherDay: 0,
+  lastWeatherEvolveAt: 0, // real ms of the last gentle weather-evolution step
   lastCompanyLevel: 0, // last company level a reward was paid for
   weekly: null, // this week's challenges {id, challenges, snapshot, claimed, jackpotPaid}
   updateGiftVersion: '', // last update-welcome-gift version already granted
@@ -932,7 +933,13 @@ export const useGame = create(
         // weather is NOT just visual — any truck already driving through a
         // fresh zone gets its remaining trip slowed by that zone's factor.
         if ((s.weatherDay || 0) !== day || (s.weather || []).some(z => !z.shape || !z.shape.a3)) {
-          const zones = generateWeather(day);
+          // Fresh systems get a life cycle: they grow in, peak, shrink out and
+          // dissipate (20–45 real minutes each), drifting slowly as they go.
+          const zones = generateWeather(day).map(z => ({
+            ...z, baseRadiusKm: z.radiusKm, born: now,
+            lifeMs: (20 + Math.random() * 25) * 60 * 1000,
+            drift: { dLat: (Math.random() - 0.5) * 0.5, dLng: (Math.random() - 0.5) * 0.5 },
+          }));
           const nowW = Date.now();
           const slowed = [];
           const deliveries = get().deliveries.map(d => {
@@ -943,7 +950,7 @@ export const useGame = create(
             if (rem > 60000) slowed.push({ d, wx });
             return { ...d, wxDay: day, endsAt: rem > 60000 ? nowW + rem / wx.factor : d.endsAt };
           });
-          set({ weather: zones, weatherDay: day, deliveries });
+          set({ weather: zones, weatherDay: day, deliveries, lastWeatherEvolveAt: now });
           for (const { d, wx } of slowed) {
             const t = get().trucks.find(x => x.id === d.truckId);
             const z = wx.hits[0];
@@ -951,6 +958,44 @@ export const useGame = create(
             get().notify('truck', k?.icon || 'weather-pouring',
               `${k?.label || 'Weather'} over ${z?.name || 'the route'} — ${t ? (t.customName || modelById(t.modelId).name) : 'a truck'} slowed ${Math.round((1 - wx.factor) * 100)}% for the rest of the trip.`);
           }
+        }
+        // Living weather (v3.1.0): every ~7 real minutes each system breathes —
+        // expands toward its peak, then contracts and dissipates; dead systems
+        // are replaced by a fresh one somewhere else. Gentle, never jumpy.
+        if (now - (get().lastWeatherEvolveAt || 0) > 7 * 60 * 1000 && (get().weather || []).length) {
+          const curZones = get().weather;
+          let bornMsg = null;
+          const evolved = curZones.map(z => {
+            const born = z.born || now, life = z.lifeMs || 30 * 60 * 1000;
+            const age = now - born;
+            if (age >= life) {
+              // Dissipate → a new system spawns from the catalog (offset seed
+              // so it usually lands in a different region than the dead one).
+              const fresh = generateWeather(day * 131 + Math.floor(now / 600000))[0];
+              if (!fresh) return null;
+              const nz = {
+                ...fresh, id: `w-${now}-${Math.floor(Math.random() * 1e6)}`,
+                baseRadiusKm: fresh.radiusKm, radiusKm: Math.round(fresh.radiusKm * 0.5), // grows in from small
+                born: now, lifeMs: (20 + Math.random() * 25) * 60 * 1000,
+                drift: { dLat: (Math.random() - 0.5) * 0.5, dLng: (Math.random() - 0.5) * 0.5 },
+              };
+              const k = WEATHER_KINDS[nz.kind];
+              bornMsg = `${k?.label || 'Weather'} system forming over ${nz.name} — plan routes accordingly.`;
+              return nz;
+            }
+            // Breathe: 70% → 130% of base radius across the life cycle; drift slowly.
+            const phase = Math.sin(Math.PI * (age / life));
+            const frac = age / life;
+            return {
+              ...z,
+              radiusKm: Math.max(60, Math.round((z.baseRadiusKm || z.radiusKm) * (0.7 + 0.6 * phase))),
+              lat: +(z.lat + (z.drift?.dLat || 0) * 0.12).toFixed(3),
+              lng: +(z.lng + (z.drift?.dLng || 0) * 0.12).toFixed(3),
+              intensity: frac < 0.5 ? 'building' : 'weakening',
+            };
+          }).filter(Boolean);
+          set({ weather: evolved, lastWeatherEvolveAt: now });
+          if (bornMsg) get().notify('system', 'weather-cloudy-alert', bornMsg);
         }
         // Loan EMIs: charged every 30 game days per loan. A missed EMI dings
         // the credit score and adds 5% penalty interest to what's left.

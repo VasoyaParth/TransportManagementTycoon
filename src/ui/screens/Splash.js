@@ -1,5 +1,5 @@
 // Splash screen — premium light entry point.
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, Animated, Easing, StyleSheet, SafeAreaView } from 'react-native';
 import { C, FONT, SHADOW, RADIUS } from '../theme';
 import { Btn, Icon, Row, useEasterEggTap } from '../components';
@@ -19,7 +19,12 @@ const BOOT_LINES = [
 export function BootSplash() {
   const pulse = useRef(new Animated.Value(0)).current;
   const dots = [useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current];
-  const line = useRef(BOOT_LINES[Math.floor(Math.random() * BOOT_LINES.length)]).current;
+  // Lines rotate continuously — one splash doing all the talking.
+  const [lineIdx, setLineIdx] = useState(Math.floor(Math.random() * BOOT_LINES.length));
+  useEffect(() => {
+    const iv = setInterval(() => setLineIdx(i => (i + 1) % BOOT_LINES.length), 1600);
+    return () => clearInterval(iv);
+  }, []);
   useEffect(() => {
     const breathe = Animated.loop(Animated.sequence([
       Animated.timing(pulse, { toValue: 1, duration: 900, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
@@ -47,7 +52,7 @@ export function BootSplash() {
           }]} />
         ))}
       </View>
-      <Text style={bs.line}>{line}</Text>
+      <Text style={bs.line}>{BOOT_LINES[lineIdx]}</Text>
       <Text style={bs.footer}>Made in India 🇮🇳</Text>
     </View>
   );

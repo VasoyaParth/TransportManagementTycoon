@@ -11,7 +11,7 @@ import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
 import { CITIES } from '../../data/cities';
 import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
-import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, TRUCK_COLORS, TRUCK_LOGOS } from '../../data/trucks';
+import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, TRUCK_COLORS, TRUCK_LOGOS, CAMPAIGNS } from '../../data/trucks';
 import { inr, inrShort } from '../../engine/economy';
 import { APP_VERSION, checkForUpdate, fmtMB, cmpVer } from '../../net/updates';
 import { exportBackup, parseBackup, readAutoBackup, pickBackupFile } from '../../engine/backup';
@@ -2351,6 +2351,21 @@ function RoadmapTab() {
 }
 
 // ============ Settings ============
+// v3.1.0 redesign: info-first. Profile & Company open as clean VIEW pages —
+// a read-only summary card with an Edit button; the form only appears in
+// edit mode and returns to the view after saving.
+function ViewRow({ icon, label, value, divider }) {
+  return (
+    <Row style={[{ paddingVertical: 9, justifyContent: 'space-between' }, divider && { borderTopWidth: 1, borderTopColor: C.border }]}>
+      <Row style={{ flex: 1 }}>
+        <Icon name={icon} size={16} color={C.sub} />
+        <Text style={[FONT.sub, { marginLeft: 8 }]}>{label}</Text>
+      </Row>
+      <Text style={[FONT.body, { fontWeight: '700', maxWidth: '55%' }]} numberOfLines={1}>{value}</Text>
+    </Row>
+  );
+}
+
 export function SettingsModal({ visible, onClose, initialTab }) {
   const toast = useToast();
   const company = useGame(s => s.company);
@@ -2363,7 +2378,9 @@ export function SettingsModal({ visible, onClose, initialTab }) {
   const resetGame = useGame(s => s.resetGame);
   const gameDay = useGame(s => s.gameDay);
   const [tab, setTab] = useState(initialTab || 'profile');
-  useEffect(() => { if (visible) setTab(initialTab || 'profile'); }, [visible, initialTab]);
+  const [editing, setEditing] = useState(null); // 'profile' | 'company' | null — view-first pages
+  useEffect(() => { if (visible) { setTab(initialTab || 'profile'); setEditing(null); } }, [visible, initialTab]);
+  useEffect(() => { setEditing(null); }, [tab]);
   const [ceo, setCeo] = useState(company?.ceo || '');
   const [avatar, setAvatar] = useState(company?.avatar);
   const [cname, setCname] = useState(company?.name || '');
@@ -2400,39 +2417,80 @@ export function SettingsModal({ visible, onClose, initialTab }) {
         <Row style={{ gap: 6 }}>{TABS.map(([id, l, icon]) => <Chip key={id} label={l} icon={icon} active={tab === id} onPress={() => { if (id === 'about' && tab === 'about') tapCuriousEgg(); setTab(id); }} />)}</Row>
       </ScrollView>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
-        {tab === 'profile' && (
+        {tab === 'profile' && (editing !== 'profile' ? (
           <>
-            <SectionTitle icon="account-circle" text="Your Profile" />
+            {/* VIEW: clean identity card, no form in sight */}
+            <Card style={{ alignItems: 'center', paddingVertical: 20, marginBottom: 12, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
+              <Pressable onPress={tapMirrorEgg}>
+                <View style={{ width: 72, height: 72, borderRadius: 36, backgroundColor: '#1E293B', alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name={company?.avatar || 'account-tie'} size={38} color="#5B8DF0" />
+                </View>
+              </Pressable>
+              <Text style={[FONT.h2, { marginTop: 10, color: '#F8FAFC' }]}>{company?.ceo}</Text>
+              <Text style={[FONT.tiny, { color: '#94A3B8' }]}>CEO · {company?.name}</Text>
+              <Btn title="Edit Profile" kind="blue" small icon="pencil" style={{ marginTop: 12 }}
+                onPress={() => { setCeo(company?.ceo || ''); setAvatar(company?.avatar); setEditing('profile'); }} />
+            </Card>
+            <SectionTitle icon="chart-box-outline" text="Lifetime Stats" />
+            <Card>
+              <ViewRow icon="package-variant-closed-check" label="Deliveries" value={String(stats.deliveries)} />
+              <ViewRow divider icon="cash-multiple" label="Revenue" value={inrShort(stats.revenue)} />
+              <ViewRow divider icon="map-marker-distance" label="Distance" value={`${Math.round(stats.km).toLocaleString()} km`} />
+              <ViewRow divider icon="truck" label="Trucks owned" value={String(trucks.length)} />
+              <ViewRow divider icon="account-group" label="Staff" value={String(staff.length)} />
+              <ViewRow divider icon="calendar" label="Current day" value={String(day)} />
+            </Card>
+          </>
+        ) : (
+          <>
+            {/* EDIT: the form appears only on demand */}
+            <SectionTitle icon="pencil" text="Edit Profile" />
             <Card>
               <Text style={[FONT.tiny, { marginBottom: 4 }]}>CEO NAME</Text>
               <TextInput value={ceo} onChangeText={setCeo} maxLength={30} style={cs.input} />
               <Text style={[FONT.tiny, { marginTop: 14, marginBottom: 4 }]}>AVATAR</Text>
               <IconGrid options={AVATARS} value={avatar} onChange={o => { if (o === avatar) tapMirrorEgg(); setAvatar(o); }} />
             </Card>
-            <SectionTitle icon="chart-box-outline" text="Lifetime Stats" />
-            <Card>
-              <SpecRow icon="package-variant-closed-check" label="Deliveries" value={stats.deliveries} />
-              <SpecRow icon="cash-multiple" label="Revenue" value={inrShort(stats.revenue)} />
-              <SpecRow icon="map-marker-distance" label="Distance" value={`${Math.round(stats.km).toLocaleString()} km`} />
-              <SpecRow icon="truck" label="Trucks owned" value={trucks.length} />
-              <SpecRow icon="account-group" label="Staff" value={staff.length} />
-              <SpecRow icon="calendar" label="Current day" value={day} />
-            </Card>
-            <Btn title="Save Profile" kind="green" icon="content-save-outline" style={{ marginTop: 14 }} onPress={() => { saveCompany({ ceo, avatar }); toast('Profile saved', 'success'); }} />
+            <Btn title="Save Profile" kind="green" icon="content-save-outline" style={{ marginTop: 14 }}
+              onPress={() => { saveCompany({ ceo, avatar }); setEditing(null); toast('Profile saved', 'success'); }} />
+            <Btn title="Cancel" kind="ghost" style={{ marginTop: 8 }} onPress={() => setEditing(null)} />
           </>
-        )}
-        {tab === 'company' && (
+        ))}
+        {tab === 'company' && (editing !== 'company' ? (
           <>
-            <SectionTitle icon="domain" text="Company Identity" />
+            <Card style={{ alignItems: 'center', paddingVertical: 20, marginBottom: 12, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
+              <Pressable onPress={tapBrandedEgg}>
+                <View style={{ width: 72, height: 72, borderRadius: 20, backgroundColor: '#1E293B', alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name={company?.logo || 'truck'} size={38} color="#5B8DF0" />
+                </View>
+              </Pressable>
+              <Text style={[FONT.h2, { marginTop: 10, color: '#F8FAFC' }]}>{company?.name}</Text>
+              <Text style={[FONT.tiny, { color: '#94A3B8' }]}>Est. day 1 · HQ {cityById(company?.hqCityId)?.name}</Text>
+              <Btn title="Edit Company" kind="blue" small icon="pencil" style={{ marginTop: 12 }}
+                onPress={() => { setCname(company?.name || ''); setLogo(company?.logo); setEditing('company'); }} />
+            </Card>
+            <SectionTitle icon="information-outline" text="Company Details" />
+            <Card>
+              <ViewRow icon="domain" label="Company name" value={company?.name || '—'} />
+              <ViewRow divider icon="account-tie" label="CEO" value={company?.ceo || '—'} />
+              <ViewRow divider icon="map-marker" label="Headquarters" value={cityById(company?.hqCityId)?.name || '—'} />
+              <ViewRow divider icon="calendar-check" label="Founded" value={company?.createdAt ? new Date(company.createdAt).toDateString() : '—'} />
+            </Card>
+          </>
+        ) : (
+          <>
+            <SectionTitle icon="pencil" text="Edit Company" />
             <Card>
               <Text style={[FONT.tiny, { marginBottom: 4 }]}>COMPANY NAME</Text>
               <TextInput value={cname} onChangeText={setCname} maxLength={40} style={cs.input} />
               <Text style={[FONT.tiny, { marginTop: 14, marginBottom: 4 }]}>LOGO</Text>
               <IconGrid options={LOGOS} value={logo} onChange={o => { if (o === logo) tapBrandedEgg(); setLogo(o); }} />
             </Card>
-            <Btn title="Save Company" kind="green" icon="content-save-outline" style={{ marginTop: 14 }} onPress={() => { saveCompany({ name: cname, logo }); toast('Company saved', 'success'); }} />
+            <Btn title="Save Company" kind="green" icon="content-save-outline" style={{ marginTop: 14 }}
+              onPress={() => { saveCompany({ name: cname, logo }); setEditing(null); toast('Company saved', 'success'); }} />
+            <Btn title="Cancel" kind="ghost" style={{ marginTop: 8 }} onPress={() => setEditing(null)} />
           </>
-        )}
+        ))}
         {tab === 'gameplay' && (
           <>
             <SectionTitle icon="controller-classic" text="Simulation" />
@@ -3074,6 +3132,9 @@ export function HubInfoModal({ visible, onClose, cityId, onNewDelivery, onOpenTr
 // a real dashboard, not a shortcut into Settings.
 export function CompanyInsightsModal({ visible, onClose, onOpenSettings }) {
   const state = useGame(s => s);
+  // PERF: once opened these sheets stay mounted; skip all the analytics work
+  // (and the whole render tree) while hidden.
+  if (!visible) return <Sheet visible={false} onClose={onClose} title="Company Insights" height="88%"><View /></Sheet>;
   const company = state.company;
   const hq = company ? cityById(company.hqCityId) : null;
   if (!company) return <Sheet visible={visible} onClose={onClose} title="Company" height="40%"><View /></Sheet>;
@@ -3165,6 +3226,9 @@ export function CompanyInsightsModal({ visible, onClose, onOpenSettings }) {
 export function NewsModal({ visible, onClose }) {
   const state = useGame(s => s);
   const day = state.gameDay().day;
+  // Suggestions memo must run unconditionally (hooks), but the heavy city
+  // scans inside it only execute while the sheet is visible.
+  const hidden = !visible;
   const fuel = fuelFactorForDay(day);
   const fuelY = fuelFactorForDay(Math.max(1, day - 1));
   const zones = state.weather || [];
@@ -3182,6 +3246,7 @@ export function NewsModal({ visible, onClose }) {
 
   // Suggested destinations: busy tier-1/2 unlocked cities with CLEAR skies.
   const suggestions = useMemo(() => {
+    if (hidden) return [];
     const inZone = (c) => zones.some(z => {
       const kLat = 111, kLng = 111 * Math.cos((z.lat * Math.PI) / 180);
       const dy = (c.lat - z.lat) * kLat, dx = (c.lng - z.lng) * kLng;
@@ -3192,7 +3257,8 @@ export function NewsModal({ visible, onClose }) {
       .sort((a, b) => (b.pop || 0) - (a.pop || 0))
       .filter((_, i) => (i + day) % 7 < 3) // rotate picks day to day
       .slice(0, 4);
-  }, [zones, unlocked, day]);
+  }, [zones, unlocked, day, hidden]);
+  if (hidden) return <Sheet visible={false} onClose={onClose} title="Apna News, Tera Kya Jata" height="88%"><View /></Sheet>;
 
   const gossip = [
     'Transporters association demands wider bypasses around metro mandis. Hamare drivers bole: "pehle chai ka thela hatao".',
@@ -3285,6 +3351,43 @@ export function NewsModal({ visible, onClose }) {
           ))}
           <Text style={[FONT.tiny, { marginTop: 8 }]}>Picks rotate daily — clear-sky tier-1/2 cities in your unlocked countries.</Text>
         </Card>
+
+        {/* BREAKING: your empire's own wire — live incidents, thefts,
+            marketing launches and the freshest company headlines. */}
+        <SectionTitle icon="flash" text="Breaking — Empire Wire" />
+        {(() => {
+          const items = [];
+          // Live incidents on trucks right now
+          for (const d of state.deliveries) {
+            if (!d.incident) continue;
+            const t = state.trucks.find(x => x.id === d.truckId);
+            const im = incidentMeta(d.incident.type);
+            items.push({ key: 'inc' + d.id, icon: im.icon, color: im.color, tag: 'HAPPENING NOW',
+              text: `${im.title.replace('!', '')} — ${state.company?.name}'s ${t ? (t.customName || modelById(t.modelId).name) : 'truck'} held up en route to ${cityById(d.toCityId)?.name}.` });
+          }
+          // Marketing campaigns on air
+          for (const a of state.campaigns.filter(x => x.endsAt > Date.now())) {
+            const def = CAMPAIGNS.find(c => c.id === a.campaignId);
+            if (def) items.push({ key: 'mk' + a.id, icon: 'bullhorn', color: C.blue, tag: 'AD WATCH',
+              text: `${state.company?.name} blankets the market with "${def.name}" — rivals reportedly sweating (+${Math.round(def.boost * 100)}% freight buzz).` });
+          }
+          // Freshest company headlines from the notification wire
+          for (const n of state.notifications.slice(0, 6)) {
+            items.push({ key: n.id, icon: n.icon, color: C.sub, tag: relTime(n.ts).toUpperCase(), text: n.message });
+          }
+          if (!items.length) return <Card style={{ marginBottom: 12 }}><Text style={FONT.sub}>A quiet hour on the wire — even the bandits are on chai break.</Text></Card>;
+          return items.slice(0, 9).map((it, i) => (
+            <Card key={it.key} style={{ marginBottom: 6, padding: 10, borderLeftWidth: 3, borderLeftColor: it.color || C.red }}>
+              <Row style={{ alignItems: 'flex-start' }}>
+                <Icon name={it.icon || 'flash'} size={16} color={it.color || C.red} style={{ marginTop: 1 }} />
+                <View style={{ marginLeft: 8, flex: 1 }}>
+                  <Text style={[FONT.tiny, { fontWeight: '900', color: '#C0161C', fontSize: 9, letterSpacing: 0.5 }]}>{it.tag}</Text>
+                  <Text style={FONT.body} numberOfLines={3}>{it.text}</Text>
+                </View>
+              </Row>
+            </Card>
+          ));
+        })()}
 
         {/* World events */}
         {events.length > 0 && (

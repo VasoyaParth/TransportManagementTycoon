@@ -1,7 +1,7 @@
 // Main game view: header (company, clock, money), full-screen India map,
 // bottom navigation into dashboard tabs, and all modal flows.
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, Pressable, useWindowDimensions, AppState, Linking } from 'react-native';
+import { View, Text, StyleSheet, Pressable, useWindowDimensions, AppState, Linking, Animated, Easing } from 'react-native';
 import { SafeAreaView } from 'react-native';
 import { C, FONT, RADIUS } from '../theme';
 import { IconBtn, Icon, Money, Sheet, useToast, Row, useEasterEggTap } from '../components';
@@ -53,6 +53,19 @@ export default function GameScreen() {
   const tapMoneyEgg = useEasterEggTap('money_gazer', 6);
   const tapEconomyEgg = useEasterEggTap('number_cruncher', 7);
   const tapGhostEgg = useEasterEggTap('ghost_rider', 9);
+  // Right-side action drawer: 2 pinned buttons + the rest folded behind a
+  // toggle that expands upward smoothly. Open/closed state persists across
+  // app restarts (settings.actionDrawerOpen).
+  const saveSettings = useGame(s => s.saveSettings);
+  const [drawerOpen, setDrawerOpen] = useState(settings.actionDrawerOpen === true);
+  const drawerAnim = useRef(new Animated.Value(settings.actionDrawerOpen === true ? 1 : 0)).current;
+  const toggleDrawer = () => {
+    haptic('light');
+    const next = !drawerOpen;
+    setDrawerOpen(next);
+    saveSettings({ actionDrawerOpen: next });
+    Animated.timing(drawerAnim, { toValue: next ? 1 : 0, duration: 240, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
+  };
 
   // ---- Update prompt: check once on load; the download itself happens in the
   // browser (one tap on the pill), which hands the APK to Android's installer.
@@ -82,7 +95,13 @@ export default function GameScreen() {
         if (d.endsAt <= now) g.completeDelivery(d.id);
       }
       g.dailyTick();
-      setClock(g.gameDay());
+      // PERF: the header only shows day + real-world minute, so only trigger a
+      // React re-render when either actually changes — the whole GameScreen
+      // (header, nav, overlays) used to re-render every single second.
+      const gd = g.gameDay();
+      const minute = Math.floor(now / 60000);
+      setClock(prev => (prev.day === gd.day && prev.hour === gd.hour && prev._m === minute)
+        ? prev : { ...gd, _m: minute });
     };
     const start = () => { if (!iv) { useGame.getState().settleOffline(); tick(); iv = setInterval(tick, 1000); } };
     const stop = () => { if (iv) { clearInterval(iv); iv = null; } };
@@ -120,6 +139,10 @@ export default function GameScreen() {
     setModal(null); setTab(null);
     setFocus({ lat: truck.lat, lng: truck.lng, scale: 5, key: Date.now() });
   }, []);
+  // PERF: stable handlers — inline arrows recreated every render forced the
+  // map (and its WebView bridge effects) to reconcile once per second.
+  const onTruckTap = useCallback((t) => setModal({ kind: 'truck', truckId: t.id }), []);
+  const onHubTap = useCallback((cityId) => { haptic('light'); setModal({ kind: 'hubinfo', cityId }); }, []);
 
   const narrow = width < 420;
 
@@ -146,8 +169,8 @@ export default function GameScreen() {
           onCityPick={handleCityPick}
           onCancelPick={() => setPicking(null)}
           focus={focus}
-          onTruckTap={(t) => setModal({ kind: 'truck', truckId: t.id })}
-          onHubTap={(cityId) => { haptic('light'); setModal({ kind: 'hubinfo', cityId }); }}
+          onTruckTap={onTruckTap}
+          onHubTap={onHubTap}
         />
         {/* Night tint overlay — follows the player's real local time */}
         {phase.tint > 0 && (
@@ -175,20 +198,31 @@ export default function GameScreen() {
         </View>
         {/* Right-side action stack (garage / contracts / power-ups) */}
         <View style={st.actionStack}>
+          {/* Pinned: news + garages */}
           <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'news' }); }}>
             <Icon name="newspaper-variant-outline" size={19} color="#C0161C" />
           </Pressable>
           <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'hubs' }); }}>
             <Icon name="garage" size={19} color={C.text} />
           </Pressable>
-          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'contracts' }); }}>
-            <Icon name="file-document-outline" size={19} color={C.text} />
-          </Pressable>
-          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'countries' }); }}>
-            <Icon name="earth" size={19} color={C.blue} />
-          </Pressable>
-          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'powerups' }); }}>
-            <Icon name="star-four-points" size={19} color={C.gold} />
+          {/* Folding drawer: expands smoothly above the toggle */}
+          <Animated.View style={{
+            overflow: 'hidden',
+            height: drawerAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 3 * 48] }),
+            opacity: drawerAnim,
+          }}>
+            <Pressable style={[st.actionBtn, { marginBottom: 8 }]} onPress={() => { haptic('light'); setModal({ kind: 'contracts' }); }}>
+              <Icon name="file-document-outline" size={19} color={C.text} />
+            </Pressable>
+            <Pressable style={[st.actionBtn, { marginBottom: 8 }]} onPress={() => { haptic('light'); setModal({ kind: 'countries' }); }}>
+              <Icon name="earth" size={19} color={C.blue} />
+            </Pressable>
+            <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'powerups' }); }}>
+              <Icon name="star-four-points" size={19} color={C.gold} />
+            </Pressable>
+          </Animated.View>
+          <Pressable style={[st.actionBtn, drawerOpen && { backgroundColor: C.blueSoft, borderColor: C.blue }]} onPress={toggleDrawer}>
+            <Icon name={drawerOpen ? 'chevron-up' : 'dots-horizontal'} size={19} color={drawerOpen ? C.blue : C.text} />
           </Pressable>
         </View>
         {/* Floating company profile capsule (opens Settings → Profile) */}
