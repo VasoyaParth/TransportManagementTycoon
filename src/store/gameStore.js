@@ -260,7 +260,7 @@ export function creditScoreOf(credit) {
 // the whole fleet sees the same market and the 7-day history can be redrawn
 // anywhere without storing it. 0.85× (crash) … 1.25× (spike) of base price.
 export function fuelFactorForDay(day) {
-  let h = (day * 2654435761) >>> 0; h ^= h >> 13; h = (h * 2246822519) >>> 0; h ^= h >> 16;
+  let h = (day * 2654435761) >>> 0; h = (h ^ (h >>> 13)) >>> 0; h = (h * 2246822519) >>> 0; h = (h ^ (h >>> 16)) >>> 0;
   return 0.85 + (h % 41) / 100;
 }
 
@@ -316,19 +316,19 @@ const WEATHER_REGIONS = [
   { name: 'Urals', lat: 56.5, lng: 60.5, kinds: ['snow'] },
 ];
 export function generateWeather(day) {
-  let h = ((day + 7) * 2654435761) >>> 0; h ^= h >> 15;
+  let h = ((day + 7) * 2654435761) >>> 0; h = (h ^ (h >>> 15)) >>> 0;
   const count = 3 + (h % 3); // 3–5 active zones
   const zones = [];
   const used = new Set();
   for (let i = 0; i < count * 3 && zones.length < count; i++) {
-    const idx = ((h >> (i * 3)) + i * 131) % WEATHER_REGIONS.length;
+    const idx = (((h >>> (i * 3)) + i * 131) >>> 0) % WEATHER_REGIONS.length;
     if (used.has(idx)) continue;
     used.add(idx);
     const r = WEATHER_REGIONS[idx];
-    const kind = r.kinds[((h >> (i * 2)) + i) % r.kinds.length];
+    const kind = r.kinds[(((h >>> (i * 2)) + i) >>> 0) % r.kinds.length];
     zones.push({
       id: `w-${day}-${idx}`, kind, name: r.name, lat: r.lat, lng: r.lng,
-      radiusKm: 130 + ((h >> (i + 4)) % 130), day,
+      radiusKm: 130 + ((h >>> (i + 4)) % 130), day,
     });
   }
   return zones;
@@ -391,10 +391,12 @@ export function buildWeekly(weekId, stats) {
   let h = 0; for (let i = 0; i < weekId.length; i++) h = (h * 31 + weekId.charCodeAt(i)) >>> 0;
   const picks = []; const used = new Set();
   for (let i = 0; picks.length < 3 && i < 18; i++) {
-    const idx = ((h >> (i * 2)) + i * 7) % WEEKLY_POOL.length;
+    // Unsigned shifts only — a signed >> on a large hash goes negative and a
+    // negative index here crashed the game on open (v2.4.0 hotfix).
+    const idx = (((h >>> (i * 2)) + i * 7) >>> 0) % WEEKLY_POOL.length;
     if (used.has(idx)) continue; used.add(idx);
     const p = WEEKLY_POOL[idx];
-    const target = p.targets[((h >> (i + 5)) % 3)];
+    const target = p.targets[(h >>> (i + 5)) % 3];
     picks.push({ key: p.key, icon: p.icon, label: p.label(target), target, gold: p.gold, cash: p.cash });
   }
   const snap = {};
