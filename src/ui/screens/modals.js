@@ -1,8 +1,12 @@
 // Modal flows — all rendered inside the shared <Sheet>. New delivery, truck
 // detail, buy truck, contracts, power-ups, notifications, settings.
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Switch, Animated, Easing, Linking, Share, Platform } from 'react-native';
+import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Switch, Animated, Easing, Linking, Share, Platform, PermissionsAndroid } from 'react-native';
 import ViewShot from 'react-native-view-shot';
+import RNShare from 'react-native-share';
+import QRCode from 'react-native-qrcode-svg';
+import { Camera } from 'react-native-camera-kit';
+import { buildQrFrames, createQrReceiver } from '../../net/qrBackup';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider } from '../components';
@@ -2237,6 +2241,155 @@ function RestoreDiffCard({ current, incoming }) {
   );
 }
 
+// ============ QR Backup Transfer (phone-to-phone, no cable/internet) ============
+// A full save can't fit in one QR code (QR's hard capacity ceiling is a few
+// KB; a real save is much bigger) — so it's compressed and shown as a
+// SEQUENCE of QR codes that auto-advance; the receiving phone's camera
+// captures them in any order, and the moment every frame is in, the exact
+// same before/after diff card used for file restore appears before anything
+// is touched.
+function QrExportPanel({ snapshot }) {
+  const built = useMemo(() => buildQrFrames(snapshot), [snapshot]);
+  const [idx, setIdx] = useState(0);
+  const [playing, setPlaying] = useState(true);
+  useEffect(() => {
+    if (!playing || built.frames.length <= 1) return undefined;
+    const iv = setInterval(() => setIdx(i => (i + 1) % built.frames.length), 900);
+    return () => clearInterval(iv);
+  }, [playing, built.frames.length]);
+
+  return (
+    <View style={{ alignItems: 'center' }}>
+      <Card style={{ padding: 16, alignItems: 'center' }}>
+        <QRCode value={built.frames[idx]} size={230} />
+      </Card>
+      <Text style={[FONT.body, { fontWeight: '800', marginTop: 12 }]}>
+        Frame {idx + 1} of {built.totalFrames}
+      </Text>
+      <Progress pct={((idx + 1) / built.totalFrames) * 100} color={C.blue} style={{ width: 230, marginTop: 8 }} />
+      <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 10, paddingHorizontal: 10 }]}>
+        Hold the OTHER phone's camera on this screen — it auto-advances and loops, so a slower camera gets extra passes to catch every frame.
+      </Text>
+      <Row style={{ gap: 10, marginTop: 14 }}>
+        <Btn title="◀" kind="soft" small onPress={() => { setPlaying(false); setIdx(i => (i - 1 + built.totalFrames) % built.totalFrames); }} />
+        <Btn title={playing ? 'Pause' : 'Play'} kind={playing ? 'soft' : 'blue'} small icon={playing ? 'pause' : 'play'} onPress={() => setPlaying(p => !p)} />
+        <Btn title="▶" kind="soft" small onPress={() => { setPlaying(false); setIdx(i => (i + 1) % built.totalFrames); }} />
+      </Row>
+      <Text style={[FONT.tiny, { color: C.faint, marginTop: 8 }]}>{inrShort(built.rawBytes)}B compressed (~{Math.round(JSON.stringify(snapshot).length / 1024)}KB save)</Text>
+    </View>
+  );
+}
+
+function QrScanPanel({ current, onRestored }) {
+  const receiverRef = useRef(createQrReceiver());
+  const [progress, setProgress] = useState({ have: 0, total: 0 });
+  const [permission, setPermission] = useState(Platform.OS === 'android' ? null : true); // null = unknown/asking
+  const [scanned, setScanned] = useState(null); // reassembled save, pending confirmation
+  const [lastError, setLastError] = useState(null);
+  const busyRef = useRef(false);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.CAMERA).then(res => {
+      setPermission(res === PermissionsAndroid.RESULTS.GRANTED);
+    }).catch(() => setPermission(false));
+  }, []);
+
+  const onReadCode = (event) => {
+    if (busyRef.current || scanned) return;
+    const text = event?.nativeEvent?.codeStringValue;
+    if (!text) return;
+    busyRef.current = true;
+    const r = receiverRef.current.addFrame(text);
+    setProgress(r.progress);
+    if (r.error) setLastError(r.error);
+    else setLastError(null);
+    if (r.done) {
+      haptic('success');
+      setScanned(r.data);
+    }
+    setTimeout(() => { busyRef.current = false; }, 150); // small debounce, camera fires fast
+  };
+
+  const resetScan = () => { receiverRef.current.reset(); setScanned(null); setProgress({ have: 0, total: 0 }); setLastError(null); };
+
+  if (permission === false) {
+    return (
+      <Card style={{ alignItems: 'center', padding: 24 }}>
+        <Icon name="camera-off-outline" size={36} color={C.faint} />
+        <Text style={[FONT.body, { fontWeight: '700', marginTop: 10, textAlign: 'center' }]}>Camera permission needed</Text>
+        <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 6 }]}>Enable camera access for this app in your phone's Settings to scan a QR transfer.</Text>
+      </Card>
+    );
+  }
+  if (permission === null) {
+    return <Card style={{ alignItems: 'center', padding: 24 }}><Text style={FONT.sub}>Requesting camera permission…</Text></Card>;
+  }
+
+  if (scanned) {
+    return (
+      <View>
+        <Card style={{ marginBottom: 10, backgroundColor: C.greenSoft }}>
+          <Row><Icon name="check-decagram" size={16} color={C.green} /><Text style={[FONT.body, { fontWeight: '700', marginLeft: 6, color: C.text }]}>All {progress.total} frames captured — verified.</Text></Row>
+        </Card>
+        <RestoreDiffCard current={current} incoming={scanned} />
+        <Row style={{ marginTop: 10, gap: 8 }}>
+          <View style={{ flex: 1 }}><Btn title="Cancel" kind="ghost" onPress={resetScan} /></View>
+          <View style={{ flex: 1 }}>
+            <Btn title="Restore This" kind="danger" icon="backup-restore" onPress={() => { onRestored(scanned); resetScan(); }} />
+          </View>
+        </Row>
+      </View>
+    );
+  }
+
+  return (
+    <View>
+      <View style={{ width: '100%', height: 280, borderRadius: RADIUS.lg, overflow: 'hidden', backgroundColor: '#000' }}>
+        <Camera style={{ flex: 1 }} scanBarcode onReadCode={onReadCode} showFrame={false} laserColor="#2563EB" frameColor="#2563EB" />
+      </View>
+      <Text style={[FONT.body, { fontWeight: '800', textAlign: 'center', marginTop: 12 }]}>
+        {progress.total ? `Captured ${progress.have} of ${progress.total} frames` : 'Point at the other phone\'s QR slideshow'}
+      </Text>
+      {progress.total > 0 && <Progress pct={(progress.have / progress.total) * 100} color={C.blue} style={{ marginTop: 8 }} />}
+      {lastError ? <Text style={[FONT.tiny, { color: C.red, textAlign: 'center', marginTop: 8 }]}>{lastError}</Text> : null}
+      <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 10 }]}>
+        Order doesn't matter — hold steady and let it cycle through the other phone's frames.
+      </Text>
+    </View>
+  );
+}
+
+export function QrBackupModal({ visible, onClose }) {
+  const toast = useToast();
+  const cloudSnapshot = useGame(s => s.cloudSnapshot);
+  const applyCloudState = useGame(s => s.applyCloudState);
+  const [tab, setTab] = useState('export'); // 'export' | 'scan'
+  useEffect(() => { if (visible) setTab('export'); }, [visible]);
+  if (!visible) return <Sheet visible={false} onClose={onClose} title="QR Transfer" height="90%"><View /></Sheet>;
+  const current = cloudSnapshot();
+
+  return (
+    <Sheet visible={visible} onClose={onClose} title="QR Transfer" height="92%">
+      <Row style={{ gap: 6, marginBottom: 14 }}>
+        <Chip label="Show My QR (Send)" icon="qrcode" active={tab === 'export'} onPress={() => setTab('export')} />
+        <Chip label="Scan a QR (Receive)" icon="camera-outline" active={tab === 'scan'} onPress={() => setTab('scan')} />
+      </Row>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+        {tab === 'export' ? (
+          <QrExportPanel snapshot={current} />
+        ) : (
+          <QrScanPanel current={current} onRestored={(data) => {
+            applyCloudState(data);
+            toast('Save restored from QR transfer — welcome back, boss!', 'success');
+            onClose();
+          }} />
+        )}
+      </ScrollView>
+    </Sheet>
+  );
+}
+
 function BackupTab({ onClose }) {
   const toast = useToast();
   const lastBackupAt = useGame(s => s.lastBackupAt);
@@ -2246,6 +2399,7 @@ function BackupTab({ onClose }) {
   // pending = a picked & validated file waiting for the confirm tap.
   const [pending, setPending] = useState(null); // {data, meta, fileName}
   const [busy, setBusy] = useState(false);
+  const [qrOpen, setQrOpen] = useState(false);
 
   const doExport = async () => {
     setBusy(true);
@@ -2308,6 +2462,15 @@ function BackupTab({ onClose }) {
           Format: TruckEmpire-backup-{APP_VERSION}-date.json · importable on {APP_VERSION} or any newer version.
         </Text>
       </Card>
+
+      <SectionTitle icon="qrcode" text="QR Transfer (phone to phone)" />
+      <Card>
+        <Text style={FONT.sub}>
+          No cable, no internet: show a QR slideshow on this phone and scan it with the other phone's camera — full A-to-Z save (company, money, gold, trucks, staff, achievements, hidden gems, everything), same before/after diff before anything is restored.
+        </Text>
+        <Btn title="Open QR Transfer" kind="blue" icon="qrcode-scan" style={{ marginTop: 12 }} onPress={() => setQrOpen(true)} />
+      </Card>
+      {qrOpen && <QrBackupModal visible={qrOpen} onClose={() => setQrOpen(false)} />}
 
       <SectionTitle icon="history" text="Auto-Backup" />
       <Card>
@@ -3400,11 +3563,19 @@ export function PhotoModeModal({ visible, onClose }) {
   const doShare = async () => {
     setCapturing(true);
     try {
-      const uri = await shotRef.current.capture();
+      const raw = await shotRef.current.capture();
+      // React Native's built-in Share module can't actually attach a local
+      // file on Android — it just forwards the raw file:// path, which
+      // Android blocks with a FileUriExposedException, silently landing in
+      // the catch below and shipping text-only every time. react-native-share
+      // ships its own FileProvider and does the content:// conversion for
+      // us, so the real image reaches WhatsApp/etc, not just a caption.
+      const uri = raw.startsWith('file://') || raw.startsWith('content://') || raw.startsWith('data:') ? raw : `file://${raw}`;
       setCapturing(false);
-      await Share.share(Platform.OS === 'ios' ? { url: uri, message: shareText() } : { url: uri, message: shareText() });
+      await RNShare.open({ url: uri, type: 'image/png', message: shareText(), failOnCancel: false });
     } catch (e) {
       setCapturing(false);
+      if (e && (e.message === 'User did not share' || e.error === 'User did not share')) return; // cancelled — not a failure
       toast('Could not capture image — sharing as text instead.', 'warn');
       Share.share({ message: shareText() }).catch(() => {});
     }
