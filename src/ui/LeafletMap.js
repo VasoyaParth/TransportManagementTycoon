@@ -239,7 +239,8 @@ const st = StyleSheet.create({
   controls: { position: 'absolute', right: 14, bottom: 150, alignItems: 'center', gap: 8 },
   ctl: {
     width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.94)', borderWidth: 1, borderColor: C.border,
+    backgroundColor: 'rgba(255,255,255,0.68)', borderWidth: 1, borderTopColor: 'rgba(255,255,255,0.95)', borderColor: 'rgba(255,255,255,0.4)',
+    shadowColor: '#0B0F14', shadowOpacity: 0.1, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 4,
   },
   legend: {
     position: 'absolute', left: 12, bottom: 12, flexDirection: 'row',
