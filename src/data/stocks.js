@@ -84,6 +84,27 @@ export function stockReturnOverDays(stock, days) {
 
 export function stockYearReturn(stock) { return stockReturnOverDays(stock, 365); }
 
+// Deterministic "fundamentals" — market cap, profit, tax, P/E — derived
+// purely from the stock's own id/price/vol so they're stable across
+// renders and sessions without needing to store extra fields per company.
+function seedFrom(id) {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 100000;
+  return h / 100000;
+}
+export function stockFundamentals(stock) {
+  const seed = seedFrom(stock.id);
+  const sharesOutstanding = 500000 + Math.round(seed * 4500000); // 5L–50L shares
+  const marketCap = stock.price * sharesOutstanding;
+  const margin = 0.06 + seed * 0.22; // 6%–28% net margin, flavor of the sector
+  const annualRevenue = marketCap * (0.4 + seed * 1.2); // rough revenue multiple
+  const annualProfit = annualRevenue * margin;
+  const taxRate = 0.25; // flat corporate tax, India flavor
+  const eps = annualProfit / sharesOutstanding;
+  const peRatio = eps > 0 ? stock.price / eps : 0;
+  return { sharesOutstanding, marketCap, annualRevenue, annualProfit, taxRate, eps, peRatio };
+}
+
 // Timeframe presets for the detail chart / return badges. 1H/3H are "live"
 // timeframes — driven by liveJitterPct below (real-clock movement) rather
 // than the daily-close history, for a market that visibly ticks while

@@ -12,7 +12,7 @@ import { STAFF_NAMES, STAFF_LEVELS } from '../data/staffNames';
 import { CITIES } from '../data/cities';
 import {
   generateStockPool, stockDailyStep, stockYearReturn, stockReturnOverDays, STOCK_SECTORS, STOCK_TIMEFRAMES,
-  liveJitterPct, liveStockPrice, isMarketOpen, fakeTradeFor,
+  liveJitterPct, liveStockPrice, isMarketOpen, fakeTradeFor, stockFundamentals,
 } from '../data/stocks';
 import { computeRoute, planFuelStops, cityById } from '../engine/routing';
 import { cmpVer } from '../net/updates';
@@ -320,7 +320,7 @@ export function creditScoreOf(credit) {
 // the same asset being pledged twice.
 export {
   stockYearReturn, stockReturnOverDays, STOCK_SECTORS, STOCK_TIMEFRAMES,
-  liveJitterPct, liveStockPrice, isMarketOpen, fakeTradeFor,
+  liveJitterPct, liveStockPrice, isMarketOpen, fakeTradeFor, stockFundamentals,
 };
 
 export function pledgedTruckIds(s) {
@@ -859,6 +859,7 @@ const initialState = {
     difficulty: 'normal', events: 'rare', tutorialSeen: false,
     musicVolume: 0.4, sfxVolume: 1, hapticIntensity: 'medium',
     startupSound: 'start', startupVolume: 0.7, // played once each time the game opens
+    finaleSeen: false, finaleModalShown: false, // Grand Finale gift + celebration screen, each one-time-ever
     notif: { delivery: true, truck: true, fuel: true, daily: true },
   },
   easterEggs: { found: [] }, // ids of discovered hidden gems (persisted, one-time rewards)

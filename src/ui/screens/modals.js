@@ -11,7 +11,7 @@ import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-sv
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider } from '../components';
 import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds, stockYearReturn, stockReturnOverDays, STOCK_TIMEFRAMES,
-  liveStockPrice, isMarketOpen, fakeTradeFor, STARTUP_SOUNDS } from '../../store/gameStore';
+  liveStockPrice, isMarketOpen, fakeTradeFor, STARTUP_SOUNDS, stockFundamentals } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
@@ -419,7 +419,11 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
   const results = useMemo(() => {
     if (!query.trim()) return [];
     const q = query.toLowerCase();
-    return CITIES.filter(c => c.name.toLowerCase().includes(q) || c.state.toLowerCase().includes(q)).slice(0, 8);
+    return CITIES.filter(c => {
+      if (c.name.toLowerCase().includes(q) || c.state.toLowerCase().includes(q)) return true;
+      const country = COUNTRY_BY_CODE[c.country || 'IN'];
+      return !!country && (country.name.toLowerCase().includes(q) || (c.country || 'IN').toLowerCase() === q);
+    }).slice(0, 8);
   }, [query]);
 
   const suggestions = useMemo(() => {
@@ -3130,7 +3134,11 @@ export function HubsModal({ visible, onClose, onShowOnMap }) {
     const q = query.trim().toLowerCase();
     const base = CITIES.filter(c => !owned.has(c.id));
     if (!q) return base.filter(c => c.tier <= 2).slice(0, 15);
-    return base.filter(c => c.name.toLowerCase().includes(q) || c.state.toLowerCase().includes(q)).slice(0, 15);
+    return base.filter(c => {
+      if (c.name.toLowerCase().includes(q) || c.state.toLowerCase().includes(q)) return true;
+      const country = COUNTRY_BY_CODE[c.country || 'IN'];
+      return !!country && (country.name.toLowerCase().includes(q) || (c.country || 'IN').toLowerCase() === q);
+    }).slice(0, 15);
   }, [query, hubs.length]);
   const sellHub = useGame(s => s.sellHub);
   const buy = (c) => { const r = buyHub(c.id); toast(r.ok ? `Garage opened in ${c.name}!` : r.err, r.ok ? 'success' : 'error'); };
@@ -4098,6 +4106,34 @@ function StockDetail({ stock, portfolio, balance, buyStock, sellStock, toast, on
         <StockChart stock={stock} days={tfDef.days} tf={tfDef} now={now} mode={mode} />
       </Card>
 
+      {(() => {
+        const f = stockFundamentals(stock);
+        return (
+          <Card style={{ marginBottom: 10 }}>
+            <Text style={[FONT.tiny, { fontWeight: '800', color: C.sub, marginBottom: 8 }]}>COMPANY FUNDAMENTALS</Text>
+            <Row style={{ flexWrap: 'wrap' }}>
+              <View style={{ width: '50%', marginBottom: 10 }}>
+                <Text style={FONT.tiny}>Market Cap</Text>
+                <Text style={[FONT.body, { fontWeight: '800' }]}>{inrShort(f.marketCap)}</Text>
+              </View>
+              <View style={{ width: '50%', marginBottom: 10 }}>
+                <Text style={FONT.tiny}>Annual Revenue</Text>
+                <Text style={[FONT.body, { fontWeight: '800' }]}>{inrShort(f.annualRevenue)}</Text>
+              </View>
+              <View style={{ width: '50%' }}>
+                <Text style={FONT.tiny}>Annual Profit (post-tax)</Text>
+                <Text style={[FONT.body, { fontWeight: '800', color: C.green }]}>{inrShort(f.annualProfit * (1 - f.taxRate))}</Text>
+              </View>
+              <View style={{ width: '50%' }}>
+                <Text style={FONT.tiny}>P/E Ratio</Text>
+                <Text style={[FONT.body, { fontWeight: '800' }]}>{f.peRatio ? f.peRatio.toFixed(1) : '—'}</Text>
+              </View>
+            </Row>
+            <Text style={[FONT.tiny, { color: C.faint, marginTop: 4 }]}>Corporate tax rate: {Math.round(f.taxRate * 100)}% · {f.sharesOutstanding.toLocaleString()} shares outstanding</Text>
+          </Card>
+        );
+      })()}
+
       {open && feed.length > 0 ? (
         <Card style={{ marginBottom: 10 }}>
           <Text style={[FONT.tiny, { fontWeight: '800', color: C.sub, marginBottom: 6 }]}>LIVE MARKET ACTIVITY</Text>
@@ -4166,6 +4202,49 @@ function StockDetail({ stock, portfolio, balance, buyStock, sellStock, toast, on
   );
 }
 
+// A completely separate path from the main market: applying for an IPO is
+// its own screen with its own criteria, reachable via a dedicated button —
+// it does NOT share a page with buying/selling other companies' shares.
+function IpoLaunchPanel({ req, launchStock, toast, onBack, onLaunched }) {
+  return (
+    <View>
+      <Pressable onPress={onBack} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+        <Icon name="chevron-left" size={18} color={C.blue} />
+        <Text style={[FONT.body, { color: C.blue, fontWeight: '700', marginLeft: 2 }]}>Back to market</Text>
+      </Pressable>
+      <Card style={{ marginBottom: 10, opacity: req.met ? 1 : 0.9 }}>
+        <Row style={{ justifyContent: 'space-between' }}>
+          <Text style={[FONT.h3, { fontWeight: '800' }]}>Launch Your Own IPO</Text>
+          <Icon name="rocket-launch" size={20} color={req.met ? C.gold : C.faint} />
+        </Row>
+        <Text style={[FONT.tiny, { marginTop: 4 }]}>Prove your empire's track record to list on the exchange — ₹50L listing fee, 5,000 founder shares. Once listed, it trades on the main market like every other company.</Text>
+        {[
+          { label: 'Distance driven', have: req.have.km, need: req.km, unit: 'km' },
+          { label: 'Lifetime revenue', have: req.have.revenue, need: req.revenue, unit: '₹' },
+          { label: 'Deliveries completed', have: req.have.deliveries, need: req.deliveries, unit: '' },
+        ].map(row => (
+          <View key={row.label} style={{ marginTop: 10 }}>
+            <Row style={{ justifyContent: 'space-between' }}>
+              <Text style={FONT.tiny}>{row.label}</Text>
+              <Text style={[FONT.tiny, { fontWeight: '700', color: row.have >= row.need ? C.green : C.sub }]}>
+                {row.unit === '₹' ? inrShort(row.have) : row.have.toLocaleString()} / {row.unit === '₹' ? inrShort(row.need) : row.need.toLocaleString()}
+              </Text>
+            </Row>
+            <Progress pct={Math.min(100, (row.have / row.need) * 100)} color={row.have >= row.need ? C.green : C.amber} style={{ marginTop: 4 }} />
+          </View>
+        ))}
+        <Btn title={req.met ? 'Launch IPO · ₹50,00,000' : 'Requirements not met yet'} kind={req.met ? 'green' : 'soft'} disabled={!req.met}
+          style={{ marginTop: 12 }}
+          onPress={() => {
+            const r = launchStock();
+            toast(r.ok ? `${r.stock.name} listed! You hold 5,000 founder shares.` : r.err, r.ok ? 'success' : 'error');
+            if (r.ok) onLaunched(r.stock.id);
+          }} />
+      </Card>
+    </View>
+  );
+}
+
 const STOCK_PAGE = 20;
 export function StockMarketModal({ visible, onClose }) {
   const toast = useToast();
@@ -4176,17 +4255,29 @@ export function StockMarketModal({ visible, onClose }) {
   const sellStock = useGame(s => s.sellStock);
   const launchStock = useGame(s => s.launchStock);
   const ipoRequirements = useGame(s => s.ipoRequirements);
+  const [view, setView] = useState('list'); // 'list' | 'ipo' — two separate paths
   const [selectedId, setSelectedId] = useState(null);
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
-  useEffect(() => { if (!visible) { setSelectedId(null); setQuery(''); setPage(1); } }, [visible]);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { if (!visible) { setSelectedId(null); setQuery(''); setPage(1); setView('list'); } }, [visible]);
+
+  // Whole-market ticker: every listed price on the list screen breathes in
+  // real time too (not just the one open detail view), so the market feels
+  // alive with bots/other participants trading even when you're just
+  // browsing. Cheap — pure arithmetic over the visible page only.
+  useEffect(() => {
+    if (!visible) return;
+    const id = setInterval(() => setNow(Date.now()), 3000);
+    return () => clearInterval(id);
+  }, [visible]);
 
   const selected = selectedId ? stocks.find(s => s.id === selectedId) : null;
 
   // Only crunch the whole 1000+-company list while the sheet is actually
   // open on the list view — never on every render, never in the background.
   const insight = useMemo(() => {
-    if (!visible || selected || !stocks.length) return null;
+    if (!visible || selected || view !== 'list' || !stocks.length) return null;
     let top = stocks[0], bottom = stocks[0];
     let portfolioValue = 0, portfolioCost = 0;
     for (const st of stocks) {
@@ -4197,123 +4288,109 @@ export function StockMarketModal({ visible, onClose }) {
       if (pos) { portfolioValue += pos.shares * st.price; portfolioCost += pos.shares * pos.avgCost; }
     }
     return { top, bottom, portfolioValue, portfolioCost, count: stocks.length };
-  }, [visible, selected, stocks, portfolio]);
+  }, [visible, selected, view, stocks, portfolio]);
 
   const filtered = useMemo(() => {
-    if (!visible || selected) return [];
+    if (!visible || selected || view !== 'list') return [];
     const q = query.trim().toLowerCase();
     const list = q ? stocks.filter(s => s.name.toLowerCase().includes(q) || s.sector.toLowerCase().includes(q)) : stocks;
     return list;
-  }, [visible, selected, stocks, query]);
+  }, [visible, selected, view, stocks, query]);
   const visibleRows = filtered.slice(0, page * STOCK_PAGE);
 
-  const req = visible && !selected ? ipoRequirements() : null;
-
-  return (
-    <Sheet visible={visible} onClose={onClose} title="Stock Market" height="90%">
-      {selected ? (
+  if (selected) {
+    return (
+      <Sheet visible={visible} onClose={onClose} title="Stock Market" height="90%">
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
           <StockDetail stock={selected} portfolio={portfolio} balance={balance}
             buyStock={buyStock} sellStock={sellStock} toast={toast} onBack={() => setSelectedId(null)} />
         </ScrollView>
-      ) : (
-        <View style={{ flex: 1 }}>
-          {insight ? (
-            <Card style={{ marginBottom: 10, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
-              <Row style={{ justifyContent: 'space-between' }}>
-                <View>
-                  <Text style={[FONT.tiny, { color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 1 }]}>Your Portfolio</Text>
-                  <Text style={[FONT.h1, { color: '#F8FAFC', marginTop: 2 }]}>{inrShort(insight.portfolioValue)}</Text>
-                </View>
-                <View style={{ alignItems: 'flex-end' }}>
-                  <Text style={[FONT.tiny, { color: '#94A3B8' }]}>{insight.count.toLocaleString()} listed</Text>
-                  <Text style={[FONT.tiny, { color: insight.portfolioValue >= insight.portfolioCost ? '#4ADE80' : '#F87171', marginTop: 4, fontWeight: '800' }]}>
-                    {insight.portfolioValue >= insight.portfolioCost ? '▲' : '▼'} {inrShort(Math.abs(insight.portfolioValue - insight.portfolioCost))} P&L
-                  </Text>
-                </View>
-              </Row>
-              <Row style={{ marginTop: 10, gap: 8 }}>
-                <Pressable style={{ flex: 1, backgroundColor: '#1E293B', borderRadius: RADIUS.md, padding: 8 }} onPress={() => setSelectedId(insight.top.id)}>
-                  <Text style={[FONT.tiny, { color: '#4ADE80', fontWeight: '800' }]}>▲ Top gainer</Text>
-                  <Text style={[FONT.tiny, { color: '#F8FAFC', marginTop: 2 }]} numberOfLines={1}>{insight.top.name}</Text>
-                </Pressable>
-                <Pressable style={{ flex: 1, backgroundColor: '#1E293B', borderRadius: RADIUS.md, padding: 8 }} onPress={() => setSelectedId(insight.bottom.id)}>
-                  <Text style={[FONT.tiny, { color: '#F87171', fontWeight: '800' }]}>▼ Top loser</Text>
-                  <Text style={[FONT.tiny, { color: '#F8FAFC', marginTop: 2 }]} numberOfLines={1}>{insight.bottom.name}</Text>
-                </Pressable>
-              </Row>
-            </Card>
-          ) : null}
+      </Sheet>
+    );
+  }
 
-          {req ? (
-            <Card style={{ marginBottom: 10, opacity: req.met ? 1 : 0.9 }}>
-              <Row style={{ justifyContent: 'space-between' }}>
-                <Text style={[FONT.body, { fontWeight: '800' }]}>Launch Your Own IPO</Text>
-                <Icon name="rocket-launch" size={18} color={req.met ? C.gold : C.faint} />
-              </Row>
-              <Text style={[FONT.tiny, { marginTop: 2 }]}>Prove your empire's track record to list on the exchange — ₹50L listing fee, 5,000 founder shares.</Text>
-              {[
-                { label: 'Distance driven', have: req.have.km, need: req.km, unit: 'km' },
-                { label: 'Lifetime revenue', have: req.have.revenue, need: req.revenue, unit: '₹' },
-                { label: 'Deliveries completed', have: req.have.deliveries, need: req.deliveries, unit: '' },
-              ].map(row => (
-                <View key={row.label} style={{ marginTop: 8 }}>
+  if (view === 'ipo') {
+    const req = ipoRequirements();
+    return (
+      <Sheet visible={visible} onClose={onClose} title="Launch IPO" height="90%">
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+          <IpoLaunchPanel req={req} launchStock={launchStock} toast={toast}
+            onBack={() => setView('list')} onLaunched={id => { setView('list'); setSelectedId(id); }} />
+        </ScrollView>
+      </Sheet>
+    );
+  }
+
+  return (
+    <Sheet visible={visible} onClose={onClose} title="Stock Market" height="90%">
+      <View style={{ flex: 1 }}>
+        {insight ? (
+          <Card style={{ marginBottom: 10, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
+            <Row style={{ justifyContent: 'space-between' }}>
+              <View>
+                <Text style={[FONT.tiny, { color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 1 }]}>Your Portfolio</Text>
+                <Text style={[FONT.h1, { color: '#F8FAFC', marginTop: 2 }]}>{inrShort(insight.portfolioValue)}</Text>
+              </View>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={[FONT.tiny, { color: '#94A3B8' }]}>{insight.count.toLocaleString()} listed</Text>
+                <Text style={[FONT.tiny, { color: insight.portfolioValue >= insight.portfolioCost ? '#4ADE80' : '#F87171', marginTop: 4, fontWeight: '800' }]}>
+                  {insight.portfolioValue >= insight.portfolioCost ? '▲' : '▼'} {inrShort(Math.abs(insight.portfolioValue - insight.portfolioCost))} P&L
+                </Text>
+              </View>
+            </Row>
+            <Row style={{ marginTop: 10, gap: 8 }}>
+              <Pressable style={{ flex: 1, backgroundColor: '#1E293B', borderRadius: RADIUS.md, padding: 8 }} onPress={() => setSelectedId(insight.top.id)}>
+                <Text style={[FONT.tiny, { color: '#4ADE80', fontWeight: '800' }]}>▲ Top gainer</Text>
+                <Text style={[FONT.tiny, { color: '#F8FAFC', marginTop: 2 }]} numberOfLines={1}>{insight.top.name}</Text>
+              </Pressable>
+              <Pressable style={{ flex: 1, backgroundColor: '#1E293B', borderRadius: RADIUS.md, padding: 8 }} onPress={() => setSelectedId(insight.bottom.id)}>
+                <Text style={[FONT.tiny, { color: '#F87171', fontWeight: '800' }]}>▼ Top loser</Text>
+                <Text style={[FONT.tiny, { color: '#F8FAFC', marginTop: 2 }]} numberOfLines={1}>{insight.bottom.name}</Text>
+              </Pressable>
+            </Row>
+            <Btn title="Launch your own IPO" kind="soft" icon="rocket-launch-outline" small style={{ marginTop: 10 }} onPress={() => setView('ipo')} />
+          </Card>
+        ) : (
+          <Btn title="Launch your own IPO" kind="soft" icon="rocket-launch-outline" small style={{ marginBottom: 10 }} onPress={() => setView('ipo')} />
+        )}
+
+        <TextInput value={query} onChangeText={t => { setQuery(t); setPage(1); }} placeholder="Search companies or sectors..."
+          placeholderTextColor={C.faint}
+          style={{ backgroundColor: C.bgSoft, borderRadius: RADIUS.md, borderWidth: 1, borderColor: C.border, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10, color: C.text }} />
+
+        <FlatList
+          data={visibleRows}
+          keyExtractor={s => s.id}
+          renderItem={({ item: st }) => {
+            const live = isMarketOpen(now) ? liveStockPrice(st, now) : st.price;
+            const ret = stockYearReturn(st);
+            const pos = portfolio[st.id];
+            return (
+              <Pressable onPress={() => setSelectedId(st.id)}>
+                <Card style={{ marginBottom: 8, padding: 10 }}>
                   <Row style={{ justifyContent: 'space-between' }}>
-                    <Text style={FONT.tiny}>{row.label}</Text>
-                    <Text style={[FONT.tiny, { fontWeight: '700', color: row.have >= row.need ? C.green : C.sub }]}>
-                      {row.unit === '₹' ? inrShort(row.have) : row.have.toLocaleString()} / {row.unit === '₹' ? inrShort(row.need) : row.need.toLocaleString()}
-                    </Text>
+                    <View style={{ flex: 1 }}>
+                      <Row>
+                        <Text style={[FONT.body, { fontWeight: '700', flexShrink: 1 }]} numberOfLines={1}>{st.name}</Text>
+                        {pos ? <Icon name="briefcase-check" size={13} color={C.blue} style={{ marginLeft: 6 }} /> : null}
+                      </Row>
+                      <Text style={FONT.tiny}>{st.sector}</Text>
+                    </View>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={[FONT.mono, { fontWeight: '800' }]}>{inr(live)}</Text>
+                      <Text style={[FONT.tiny, { fontWeight: '800', color: ret >= 0 ? C.green : C.red }]}>
+                        {ret >= 0 ? '▲' : '▼'} {Math.abs(Math.round(ret * 1000) / 10)}%
+                      </Text>
+                    </View>
                   </Row>
-                  <Progress pct={Math.min(100, (row.have / row.need) * 100)} color={row.have >= row.need ? C.green : C.amber} style={{ marginTop: 4 }} />
-                </View>
-              ))}
-              <Btn title={req.met ? 'Launch IPO · ₹50,00,000' : 'Requirements not met yet'} kind={req.met ? 'green' : 'soft'} disabled={!req.met}
-                style={{ marginTop: 10 }}
-                onPress={() => {
-                  const r = launchStock();
-                  toast(r.ok ? `${r.stock.name} listed! You hold 5,000 founder shares.` : r.err, r.ok ? 'success' : 'error');
-                  if (r.ok) setSelectedId(r.stock.id);
-                }} />
-            </Card>
-          ) : null}
-
-          <TextInput value={query} onChangeText={t => { setQuery(t); setPage(1); }} placeholder="Search companies or sectors..."
-            placeholderTextColor={C.faint}
-            style={{ backgroundColor: C.bgSoft, borderRadius: RADIUS.md, borderWidth: 1, borderColor: C.border, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10, color: C.text }} />
-
-          <FlatList
-            data={visibleRows}
-            keyExtractor={s => s.id}
-            renderItem={({ item: st }) => {
-              const ret = stockYearReturn(st);
-              const pos = portfolio[st.id];
-              return (
-                <Pressable onPress={() => setSelectedId(st.id)}>
-                  <Card style={{ marginBottom: 8, padding: 10 }}>
-                    <Row style={{ justifyContent: 'space-between' }}>
-                      <View style={{ flex: 1 }}>
-                        <Row>
-                          <Text style={[FONT.body, { fontWeight: '700', flexShrink: 1 }]} numberOfLines={1}>{st.name}</Text>
-                          {pos ? <Icon name="briefcase-check" size={13} color={C.blue} style={{ marginLeft: 6 }} /> : null}
-                        </Row>
-                        <Text style={FONT.tiny}>{st.sector}</Text>
-                      </View>
-                      <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={[FONT.mono, { fontWeight: '800' }]}>{inr(st.price)}</Text>
-                        <Text style={[FONT.tiny, { fontWeight: '800', color: ret >= 0 ? C.green : C.red }]}>
-                          {ret >= 0 ? '▲' : '▼'} {Math.abs(Math.round(ret * 1000) / 10)}%
-                        </Text>
-                      </View>
-                    </Row>
-                  </Card>
-                </Pressable>
-              );
-            }}
-            ListFooterComponent={<LoadMore shown={visibleRows.length} total={filtered.length} onMore={() => setPage(p => p + 1)} />}
-            contentContainerStyle={{ paddingBottom: 24 }}
-          />
-        </View>
-      )}
+                </Card>
+              </Pressable>
+            );
+          }}
+          ListFooterComponent={<LoadMore shown={visibleRows.length} total={filtered.length} onMore={() => setPage(p => p + 1)} />}
+          contentContainerStyle={{ paddingBottom: 24 }}
+        />
+      </View>
     </Sheet>
   );
 }
