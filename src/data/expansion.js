@@ -385,6 +385,12 @@ export const INTL_CITIES = [
     ['hakha', 'Hakha', 'Chin', 22.65, 93.61, 30000, 3],
     ['thayet', 'Thayet', 'Magway', 19.32, 95.18, 30000, 3],
     ['kyaukpyu', 'Kyaukpyu', 'Rakhine', 19.43, 93.55, 20000, 3],
+    // Rakhine coastal chain — real coastal towns so the road/ferry network
+    // matches the actual coastline instead of straight-line auto-connects
+    // that were cutting across the Ramree Island channel and the Arakan
+    // mountain range (v3.8.0 fix).
+    ['taungup', 'Taungup', 'Rakhine', 18.83, 94.22, 30000, 3],
+    ['gwa', 'Gwa', 'Rakhine', 18.55, 94.60, 20000, 3],
   ]),
   ...C('AF')([
     ['kabul', 'Kabul', 'Kabul', 34.56, 69.21, 4600000, 1],
@@ -1277,6 +1283,16 @@ export const INTL_EDGES = [
   road('mm-mandalay', 'mm-taunggyi'), road('mm-naypyidaw', 'mm-yangon'),
   road('mm-yangon', 'mm-pathein'), road('mm-yangon', 'mm-mawlamyine'),
   road('mm-mandalay', 'mm-sittwe'),
+  // Rakhine coast, properly chained (v3.8.0 fix): the old auto-connect drew
+  // a straight 105km "road" from Kyaukpyu (on Ramree Island) to Sittwe —
+  // that gap is a real tidal channel, crossed in reality by ferry, not a
+  // bridge. And Thandwe was auto-connecting 98km straight through the
+  // Arakan mountains to Pyay with no pass modelled. Fixed with a real
+  // coastal road chain south to a real mountain-pass town (Taungup), which
+  // does carry an actual highway east to the Ayeyarwady side.
+  sea('mm-sittwe', 'mm-kyaukpyu', 'MM', 'MM'),
+  road('mm-kyaukpyu', 'mm-thandwe'), road('mm-thandwe', 'mm-gwa'),
+  road('mm-gwa', 'mm-taungup'), road('mm-taungup', 'mm-pyay'),
   // ——— China (via Nepal & Myanmar) ———
   border('cn-gyirong', 'np-kathmandu', 'CN', 'NP', 'Gyirong–Rasuwa Border'),
   border('cn-kunming', 'mm-mandalay', 'CN', 'MM', 'Muse–Ruili Border'),
