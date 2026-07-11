@@ -1,0 +1,80 @@
+name: Build Beta APK
+
+# Private beta channel for the Real Roads build (com.truckempiretycoon.beta).
+# Runs on every push to the beta branch (and manually for any branch). It
+# publishes a PRERELEASE with a beta-* tag — the in-app updater filters out
+# prereleases, so main-app players never see these builds.
+on:
+  push:
+    branches: [feature/real-roads]
+  workflow_dispatch:
+    inputs:
+      note:
+        description: 'Optional note added to the prerelease body'
+        required: false
+        default: 'Beta build'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: beta-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  beta:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute beta version
+        id: ver
+        run: |
+          gv=$(grep -oE 'versionName "[0-9]+(\.[0-9]+)*"' android/app/build.gradle | head -n1 | grep -oE '[0-9]+(\.[0-9]+)*')
+          echo "version=beta-v${gv:-1.0.0}.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build release APK
+        working-directory: android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Rename APK
+        id: apk
+        run: |
+          mkdir -p dist
+          cp android/app/build/outputs/apk/release/app-release.apk \
+             "dist/TruckEmpireBeta-${{ steps.ver.outputs.version }}.apk"
+          echo "path=dist/TruckEmpireBeta-${{ steps.ver.outputs.version }}.apk" >> "$GITHUB_OUTPUT"
+
+      - name: Publish prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.version }}
+          name: Truck Empire BETA ${{ steps.ver.outputs.version }}
+          prerelease: true
+          target_commitish: ${{ github.sha }}
+          body: |
+            🧪 **Private beta — Real Roads Edition** (installs alongside the main game).
+            ${{ inputs.note || 'Automated beta build.' }} Built from `${{ github.ref_name }}` (${{ github.sha }}).
+          files: ${{ steps.apk.outputs.path }}
+          fail_on_unmatched_files: true

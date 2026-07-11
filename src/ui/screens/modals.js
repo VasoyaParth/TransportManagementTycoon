@@ -2471,6 +2471,8 @@ const CREDITS = [
   { icon: 'react', name: 'React Native', role: 'App framework', by: 'Meta Open Source' },
   { icon: 'vector-square', name: 'Material Community Icons', role: 'Iconography', by: 'Pictogrammers (Apache 2.0)' },
   { icon: 'road-variant', name: 'National Highways data', role: 'Route network', by: 'Compiled from public NHAI references' },
+  { icon: 'routes', name: 'OSRM Routing Engine', role: 'Real road paths (beta)', by: 'Project OSRM — router.project-osrm.org' },
+  { icon: 'map', name: 'OpenStreetMap', role: 'Road geometry data', by: '© OpenStreetMap contributors (ODbL)' },
 ];
 
 // The team.
@@ -2530,6 +2532,9 @@ function AboutTab({ onReplayTutorial }) {
       <Card style={{ alignItems: 'center', padding: 22 }}>
         <BrandEmblem size={84} />
         <Text style={[FONT.h2, { marginTop: 10 }]}>Truck Empire Tycoon</Text>
+        <View style={{ marginTop: 4 }}>
+          <Pill text="BETA — Real Roads Edition" icon="flask-outline" color={C.amber} bg={C.amberSoft} />
+        </View>
         <Row style={{ marginTop: 6 }}>
           <Pressable onPress={tapVersionEgg}><Pill text={`Installed ${APP_VERSION}`} icon="cellphone-check" color={C.sub} bg={C.bgSoft} /></Pressable>
           {state.status === 'done' && (
