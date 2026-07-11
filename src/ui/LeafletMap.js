@@ -9,7 +9,7 @@ import { CITIES } from '../data/cities';
 import { STATIONS } from '../engine/stations';
 import { pointAlong } from '../engine/geo';
 import { C } from './theme';
-import { useGame, modelById, deliveryPhase, WEATHER_KINDS } from '../store/gameStore';
+import { useGame, modelById, deliveryPhase, WEATHER_KINDS, weatherPolygon } from '../store/gameStore';
 import { cityById, ferryPorts } from '../engine/routing';
 import { statusMeta, useEasterEggTap } from './components';
 import { haptic } from '../engine/haptics';
@@ -130,7 +130,10 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
     const zones = weather.map(z => {
       const k = WEATHER_KINDS[z.kind] || {};
       return {
-        lat: z.lat, lng: z.lng, radiusKm: z.radiusKm, kind: z.kind,
+        lat: z.lat, lng: z.lng, kind: z.kind,
+        // Irregular blob outline (state-boundary style) — same boundary the
+        // speed penalty uses, so the visual IS the gameplay.
+        outline: weatherPolygon(z).map(pt => [+pt.lat.toFixed(3), +pt.lng.toFixed(3)]),
         label: `${k.label || z.kind} — ${z.name}`, color: k.color || '#2563EB',
         slowPct: Math.round((1 - (k.slow || 1)) * 100),
       };

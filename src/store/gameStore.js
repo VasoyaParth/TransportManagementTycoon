@@ -326,12 +326,40 @@ export function generateWeather(day) {
     used.add(idx);
     const r = WEATHER_REGIONS[idx];
     const kind = r.kinds[(((h >>> (i * 2)) + i) >>> 0) % r.kinds.length];
+    // Organic blob, not a circle: the boundary radius varies with the angle
+    // through 2 random harmonics — every zone gets its own irregular
+    // state-boundary-like curve, deterministic per day+region.
     zones.push({
       id: `w-${day}-${idx}`, kind, name: r.name, lat: r.lat, lng: r.lng,
       radiusKm: 130 + ((h >>> (i + 4)) % 130), day,
+      shape: {
+        a1: 0.18 + ((h >>> (i + 7)) % 25) / 100,               // 0.18–0.42 amplitude
+        p1: (((h >>> (i + 11)) % 360) * Math.PI) / 180,
+        k1: 2 + ((h >>> (i + 3)) % 2),                          // 2–3 lobes
+        a2: 0.08 + ((h >>> (i + 13)) % 18) / 100,               // fine ripple
+        p2: (((h >>> (i + 17)) % 360) * Math.PI) / 180,
+        k2: 5 + ((h >>> (i + 5)) % 3),                          // 5–7 ripples
+      },
     });
   }
   return zones;
+}
+// Boundary radius (km) of a weather blob at a given bearing from its centre.
+export function weatherRadiusAt(z, ang) {
+  const sh = z.shape;
+  if (!sh) return z.radiusKm; // old saves: plain circle
+  return z.radiusKm * (1 + sh.a1 * Math.sin(sh.k1 * ang + sh.p1) + sh.a2 * Math.sin(sh.k2 * ang + sh.p2));
+}
+// Blob outline as lat/lng points (for drawing on the map).
+export function weatherPolygon(z, n = 48) {
+  const out = [];
+  const kLat = 111, kLng = 111 * Math.cos((z.lat * Math.PI) / 180);
+  for (let i = 0; i <= n; i++) {
+    const ang = (i / n) * 2 * Math.PI;
+    const r = weatherRadiusAt(z, ang);
+    out.push({ lat: z.lat + (r / kLat) * Math.sin(ang), lng: z.lng + (r / kLng) * Math.cos(ang) });
+  }
+  return out;
 }
 const degKm = (a, b) => { // fast approximate distance in km
   const dLat = (a.lat - b.lat) * 111;
@@ -339,14 +367,19 @@ const degKm = (a, b) => { // fast approximate distance in km
   return Math.sqrt(dLat * dLat + dLng * dLng);
 };
 // Worst (slowest) weather zone a route passes through; 1 = clear skies.
+// Uses the zone's ACTUAL irregular boundary (weatherRadiusAt), so what the
+// player sees on the map is exactly what slows the truck — no invisible math.
 export function weatherOnRoute(points, zones) {
   if (!zones?.length || !points?.length) return { factor: 1, hits: [] };
   let factor = 1; const hits = [];
-  const step = Math.max(1, Math.floor(points.length / 40));
+  const step = Math.max(1, Math.floor(points.length / 60));
   for (const z of zones) {
     const k = WEATHER_KINDS[z.kind]; if (!k) continue;
+    const kLat = 111, kLng = 111 * Math.cos((z.lat * Math.PI) / 180);
     for (let i = 0; i < points.length; i += step) {
-      if (degKm(points[i], z) <= z.radiusKm) { if (k.slow < factor) factor = k.slow; hits.push(z); break; }
+      const dy = (points[i].lat - z.lat) * kLat, dx = (points[i].lng - z.lng) * kLng;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist <= weatherRadiusAt(z, Math.atan2(dy, dx))) { if (k.slow < factor) factor = k.slow; hits.push(z); break; }
     }
   }
   return { factor, hits };
@@ -805,9 +838,29 @@ export const useGame = create(
           }
         }
         // ---- v2.4.0 daily/periodic systems ----
-        // Weather: fresh zones each game day, only in plausible regions.
+        // Weather: fresh zones each game day, only in plausible regions. New
+        // weather is NOT just visual — any truck already driving through a
+        // fresh zone gets its remaining trip slowed by that zone's factor.
         if ((s.weatherDay || 0) !== day) {
-          set({ weather: generateWeather(day), weatherDay: day });
+          const zones = generateWeather(day);
+          const nowW = Date.now();
+          const slowed = [];
+          const deliveries = get().deliveries.map(d => {
+            if (d.wxDay === day) return d;
+            const wx = weatherOnRoute(d.route.points, zones);
+            if (wx.factor >= 0.999) return { ...d, wxDay: day };
+            const rem = Math.max(0, d.endsAt - nowW);
+            if (rem > 60000) slowed.push({ d, wx });
+            return { ...d, wxDay: day, endsAt: rem > 60000 ? nowW + rem / wx.factor : d.endsAt };
+          });
+          set({ weather: zones, weatherDay: day, deliveries });
+          for (const { d, wx } of slowed) {
+            const t = get().trucks.find(x => x.id === d.truckId);
+            const z = wx.hits[0];
+            const k = z && WEATHER_KINDS[z.kind];
+            get().notify('truck', k?.icon || 'weather-pouring',
+              `${k?.label || 'Weather'} over ${z?.name || 'the route'} — ${t ? (t.customName || modelById(t.modelId).name) : 'a truck'} slowed ${Math.round((1 - wx.factor) * 100)}% for the rest of the trip.`);
+          }
         }
         // Loan EMIs: charged every 30 game days per loan. A missed EMI dings
         // the credit score and adds 5% penalty interest to what's left.

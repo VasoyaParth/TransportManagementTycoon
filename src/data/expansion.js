@@ -1020,6 +1020,11 @@ export const INTL_EDGES = [
   road('ir-isfahan', 'ir-shiraz'), road('ir-shiraz', 'ir-bandar-abbas'),
   road('ir-kerman', 'ir-bandar-abbas'), road('ir-tehran', 'ir-karaj'),
   road('ir-zahedan', 'ir-chabahar'), road('ir-ahvaz', 'ir-khorramabad'),
+  // Bridge the western (Ahvaz/Kermanshah) cluster into the main network —
+  // both endpoints of a hand-written edge get skipped by auto-connect, so
+  // without these the whole west of Iran floats disconnected (v2.4.2 fix).
+  road('ir-khorramabad', 'ir-arak'), road('ir-arak', 'ir-qom'),
+  road('ir-hamadan', 'ir-qazvin'), road('ir-qazvin', 'ir-tehran'), road('ir-ahvaz', 'ir-isfahan'),
   road('ir-tehran', 'ir-rasht'),
   // ——— UAE (Arabian Sea ferries into the Gulf) ———
   sea('mumbai', 'ae-dubai', 'IN', 'AE'),

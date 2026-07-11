@@ -316,8 +316,15 @@ function boot(){
   window.setWeather=function(zones){
     weatherLayer.clearLayers();
     (zones||[]).forEach(function(z){
-      weatherLayer.addLayer(L.circle([z.lat,z.lng],{radius:z.radiusKm*1000,color:z.color,weight:1.5,
-        opacity:0.55,fillColor:z.color,fillOpacity:0.13,dashArray:'6 5'}));
+      // Irregular organic outline (like a state boundary), not a circle —
+      // exactly the boundary that slows trucks inside it.
+      if(z.outline && z.outline.length>2){
+        weatherLayer.addLayer(L.polygon(z.outline,{color:z.color,weight:1.5,opacity:0.6,
+          fillColor:z.color,fillOpacity:0.14,dashArray:'6 5',smoothFactor:1.2}));
+      } else if(z.radiusKm){
+        weatherLayer.addLayer(L.circle([z.lat,z.lng],{radius:z.radiusKm*1000,color:z.color,weight:1.5,
+          opacity:0.55,fillColor:z.color,fillOpacity:0.13,dashArray:'6 5'}));
+      }
       weatherLayer.addLayer(L.marker([z.lat,z.lng],{icon:L.divIcon({className:'',
         html:'<div style="width:26px;height:26px;border-radius:50%;background:'+z.color+';border:2px solid #fff;'
           +'display:flex;align-items:center;justify-content:center;box-shadow:0 2px 5px rgba(0,0,0,.3)">'
