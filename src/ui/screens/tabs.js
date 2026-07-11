@@ -134,6 +134,10 @@ export function FleetTab({ onTruckPress, onBuyTruck }) {
     trucks.forEach(t => { c[t.status] = (c[t.status] || 0) + 1; });
     return c;
   }, [trucks]);
+  // Hero metrics: whole-fleet health at a glance.
+  const fleetAvgFuel = trucks.length ? Math.round(trucks.reduce((a, t) => a + (t.fuelPct || 0), 0) / trucks.length) : 0;
+  const fleetAvgCond = trucks.length ? Math.round(trucks.reduce((a, t) => a + (t.condition == null ? 100 : t.condition), 0) / trucks.length) : 0;
+  const fleetKm = trucks.reduce((a, t) => a + (t.km || 0), 0);
 
   const filtered = useMemo(
     () => (filter === 'all' ? trucks : trucks.filter(t => t.status === filter)),
@@ -219,10 +223,40 @@ export function FleetTab({ onTruckPress, onBuyTruck }) {
       contentContainerStyle={{ paddingBottom: 24 }}
       ListHeaderComponent={
         <View>
-          <Row style={{ justifyContent: 'space-between', marginBottom: 12 }}>
-            <Text style={FONT.h2}>Fleet</Text>
-            <Btn title="Buy Truck" icon="plus" small onPress={() => onBuyTruck && onBuyTruck()} />
-          </Row>
+          {/* Fleet HQ hero — same dark command style as Economy/Routes/Rewards */}
+          <Card style={{ marginBottom: 12, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
+            <Row style={{ justifyContent: 'space-between' }}>
+              <View>
+                <Text style={[FONT.tiny, { color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 1 }]}>Fleet Command</Text>
+                <Row style={{ alignItems: 'flex-end', marginTop: 2 }}>
+                  <Text style={[FONT.h1, { color: '#F8FAFC' }]}>{trucks.length}</Text>
+                  <Text style={[FONT.tiny, { color: '#94A3B8', marginLeft: 6, marginBottom: 5 }]}>truck{trucks.length === 1 ? '' : 's'} · {counts.delivering} earning now</Text>
+                </Row>
+              </View>
+              <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: '#1E293B', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="truck" size={24} color="#5B8DF0" />
+              </View>
+            </Row>
+            <Row style={{ marginTop: 10, backgroundColor: '#1E293B', borderRadius: RADIUS.md, paddingVertical: 8, justifyContent: 'space-around' }}>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={[FONT.body, { fontWeight: '800', color: fleetAvgFuel > 50 ? '#4ADE80' : '#F4D35E' }]}>{fleetAvgFuel}%</Text>
+                <Text style={[FONT.tiny, { color: '#64748B' }]}>avg fuel</Text>
+              </View>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={[FONT.body, { fontWeight: '800', color: fleetAvgCond > 60 ? '#4ADE80' : '#F87171' }]}>{fleetAvgCond}%</Text>
+                <Text style={[FONT.tiny, { color: '#64748B' }]}>avg condition</Text>
+              </View>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={[FONT.body, { fontWeight: '800', color: '#F8FAFC' }]}>{Math.round(fleetKm).toLocaleString('en-IN')}</Text>
+                <Text style={[FONT.tiny, { color: '#64748B' }]}>fleet km</Text>
+              </View>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={[FONT.body, { fontWeight: '800', color: counts.broken ? '#F87171' : '#4ADE80' }]}>{counts.broken || 0}</Text>
+                <Text style={[FONT.tiny, { color: '#64748B' }]}>broken</Text>
+              </View>
+            </Row>
+            <Btn title="Buy Truck — showroom" icon="plus" kind="blue" small style={{ marginTop: 10 }} onPress={() => onBuyTruck && onBuyTruck()} />
+          </Card>
           <FilterChips options={filterOpts} value={filter} onChange={setFilter} />
         </View>
       }
@@ -244,19 +278,98 @@ export function FleetTab({ onTruckPress, onBuyTruck }) {
 }
 
 // ============================== 2. ROUTES ==============================
+// v3.1.0 remaster: dark command-center hero + three views — Running (live),
+// History (every past trip with driver, cargo & full expense breakdown) and
+// Insights (network analytics).
 const ROUTE_SORTS = [
   { key: 'eta', label: 'ETA' },
   { key: 'distance', label: 'Distance' },
   { key: 'profit', label: 'Profit' },
 ];
 
+function HistoryEntry({ h, expanded, onToggle }) {
+  const from = cityById(h.fromCityId), to = cityById(h.toCityId);
+  const costs = (h.fuel || 0) + (h.maint || 0) + (h.tolls || 0) + (h.customs || 0);
+  const hasDetail = h.fuel != null;
+  return (
+    <Card style={{ marginBottom: 8, padding: 12 }}>
+      <Pressable onPress={() => { haptic('light'); onToggle(); }}>
+        <Row style={{ justifyContent: 'space-between' }}>
+          <View style={{ flex: 1, marginRight: 8 }}>
+            <Row>
+              <Text style={FONT.body} numberOfLines={1}>{from ? from.name : '?'}</Text>
+              <Icon name={h.ferry ? 'ferry' : 'arrow-right'} size={12} color={h.ferry ? C.blue : C.faint} style={{ marginHorizontal: 4 }} />
+              <Text style={FONT.body} numberOfLines={1}>{to ? to.name : '?'}</Text>
+            </Row>
+            <Text style={FONT.tiny}>
+              {h.km} km · {h.truckName || 'Truck'}{h.driver ? ` · ${h.driver}` : ''} · {relTime(h.ts)}
+            </Text>
+          </View>
+          <View style={{ alignItems: 'flex-end' }}>
+            <Text style={[FONT.mono, { fontWeight: '700', color: h.net >= 0 ? C.green : C.red }]}>{inr(h.net)}</Text>
+            <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={15} color={C.faint} />
+          </View>
+        </Row>
+      </Pressable>
+      {expanded && (
+        <View style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 10 }}>
+          <Row style={{ backgroundColor: C.bgSoft, borderRadius: RADIUS.md, paddingVertical: 8, marginBottom: 8, justifyContent: 'space-around' }}>
+            <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800' }]}>{h.cargoTons != null ? `${h.cargoTons}t` : '—'}</Text><Text style={[FONT.tiny, { fontSize: 9 }]}>{h.cargoType || 'cargo'}</Text></View>
+            <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800' }]}>{h.hours != null ? `${h.hours}h` : '—'}</Text><Text style={[FONT.tiny, { fontSize: 9 }]}>driving</Text></View>
+            <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800' }]}>{h.driver || '—'}</Text><Text style={[FONT.tiny, { fontSize: 9 }]}>driver</Text></View>
+          </Row>
+          {hasDetail ? (
+            <>
+              <Row style={{ justifyContent: 'space-between', paddingVertical: 4 }}>
+                <Text style={FONT.sub}>Freight earned (gross)</Text>
+                <Text style={[FONT.mono, { fontWeight: '700', color: C.green }]}>+{inr(h.gross)}</Text>
+              </Row>
+              {h.reward ? (
+                <Row style={{ justifyContent: 'space-between', paddingVertical: 4 }}>
+                  <Text style={FONT.sub}>Contract bonus</Text>
+                  <Text style={[FONT.mono, { fontWeight: '700', color: C.green }]}>+{inr(h.reward)}</Text>
+                </Row>
+              ) : null}
+              <Row style={{ justifyContent: 'space-between', paddingVertical: 4 }}>
+                <Text style={FONT.sub}>Fuel</Text><Text style={[FONT.mono, { color: C.red }]}>−{inr(h.fuel)}</Text>
+              </Row>
+              <Row style={{ justifyContent: 'space-between', paddingVertical: 4 }}>
+                <Text style={FONT.sub}>Maintenance</Text><Text style={[FONT.mono, { color: C.red }]}>−{inr(h.maint)}</Text>
+              </Row>
+              <Row style={{ justifyContent: 'space-between', paddingVertical: 4 }}>
+                <Text style={FONT.sub}>Tolls</Text><Text style={[FONT.mono, { color: C.red }]}>−{inr(h.tolls)}</Text>
+              </Row>
+              {h.customs ? (
+                <Row style={{ justifyContent: 'space-between', paddingVertical: 4 }}>
+                  <Text style={FONT.sub}>Customs (borders)</Text><Text style={[FONT.mono, { color: C.red }]}>−{inr(h.customs)}</Text>
+                </Row>
+              ) : null}
+              <Row style={{ justifyContent: 'space-between', paddingVertical: 6, borderTopWidth: 1, borderTopColor: C.border, marginTop: 2 }}>
+                <Text style={[FONT.body, { fontWeight: '800' }]}>Net profit</Text>
+                <Text style={[FONT.mono, { fontWeight: '800', color: h.net >= 0 ? C.green : C.red }]}>{inr(h.net)}</Text>
+              </Row>
+              <Text style={[FONT.tiny, { marginTop: 4 }]}>Cost per km: ₹{h.km ? (costs / h.km).toFixed(1) : '—'} · margin {h.gross ? Math.round((h.net / h.gross) * 100) : 0}%</Text>
+            </>
+          ) : (
+            <Text style={FONT.tiny}>Older trip — full expense breakdown is recorded for every new delivery from v3.1.0.</Text>
+          )}
+        </View>
+      )}
+    </Card>
+  );
+}
+
 export function RoutesTab({ onTrack, onNewDelivery }) {
   const deliveries = useGame(s => s.deliveries);
   const history = useGame(s => s.history);
   const trucks = useGame(s => s.trucks);
+  const stats = useGame(s => s.stats);
   const now = useNow(deliveries.length > 0);
+  const [view, setView] = useState('running'); // running | history | insights
   const [sort, setSort] = useState('eta');
   const [histSort, setHistSort] = useState('recent');
+  const [histPage, setHistPage] = useState(1);
+  const [openId, setOpenId] = useState(null);
 
   const sortedDeliveries = useMemo(() => {
     const arr = [...deliveries];
@@ -274,86 +387,164 @@ export function RoutesTab({ onTrack, onNewDelivery }) {
     return arr;
   }, [history, histSort]);
 
+  // Network insights across recorded history.
+  const insights = useMemo(() => {
+    if (!history.length) return null;
+    const totalNet = history.reduce((a, h) => a + h.net, 0);
+    const totalKm = history.reduce((a, h) => a + h.km, 0);
+    const best = [...history].sort((a, b) => b.net - a.net)[0];
+    const longest = [...history].sort((a, b) => b.km - a.km)[0];
+    const byDriver = new Map();
+    for (const h of history) { if (h.driver) { const g = byDriver.get(h.driver) || { net: 0, trips: 0 }; g.net += h.net; g.trips++; byDriver.set(h.driver, g); } }
+    const topDriver = [...byDriver.entries()].sort((a, b) => b[1].net - a[1].net)[0];
+    const ferries = history.filter(h => h.ferry).length;
+    return { totalNet, totalKm, best, longest, topDriver, ferries };
+  }, [history]);
+
+  const liveNet = deliveries.reduce((a, d) => a + d.econ.net, 0);
+  const shownHist = sortedHistory.slice(0, histPage * 10);
+
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
-      <SectionTitle icon="routes" text="Active Deliveries" />
-      {deliveries.length > 0 && (
-        <FilterChips options={ROUTE_SORTS.map(o => ({ key: o.key, label: `Sort: ${o.label}` }))} value={sort} onChange={setSort} />
-      )}
-      {deliveries.length === 0 ? (
-        <EmptyState
-          icon="truck-outline"
-          title="No active deliveries"
-          sub="Dispatch a parked truck to start earning."
-          action={<Btn title="New Delivery" icon="plus" small onPress={() => onNewDelivery && onNewDelivery()} />}
-        />
-      ) : sortedDeliveries.map(d => {
-        const truck = trucks.find(t => t.id === d.truckId);
-        const model = truck ? modelById(truck.modelId) : null;
-        const from = cityById(d.fromCityId);
-        const to = cityById(d.toCityId);
-        const pct = clampPct(((now - d.startedAt) / (d.endsAt - d.startedAt)) * 100);
-        return (
-          <Card key={d.id} style={{ marginBottom: 10 }}>
-            <Row style={{ justifyContent: 'space-between' }}>
-              <View style={{ flex: 1, marginRight: 8 }}>
-                <Text style={FONT.h3} numberOfLines={1}>{model ? model.name : 'Truck'}</Text>
-                <Row style={{ marginTop: 3 }}>
-                  <Text style={FONT.sub}>{from ? from.name : '?'}</Text>
-                  <Icon name="arrow-right" size={13} color={C.faint} style={{ marginHorizontal: 5 }} />
-                  <Text style={FONT.sub}>{to ? to.name : '?'}</Text>
-                </Row>
-              </View>
-              <Btn title="Track" icon="crosshairs-gps" kind="soft" small onPress={() => onTrack && onTrack(d)} />
+      {/* ---- Command-center hero ---- */}
+      <Card style={{ marginBottom: 12, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
+        <Row style={{ justifyContent: 'space-between' }}>
+          <View>
+            <Text style={[FONT.tiny, { color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 1 }]}>Routes Command Center</Text>
+            <Row style={{ alignItems: 'flex-end', marginTop: 2 }}>
+              <Text style={[FONT.h1, { color: '#F8FAFC' }]}>{deliveries.length}</Text>
+              <Text style={[FONT.tiny, { color: '#94A3B8', marginLeft: 6, marginBottom: 5 }]}>truck{deliveries.length === 1 ? '' : 's'} on the road</Text>
             </Row>
-            <Row style={{ justifyContent: 'space-between', marginTop: 10 }}>
-              <Row>
-                <Icon name="map-marker-distance" size={13} color={C.sub} />
-                <Text style={[FONT.tiny, { marginLeft: 4 }]}>{d.route.roadKm} km</Text>
-              </Row>
-              <Row>
-                <Icon name="timer-outline" size={13} color={C.sub} />
-                <Text style={[FONT.mono, { marginLeft: 4, fontSize: 12 }]}>{mmss(d.endsAt - now)}</Text>
-              </Row>
-              <Text style={[FONT.mono, { fontSize: 12, color: C.green, fontWeight: '700' }]}>{inr(d.econ.net)}</Text>
-            </Row>
-            <Progress pct={pct} color={C.green} style={{ marginTop: 8 }} />
-          </Card>
-        );
-      })}
+          </View>
+          <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: '#1E293B', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="routes" size={24} color="#5B8DF0" />
+          </View>
+        </Row>
+        <Row style={{ marginTop: 10, backgroundColor: '#1E293B', borderRadius: RADIUS.md, paddingVertical: 8, justifyContent: 'space-around' }}>
+          <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800', color: '#4ADE80' }]}>{inrShort(liveNet)}</Text><Text style={[FONT.tiny, { color: '#64748B' }]}>incoming</Text></View>
+          <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800', color: '#F8FAFC' }]}>{stats.deliveries}</Text><Text style={[FONT.tiny, { color: '#64748B' }]}>lifetime trips</Text></View>
+          <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800', color: '#F8FAFC' }]}>{Math.round(stats.km).toLocaleString('en-IN')}</Text><Text style={[FONT.tiny, { color: '#64748B' }]}>km driven</Text></View>
+        </Row>
+      </Card>
 
-      <SectionTitle icon="history" text="Recent Deliveries" />
-      {history.length > 0 && (
-        <FilterChips
-          options={[
-            { key: 'recent', label: 'Sort: Recent' },
-            { key: 'profit', label: 'Sort: Profit' },
-            { key: 'distance', label: 'Sort: Distance' },
-          ]}
-          value={histSort} onChange={setHistSort}
-        />
-      )}
-      {history.length === 0 ? (
-        <Text style={[FONT.sub, { textAlign: 'center', paddingVertical: 16 }]}>Completed deliveries will appear here.</Text>
-      ) : sortedHistory.map(h => {
-        const from = cityById(h.fromCityId);
-        const to = cityById(h.toCityId);
-        return (
-          <Card key={h.id} style={{ marginBottom: 8, padding: 12 }}>
-            <Row style={{ justifyContent: 'space-between' }}>
-              <View style={{ flex: 1, marginRight: 8 }}>
-                <Row>
-                  <Text style={FONT.body} numberOfLines={1}>{from ? from.name : '?'}</Text>
-                  <Icon name="arrow-right" size={12} color={C.faint} style={{ marginHorizontal: 4 }} />
-                  <Text style={FONT.body} numberOfLines={1}>{to ? to.name : '?'}</Text>
+      {/* ---- View switch ---- */}
+      <FilterChips
+        options={[
+          { key: 'running', label: 'Running', count: deliveries.length },
+          { key: 'history', label: 'History', count: history.length },
+          { key: 'insights', label: 'Insights' },
+        ]}
+        value={view} onChange={setView}
+      />
+
+      {view === 'running' && (
+        <>
+          {deliveries.length > 1 && (
+            <FilterChips options={ROUTE_SORTS.map(o => ({ key: o.key, label: `Sort: ${o.label}` }))} value={sort} onChange={setSort} />
+          )}
+          {deliveries.length === 0 ? (
+            <EmptyState
+              icon="truck-outline"
+              title="No active deliveries"
+              sub="Dispatch a parked truck to start earning."
+              action={<Btn title="New Delivery" icon="plus" small onPress={() => onNewDelivery && onNewDelivery()} />}
+            />
+          ) : sortedDeliveries.map(d => {
+            const truck = trucks.find(t => t.id === d.truckId);
+            const model = truck ? modelById(truck.modelId) : null;
+            const from = cityById(d.fromCityId);
+            const to = cityById(d.toCityId);
+            const pct = clampPct(((now - d.startedAt) / (d.endsAt - d.startedAt)) * 100);
+            return (
+              <Card key={d.id} style={{ marginBottom: 10 }}>
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={FONT.h3} numberOfLines={1}>{truck?.customName || (model ? model.name : 'Truck')}</Text>
+                    <Row style={{ marginTop: 3 }}>
+                      <Text style={FONT.sub}>{from ? from.name : '?'}</Text>
+                      <Icon name="arrow-right" size={13} color={C.faint} style={{ marginHorizontal: 5 }} />
+                      <Text style={FONT.sub}>{to ? to.name : '?'}</Text>
+                    </Row>
+                  </View>
+                  <Btn title="Track" icon="crosshairs-gps" kind="soft" small onPress={() => onTrack && onTrack(d)} />
                 </Row>
-                <Text style={FONT.tiny}>{h.km} km · {relTime(h.ts)}</Text>
-              </View>
-              <Text style={[FONT.mono, { fontWeight: '700', color: h.net >= 0 ? C.green : C.red }]}>{inr(h.net)}</Text>
+                <Row style={{ justifyContent: 'space-between', marginTop: 10 }}>
+                  <Row>
+                    <Icon name="map-marker-distance" size={13} color={C.sub} />
+                    <Text style={[FONT.tiny, { marginLeft: 4 }]}>{d.route.roadKm} km</Text>
+                  </Row>
+                  <Row>
+                    <Icon name="timer-outline" size={13} color={C.sub} />
+                    <Text style={[FONT.mono, { marginLeft: 4, fontSize: 12 }]}>{mmss(d.endsAt - now)}</Text>
+                  </Row>
+                  <Text style={[FONT.mono, { fontSize: 12, color: C.green, fontWeight: '700' }]}>{inr(d.econ.net)}</Text>
+                </Row>
+                <Progress pct={pct} color={C.green} style={{ marginTop: 8 }} />
+              </Card>
+            );
+          })}
+        </>
+      )}
+
+      {view === 'history' && (
+        <>
+          {history.length > 1 && (
+            <FilterChips
+              options={[
+                { key: 'recent', label: 'Sort: Recent' },
+                { key: 'profit', label: 'Sort: Profit' },
+                { key: 'distance', label: 'Sort: Distance' },
+              ]}
+              value={histSort} onChange={setHistSort}
+            />
+          )}
+          {history.length === 0 ? (
+            <EmptyState icon="history" title="No trips yet" sub="Completed deliveries land here with the full story — driver, cargo, every rupee." />
+          ) : (
+            <>
+              {shownHist.map(h => (
+                <HistoryEntry key={h.id} h={h} expanded={openId === h.id}
+                  onToggle={() => setOpenId(openId === h.id ? null : h.id)} />
+              ))}
+              <LoadMore shown={shownHist.length} total={sortedHistory.length} onMore={() => setHistPage(pg => pg + 1)} />
+            </>
+          )}
+        </>
+      )}
+
+      {view === 'insights' && (
+        insights ? (
+          <>
+            <Row style={{ marginBottom: 8 }}>
+              <Stat icon="cash-check" label="History net" value={inrShort(insights.totalNet)} color={insights.totalNet >= 0 ? C.green : C.red} sub={`across last ${history.length} trips`} />
+              <View style={{ width: 8 }} />
+              <Stat icon="map-marker-distance" label="History km" value={`${Math.round(insights.totalKm).toLocaleString('en-IN')}`} />
             </Row>
-          </Card>
-        );
-      })}
+            <SectionTitle icon="trophy-outline" text="Records" />
+            <Card style={{ marginBottom: 12 }}>
+              <Row style={{ justifyContent: 'space-between', paddingVertical: 7 }}>
+                <Row style={{ flex: 1 }}><Icon name="cash-plus" size={17} color={C.gold} /><Text style={[FONT.body, { marginLeft: 8, flex: 1 }]}>Most profitable trip</Text></Row>
+                <Text style={[FONT.tiny, { fontWeight: '700' }]}>{cityById(insights.best.toCityId)?.name} · {inrShort(insights.best.net)}</Text>
+              </Row>
+              <Row style={{ justifyContent: 'space-between', paddingVertical: 7, borderTopWidth: 1, borderTopColor: C.border }}>
+                <Row style={{ flex: 1 }}><Icon name="highway" size={17} color={C.blue} /><Text style={[FONT.body, { marginLeft: 8, flex: 1 }]}>Longest haul</Text></Row>
+                <Text style={[FONT.tiny, { fontWeight: '700' }]}>{insights.longest.km} km · {cityById(insights.longest.toCityId)?.name}</Text>
+              </Row>
+              {insights.topDriver ? (
+                <Row style={{ justifyContent: 'space-between', paddingVertical: 7, borderTopWidth: 1, borderTopColor: C.border }}>
+                  <Row style={{ flex: 1 }}><Icon name="account-star" size={17} color={C.green} /><Text style={[FONT.body, { marginLeft: 8, flex: 1 }]}>Top earning driver</Text></Row>
+                  <Text style={[FONT.tiny, { fontWeight: '700' }]}>{insights.topDriver[0]} · {inrShort(insights.topDriver[1].net)} in {insights.topDriver[1].trips} trips</Text>
+                </Row>
+              ) : null}
+              <Row style={{ justifyContent: 'space-between', paddingVertical: 7, borderTopWidth: 1, borderTopColor: C.border }}>
+                <Row style={{ flex: 1 }}><Icon name="ferry" size={17} color={C.blue} /><Text style={[FONT.body, { marginLeft: 8, flex: 1 }]}>Sea crossings</Text></Row>
+                <Text style={[FONT.tiny, { fontWeight: '700' }]}>{insights.ferries} of last {history.length} trips</Text>
+              </Row>
+            </Card>
+            <Text style={[FONT.tiny, { textAlign: 'center' }]}>Insights cover the last {history.length} recorded trips.</Text>
+          </>
+        ) : <EmptyState icon="chart-line" title="No data yet" sub="Complete a few deliveries and the analytics light up." />
+      )}
     </ScrollView>
   );
 }
@@ -591,18 +782,44 @@ export function StaffTab({ onOpenDriver }) {
   // dedicated Hire screen you switch into with the header button.
   const [screen, setScreen] = useState('mine'); // 'mine' | 'hire'
 
+  // Hero metrics: crew health at a glance.
+  const avgSkill = staff.length ? Math.round(staff.reduce((a, x) => a + (x.skill || 0), 0) / staff.length) : 0;
+  const bestDriver = [...staff].filter(x => x.role === 'driver').sort((a, b) => (b.xp || 0) - (a.xp || 0))[0];
+  const busy = staff.filter(x => x.truckId && trucks.find(t => t.id === x.truckId && t.status === 'delivering')).length;
+
   if (screen === 'mine') {
     return (
       <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
-        <Row style={{ justifyContent: 'space-between', marginBottom: 12 }}>
-          <Text style={FONT.h2}>My Staff</Text>
-          <Btn title="Hire Staff" icon="account-plus" small onPress={() => setScreen('hire')} />
-        </Row>
-        <Row style={{ marginBottom: 8 }}>
-          <Stat icon="account-group" label="Team" value={String(staff.length)} />
-          <View style={{ width: 8 }} />
-          <Stat icon="cash-clock" label="Salaries / mo" value={inrShort(counts.salary)} color={C.amber} />
-        </Row>
+        {/* Crew HQ hero — same dark command style as the other tabs */}
+        <Card style={{ marginBottom: 12, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <View>
+              <Text style={[FONT.tiny, { color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 1 }]}>Crew Command</Text>
+              <Row style={{ alignItems: 'flex-end', marginTop: 2 }}>
+                <Text style={[FONT.h1, { color: '#F8FAFC' }]}>{staff.length}</Text>
+                <Text style={[FONT.tiny, { color: '#94A3B8', marginLeft: 6, marginBottom: 5 }]}>on payroll · {busy} out driving now</Text>
+              </Row>
+            </View>
+            <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: '#1E293B', alignItems: 'center', justifyContent: 'center' }}>
+              <Icon name="account-group" size={24} color="#5B8DF0" />
+            </View>
+          </Row>
+          <Row style={{ marginTop: 10, backgroundColor: '#1E293B', borderRadius: RADIUS.md, paddingVertical: 8, justifyContent: 'space-around' }}>
+            <View style={{ alignItems: 'center' }}>
+              <Text style={[FONT.body, { fontWeight: '800', color: '#F4D35E' }]}>{inrShort(counts.salary)}</Text>
+              <Text style={[FONT.tiny, { color: '#64748B' }]}>salaries / mo</Text>
+            </View>
+            <View style={{ alignItems: 'center' }}>
+              <Text style={[FONT.body, { fontWeight: '800', color: avgSkill >= 60 ? '#4ADE80' : '#F8FAFC' }]}>{avgSkill}</Text>
+              <Text style={[FONT.tiny, { color: '#64748B' }]}>avg skill</Text>
+            </View>
+            <View style={{ alignItems: 'center' }}>
+              <Text style={[FONT.body, { fontWeight: '800', color: '#F8FAFC' }]} numberOfLines={1}>{bestDriver ? `${bestDriver.name.split(' ')[0]} Lv${driverLevel(bestDriver.xp)}` : '—'}</Text>
+              <Text style={[FONT.tiny, { color: '#64748B' }]}>top driver</Text>
+            </View>
+          </Row>
+          <Btn title="Hire Staff" icon="account-plus" kind="blue" small style={{ marginTop: 10 }} onPress={() => setScreen('hire')} />
+        </Card>
         <FilterChips options={roleOpts} value={role} onChange={setRole} />
         {staff.length === 0 ? (
           <EmptyState icon="account-group-outline" title="No staff yet" sub="Hire drivers and mechanics to grow your team."
@@ -1130,7 +1347,7 @@ export function EconomyTab() {
             })}
           </Row>
           <Text style={[FONT.tiny, { marginTop: 8, textAlign: 'center' }]}>
-            {barSel != null ? `${cityById(bars[barSel].fromCityId)?.name || '?'} → ${cityById(bars[barSel].toCityId)?.name || '?'} · ${bars[barSel].km} km · ${relTime(bars[barSel].ts)}` : `Last ${bars.length} deliveries — tap a bar for details`}
+            {barSel != null ? `${cityById(bars[barSel].fromCityId)?.name || '?'} → ${cityById(bars[barSel].toCityId)?.name || '?'} · ${bars[barSel].km} km · profit ${inrShort(bars[barSel].net)} · ${relTime(bars[barSel].ts)}` : `Last ${bars.length} deliveries — tap a bar for details`}
           </Text>
         </Card>
       )}

@@ -264,6 +264,22 @@ export function fuelFactorForDay(day) {
   return 0.85 + (h % 41) / 100;
 }
 
+// ---------- Daily showroom deals ----------
+// A rotating set of trucks goes on sale every game day — deterministic from
+// the day hash so every player (and every restart) sees the same deals.
+// Returns 0 or the discount fraction (0.10–0.25) for a model today.
+export function truckDealFor(modelId, day) {
+  let h = ((day + 3) * 2654435761) >>> 0;
+  for (let i = 0; i < modelId.length; i++) h = ((h * 31 + modelId.charCodeAt(i)) >>> 0);
+  h = (h ^ (h >>> 13)) >>> 0;
+  if (h % 100 < 18) return (10 + (h >>> 8) % 16) / 100; // ~18% of models: 10–25% off
+  return 0;
+}
+export function dealPriceFor(model, day) {
+  const d = truckDealFor(model.id, day);
+  return d ? Math.round((model.price * (1 - d)) / 10000) * 10000 : model.price;
+}
+
 // ---------- Driver XP, levels & perks ----------
 // Drivers earn XP per delivery (distance-weighted). Levels unlock permanent
 // perks that plug straight into the delivery economics and incident rolls.
@@ -333,12 +349,15 @@ export function generateWeather(day) {
       id: `w-${day}-${idx}`, kind, name: r.name, lat: r.lat, lng: r.lng,
       radiusKm: 130 + ((h >>> (i + 4)) % 130), day,
       shape: {
-        a1: 0.18 + ((h >>> (i + 7)) % 25) / 100,               // 0.18–0.42 amplitude
+        a1: 0.28 + ((h >>> (i + 7)) % 27) / 100,               // 0.28–0.54: big asymmetric lobes
         p1: (((h >>> (i + 11)) % 360) * Math.PI) / 180,
         k1: 2 + ((h >>> (i + 3)) % 2),                          // 2–3 lobes
-        a2: 0.08 + ((h >>> (i + 13)) % 18) / 100,               // fine ripple
+        a2: 0.12 + ((h >>> (i + 13)) % 16) / 100,               // mid ripple
         p2: (((h >>> (i + 17)) % 360) * Math.PI) / 180,
         k2: 5 + ((h >>> (i + 5)) % 3),                          // 5–7 ripples
+        a3: 0.05 + ((h >>> (i + 19)) % 8) / 100,                // fine jagged edge
+        p3: (((h >>> (i + 23)) % 360) * Math.PI) / 180,
+        k3: 9 + ((h >>> (i + 9)) % 5),                          // 9–13 jags
       },
     });
   }
@@ -347,16 +366,25 @@ export function generateWeather(day) {
 // Boundary radius (km) of a weather blob at a given bearing from its centre.
 export function weatherRadiusAt(z, ang) {
   const sh = z.shape;
-  if (!sh) return z.radiusKm; // old saves: plain circle
-  return z.radiusKm * (1 + sh.a1 * Math.sin(sh.k1 * ang + sh.p1) + sh.a2 * Math.sin(sh.k2 * ang + sh.p2));
+  if (!sh) return z.radiusKm; // old saves: plain circle (regenerated on load anyway)
+  return z.radiusKm * Math.max(0.3,
+    1 + sh.a1 * Math.sin(sh.k1 * ang + sh.p1)
+      + sh.a2 * Math.sin(sh.k2 * ang + sh.p2)
+      + (sh.a3 || 0) * Math.sin((sh.k3 || 11) * ang + (sh.p3 || 0)));
 }
 // Blob outline as lat/lng points (for drawing on the map).
-export function weatherPolygon(z, n = 48) {
+export function weatherPolygon(z, n = 64) {
   const out = [];
   const kLat = 111, kLng = 111 * Math.cos((z.lat * Math.PI) / 180);
+  // Deterministic per-vertex jitter (hash of zone id + vertex index): breaks
+  // the smooth sine curve into an irregular hand-drawn border like a real
+  // state boundary. Same seed every render, so the outline never wobbles.
+  let zh = 0; for (let c = 0; c < z.id.length; c++) zh = (zh * 31 + z.id.charCodeAt(c)) >>> 0;
   for (let i = 0; i <= n; i++) {
     const ang = (i / n) * 2 * Math.PI;
-    const r = weatherRadiusAt(z, ang);
+    const wrap = i % n; // last vertex must equal the first — closed border
+    const jit = 1 + ((((zh >>> (wrap % 20)) + wrap * 2654435761) >>> 0) % 17 - 8) / 100; // ±8%
+    const r = weatherRadiusAt(z, ang) * jit;
     out.push({ lat: z.lat + (r / kLat) * Math.sin(ang), lng: z.lng + (r / kLng) * Math.cos(ang) });
   }
   return out;
@@ -482,7 +510,7 @@ export const streakRewardFor = streak =>
 // reward. `hint` stays vague and is all the player sees until it's found;
 // `where` is only shown after discovery, for the Settings checklist.
 export const EASTER_EGGS = [
-  { id: 'hq_home', title: 'Home Sweet Home', hint: 'Somewhere on the map, home is where the heart is...', where: 'Tap the HQ (home) button on the map 5 times fast.' },
+  { id: 'hq_home', title: 'Home Sweet Home', hint: 'Somewhere on the map, home is where the heart is...', where: 'Open your HQ on the map and tap the building icon in its modal 5 times fast.' },
   { id: 'kalavad_roots', title: 'Gujarat Roots', hint: 'A small town holds a big secret.', where: 'Search "Kalavad" in New Delivery and tap the result 3 times fast.' },
   { id: 'mirror_mirror', title: 'Mirror Mirror', hint: 'Vanity has its rewards.', where: 'Tap your own CEO avatar in Settings → Profile 5 times fast.' },
   { id: 'branded', title: 'Branded', hint: 'Your logo is worth more than you think.', where: 'Tap your own company logo in Settings → Company 4 times fast.' },
@@ -903,7 +931,7 @@ export const useGame = create(
         // Weather: fresh zones each game day, only in plausible regions. New
         // weather is NOT just visual — any truck already driving through a
         // fresh zone gets its remaining trip slowed by that zone's factor.
-        if ((s.weatherDay || 0) !== day) {
+        if ((s.weatherDay || 0) !== day || (s.weather || []).some(z => !z.shape || !z.shape.a3)) {
           const zones = generateWeather(day);
           const nowW = Date.now();
           const slowed = [];
@@ -1177,7 +1205,11 @@ export const useGame = create(
       buyTruck(modelId) {
         const s = get();
         const model = modelById(modelId);
-        if (!model || s.balance < model.price) return { ok: false, err: 'Insufficient funds' };
+        if (!model) return { ok: false, err: 'Unknown model' };
+        // Daily showroom deal: today's discounted price is the real price.
+        const day = get().gameDay().day;
+        const price = dealPriceFor(model, day);
+        if (s.balance < price) return { ok: false, err: 'Insufficient funds' };
         const hq = cityById(s.company.hqCityId);
         const truck = {
           id: uid('t'), modelId, status: 'building',
@@ -1185,8 +1217,8 @@ export const useGame = create(
           buildEndsAt: Date.now() + model.build * 1000, buildTotalSec: model.build,
           km: 0, deliveries: 0, driverId: null, condition: 100,
         };
-        set({ balance: s.balance - model.price, trucks: [...s.trucks, truck] });
-        get().logLedger('truck', 'truck', `Bought ${model.name}`, -model.price);
+        set({ balance: s.balance - price, trucks: [...s.trucks, truck] });
+        get().logLedger('truck', 'truck', `Bought ${model.name}${price < model.price ? ' (deal!)' : ''}`, -price);
         get().notify('truck', 'factory', `${model.name} ordered — building at HQ (${model.build}s).`);
         {
           const hqCity = cityById(s.company?.hqCityId);
@@ -1562,10 +1594,16 @@ export const useGame = create(
         }
         const drivingHours = t ? d.route.roadKm / modelById(t.modelId).speed : 0;
         const sleepH = (d.sleepBreaks || 0) * 2;
+        const drvName = (t && s.staff.find(m => m.id === t.driverId)?.name) || null;
         const logEntry = {
           id: d.id, fromCityId: d.fromCityId, toCityId: d.toCityId,
           km: d.route.roadKm, net: d.econ.net, gross: d.econ.gross, ts: Date.now(),
           hours: Math.round(drivingHours * 10) / 10,
+          // Full trip insight (v3.1.0): who drove, what it cost, line by line.
+          driver: drvName, cargoType: d.cargoType, cargoTons: d.cargoTons,
+          fuel: d.econ.fuel || 0, maint: d.econ.maint || 0, tolls: d.econ.tolls || 0,
+          customs: d.econ.customs || 0, reward,
+          ferry: !!(d.route.ferrySegments || []).length || !!d.route.ferrySegment,
         };
         // Occasional client gold tip on a finished delivery (~1 in 7).
         const goldTip = Math.random() < 0.15 ? 2 + Math.floor(Math.random() * 4) : 0;
@@ -1593,7 +1631,7 @@ export const useGame = create(
           } : m),
           history: [{
             ...logEntry, truckName: t ? modelById(t.modelId).name : '',
-          }, ...s.history].slice(0, 30),
+          }, ...s.history].slice(0, 60),
           stats: {
             ...s.stats,
             revenue: s.stats.revenue + d.econ.gross + reward,
