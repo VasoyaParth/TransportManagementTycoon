@@ -6,7 +6,7 @@ import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-nati
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import LeafletMap from './LeafletMap';
 import { C, FONT } from './theme';
-import { BootSplash } from './screens/Splash';
+import { BrandEmblem } from './BrandLogo';
 
 // Cloud-only: the satellite (Leaflet) map is the ONLY map. No local SVG India
 // fallback — if there is no connection we show a retry prompt instead.
@@ -29,11 +29,11 @@ export default function MapContainer(props) {
       )}
 
       {mode === 'loading' && (
-        // Same navy splash (logo + rotating one-liners + Made in India) that
-        // covered app boot — so from icon-tap to playable map the player sees
-        // ONE continuous splash screen, never a separate "loading map" page.
-        <View style={StyleSheet.absoluteFill}>
-          <BootSplash />
+        // Static pixel-match of the NATIVE launch screen (navy + centered
+        // logo, nothing else) — from icon-tap to playable map the player sees
+        // what reads as one single native splash.
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: '#0F1D30', alignItems: 'center', justifyContent: 'center' }]}>
+          <BrandEmblem size={128} />
         </View>
       )}
 
