@@ -327,10 +327,12 @@ const st = StyleSheet.create({
     position: 'absolute', top: 10, left: 10, right: 10, flexDirection: 'row', alignItems: 'center',
     paddingLeft: 14, paddingRight: 4, paddingVertical: 6,
     backgroundColor: 'rgba(255,255,255,0.88)', borderRadius: 26,
-    // No border here on purpose — a solid near-white 1px border against this
-    // background read as a stray bold horizontal line across the pill. The
-    // shadow alone gives it enough definition against the map.
-    shadowColor: '#0B0F14', shadowOpacity: 0.16, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 8,
+    // No border AND no Android elevation on purpose — both a solid near-white
+    // border and Android's elevation shadow (rendered against this
+    // translucent background) were showing up as a thin stray line across
+    // the pill. iOS shadow props are harmless no-ops on Android, so iOS still
+    // gets a soft shadow; Android renders perfectly flat with zero artifacts.
+    shadowColor: '#0B0F14', shadowOpacity: 0.16, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 0,
   },
   // Right-side vertical action stack (garage / contracts / power-ups).
   actionStack: { position: 'absolute', top: 76, right: 12, gap: 8 },
