@@ -11,7 +11,7 @@ import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-sv
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider } from '../components';
 import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds, stockYearReturn, stockReturnOverDays, STOCK_TIMEFRAMES,
-  liveStockPrice, isMarketOpen, fakeTradeFor, STARTUP_SOUNDS, stockFundamentals } from '../../store/gameStore';
+  liveStockPrice, isMarketOpen, fakeTradeFor, stockFundamentals } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
@@ -2779,23 +2779,6 @@ export function SettingsModal({ visible, onClose, initialTab }) {
               </Row>
               <GameSlider min={0} max={100} step={5} value={Math.round((settings.sfxVolume ?? 1) * 100)}
                 onChange={v => saveSettings({ sfxVolume: v / 100 })} minLabel="0%" maxLabel="100%" />
-              <Text style={[FONT.tiny, { marginTop: 14, marginBottom: 6 }]}>STARTUP SOUND — plays once each time you open the game</Text>
-              <Row style={{ gap: 6, flexWrap: 'wrap' }}>
-                {STARTUP_SOUNDS.map(o => (
-                  <Chip key={o.key} label={o.label} active={(settings.startupSound || 'start') === o.key}
-                    onPress={() => { saveSettings({ startupSound: o.key }); if (o.key !== 'off') play(o.key, settings.startupVolume ?? 0.7); }} />
-                ))}
-              </Row>
-              {(settings.startupSound || 'start') !== 'off' ? (
-                <>
-                  <Row style={{ justifyContent: 'space-between', marginTop: 10 }}>
-                    <Text style={FONT.tiny}>STARTUP VOLUME</Text>
-                    <Text style={[FONT.tiny, { fontWeight: '800', color: C.blue }]}>{Math.round((settings.startupVolume ?? 0.7) * 100)}%</Text>
-                  </Row>
-                  <GameSlider min={0} max={100} step={5} value={Math.round((settings.startupVolume ?? 0.7) * 100)}
-                    onChange={v => saveSettings({ startupVolume: v / 100 })} minLabel="0%" maxLabel="100%" />
-                </>
-              ) : null}
             </Card>
             <SectionTitle icon="vibrate" text="Vibration" />
             <Card>

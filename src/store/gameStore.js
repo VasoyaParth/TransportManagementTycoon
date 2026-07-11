@@ -407,14 +407,6 @@ export function dealPriceFor(model, day) {
 // ---------- Driver XP, levels & perks ----------
 // Drivers earn XP per delivery (distance-weighted). Levels unlock permanent
 // perks that plug straight into the delivery economics and incident rolls.
-// Startup sound choices — all reuse SFX already bundled with the app (no new
-// audio assets needed), just picked out as a dedicated "welcome" moment.
-export const STARTUP_SOUNDS = [
-  { key: 'off', label: 'Off', icon: 'volume-off' },
-  { key: 'start', label: 'Engine Start', icon: 'engine' },
-  { key: 'coin', label: 'Coin Chime', icon: 'gold' },
-  { key: 'success', label: 'Success Ding', icon: 'check-decagram' },
-];
 
 export const DRIVER_PERKS = [
   { level: 2, id: 'fuel_saver', name: 'Fuel Saver', icon: 'gas-station-outline', desc: '−5% fuel cost on every trip' },
@@ -858,7 +850,6 @@ const initialState = {
     speed: 1, autosave: true, sound: true, haptics: true, showStations: true, showPorts: true,
     difficulty: 'normal', events: 'rare', tutorialSeen: false,
     musicVolume: 0.4, sfxVolume: 1, hapticIntensity: 'medium',
-    startupSound: 'start', startupVolume: 0.7, // played once each time the game opens
     finaleSeen: false, finaleModalShown: false, // Grand Finale gift + celebration screen, each one-time-ever
     notif: { delivery: true, truck: true, fuel: true, daily: true },
   },
@@ -1259,11 +1250,19 @@ export const useGame = create(
             if (s.weekly) get().notify('system', 'calendar-week', 'New weekly challenges are live — big bonus for a clean sweep!');
           }
         }
+        // Stock market backfill: any save started BEFORE the Stock Market
+        // existed (only createCompany seeds `stocks` for brand-new
+        // companies) would otherwise have an empty listing forever — the
+        // market sheet would show nothing but the IPO button. One-time,
+        // cheap (a few ms even at 1,500 companies).
+        if (!(s.stocks || []).length) {
+          set({ stocks: generateStockPool(1500) });
+        }
         // Stock market: once per game day, every listed company takes one
         // random-walk price step (see stockDailyStep) — cheap since it only
         // runs on day rollover, not every tick, even with a large listing.
-        if (day > (s.lastStockDay || 0) && (s.stocks || []).length) {
-          const updated = s.stocks.map(st => stockDailyStep(st, day));
+        if (day > (s.lastStockDay || 0) && (get().stocks || []).length) {
+          const updated = get().stocks.map(st => stockDailyStep(st, day));
           set({ stocks: updated, lastStockDay: day });
         }
         // fresh contracts each day + flavor event

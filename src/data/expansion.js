@@ -2344,30 +2344,37 @@ export const INTL_EDGES = [
 
 // ---- Auto-connect ----------------------------------------------------------
 // Any city not hand-wired above gets a road to its nearest same-country
-// neighbour that's already on the network (nearest-first so chains form
-// naturally). Keeps hundreds of new map points routable without hundreds of
-// hand-written edges. Runs once at module load.
+// neighbour that's already on the network. Keeps hundreds of new map points
+// routable without hundreds of hand-written edges. Runs once at module load
+// — MUST stay near-linear: this used to re-scan the entire pending list on
+// every single attachment (O(pending^2 x connected)), which was fine at a
+// few hundred pending cities but became a genuine multi-second-to-minutes
+// startup stall once the world expansion pushed pending into the thousands.
+// Grouping connected cities by country and processing pending once (O(pending
+// x connected-per-country)) gives the same practical result — every pending
+// city still chains off whichever same-country city is nearest, including
+// other pending cities already attached earlier in this same pass — without
+// the quadratic rescan.
 {
   const onNet = new Set();
   INTL_EDGES.forEach(e => { onNet.add(e.a); onNet.add(e.b); });
-  const pending = INTL_CITIES.filter(c => !onNet.has(c.id))
-    .map(c => ({ c, d2: Infinity }));
-  const connected = INTL_CITIES.filter(c => onNet.has(c.id));
+  const pending = INTL_CITIES.filter(c => !onNet.has(c.id));
+  const connectedByCountry = new Map();
+  for (const c of INTL_CITIES) {
+    if (!onNet.has(c.id)) continue;
+    if (!connectedByCountry.has(c.country)) connectedByCountry.set(c.country, []);
+    connectedByCountry.get(c.country).push(c);
+  }
   const dist2 = (a, b) => (a.lat - b.lat) ** 2 + (a.lng - b.lng) ** 2;
-  // Repeatedly attach the pending city closest to the connected set.
-  while (pending.length) {
-    let bestI = -1, bestD = Infinity, bestTo = null;
-    for (let i = 0; i < pending.length; i++) {
-      const { c } = pending[i];
-      for (const o of connected) {
-        if (o.country !== c.country) continue;
-        const d = dist2(c, o);
-        if (d < bestD) { bestD = d; bestI = i; bestTo = o; }
-      }
+  for (const c of pending) {
+    const pool = connectedByCountry.get(c.country);
+    if (!pool || !pool.length) continue; // country with no connected seed — leave unrouted
+    let bestD = Infinity, bestTo = null;
+    for (const o of pool) {
+      const d = dist2(c, o);
+      if (d < bestD) { bestD = d; bestTo = o; }
     }
-    if (bestI < 0) break; // country with no connected seed — leave unrouted
-    const { c } = pending.splice(bestI, 1)[0];
     INTL_EDGES.push(road(c.id, bestTo.id));
-    connected.push(c);
+    pool.push(c); // later pending cities in this same country can now chain off it too
   }
 }

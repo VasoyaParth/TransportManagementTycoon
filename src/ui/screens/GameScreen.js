@@ -15,7 +15,6 @@ import {
   CompanyInsightsModal, NewsModal, PhotoModeModal, StockMarketModal, FinaleModal,
 } from './modals';
 import { haptic } from '../../engine/haptics';
-import { play } from '../../engine/sound';
 import Tutorial from './Tutorial';
 import { checkForUpdate } from '../../net/updates';
 
@@ -130,15 +129,6 @@ export default function GameScreen() {
     return () => { stop(); sub.remove(); };
   }, []);
 
-  // Startup sound — plays once each time the game opens (not on every tab
-  // switch or modal), picked from Settings > Sound. 'off' plays nothing.
-  useEffect(() => {
-    try {
-      const choice = settings.startupSound || 'start';
-      if (choice !== 'off') play(choice, settings.startupVolume ?? 0.7);
-    } catch (e) { /* audio unavailable — never block startup on this */ }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // surface new notifications as toasts
   const notifications = useGame(s => s.notifications);
