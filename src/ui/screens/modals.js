@@ -1,7 +1,8 @@
 // Modal flows — all rendered inside the shared <Sheet>. New delivery, truck
 // detail, buy truck, contracts, power-ups, notifications, settings.
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Switch, Animated, Easing, Linking, Share } from 'react-native';
+import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Switch, Animated, Easing, Linking, Share, Platform } from 'react-native';
+import ViewShot from 'react-native-view-shot';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider } from '../components';
@@ -3331,25 +3332,42 @@ export function HubInfoModal({ visible, onClose, cityId, onNewDelivery, onOpenTr
 // ============ Company Insights (tap the profile capsule) ============
 // The company's own page: identity, level, health scorecard and smart tips —
 // a real dashboard, not a shortcut into Settings.
-// Photo Mode — a big shareable achievement/trophy card: totals, records
-// (longest route, most profitable trip), level and title, all in one shot.
-// No image-export library in this project (would need a new native module),
-// so 'share' uses the OS Share sheet with a formatted text summary — still
-// genuinely shareable to WhatsApp/anywhere, just text instead of a PNG.
-function StatTile({ icon, label, value, color = '#F8FAFC' }) {
+// Photo Mode — a real, professional shareable "Empire Report Card" PNG.
+// Captured with react-native-view-shot (ViewShot wraps just the card, not
+// the buttons/toggle), in either a dark or light theme. Falls back to a
+// text share if capture fails for any reason (e.g. storage permission).
+const PM_THEMES = {
+  dark: {
+    bg: '#0F172A', panel: '#1B2740', border: '#26344F',
+    text: '#F8FAFC', sub: '#94A3B8', faint: '#64748B',
+    accent: '#5B8DF0', good: '#4ADE80', gold: '#F4D35E',
+  },
+  light: {
+    bg: '#FFFFFF', panel: '#F1F5F9', border: '#E2E8F0',
+    text: '#0B1220', sub: '#475569', faint: '#64748B',
+    accent: '#2563EB', good: '#16A34A', gold: '#B7791F',
+  },
+};
+function PMStatTile({ icon, label, value, color, theme }) {
   return (
-    <View style={{ width: '33.3%', alignItems: 'center', paddingVertical: 10 }}>
-      <Icon name={icon} size={20} color="#5B8DF0" />
-      <Text style={[FONT.h3, { color, marginTop: 4 }]} numberOfLines={1}>{value}</Text>
-      <Text style={[FONT.tiny, { color: '#64748B', textAlign: 'center' }]} numberOfLines={1}>{label}</Text>
+    <View style={{ width: '33.3%', alignItems: 'center', paddingVertical: 12 }}>
+      <Icon name={icon} size={20} color={theme.accent} />
+      <Text style={[FONT.h3, { color: color || theme.text, marginTop: 4, fontWeight: '800' }]} numberOfLines={1}>{value}</Text>
+      <Text style={[FONT.tiny, { color: theme.faint, textAlign: 'center', marginTop: 1 }]} numberOfLines={1}>{label}</Text>
     </View>
   );
 }
 export function PhotoModeModal({ visible, onClose }) {
+  const toast = useToast();
   const state = useGame(s => s);
-  if (!visible) return <Sheet visible={false} onClose={onClose} title="Photo Mode" height="88%"><View /></Sheet>;
+  const [mode, setMode] = useState('dark'); // 'dark' | 'light' card theme
+  const [capturing, setCapturing] = useState(false);
+  const shotRef = useRef(null);
+  useEffect(() => { if (!visible) setCapturing(false); }, [visible]);
+  if (!visible) return <Sheet visible={false} onClose={onClose} title="Photo Mode" height="90%"><View /></Sheet>;
   const company = state.company;
   if (!company) return <Sheet visible={visible} onClose={onClose} title="Photo Mode" height="40%"><View /></Sheet>;
+  const t = PM_THEMES[mode];
   const hq = cityById(company.hqCityId);
   const xp = companyXP(state);
   const level = companyLevelOf(xp);
@@ -3360,6 +3378,7 @@ export function PhotoModeModal({ visible, onClose }) {
   const gemsFound = (state.easterEggs?.found || []).length;
   const tiersUnlocked = Object.keys(state.achievements?.unlocked || {}).length;
   const totalTiers = ACHIEVEMENTS.length * 5;
+  const dateStr = new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 
   const shareText = () => {
     const lines = [
@@ -3377,65 +3396,106 @@ export function PhotoModeModal({ visible, onClose }) {
     lines.push(``, `Built in Truck Empire Tycoon`);
     return lines.join('\n');
   };
-  const doShare = () => { Share.share({ message: shareText() }).catch(() => {}); };
+
+  const doShare = async () => {
+    setCapturing(true);
+    try {
+      const uri = await shotRef.current.capture();
+      setCapturing(false);
+      await Share.share(Platform.OS === 'ios' ? { url: uri, message: shareText() } : { url: uri, message: shareText() });
+    } catch (e) {
+      setCapturing(false);
+      toast('Could not capture image — sharing as text instead.', 'warn');
+      Share.share({ message: shareText() }).catch(() => {});
+    }
+  };
 
   return (
-    <Sheet visible={visible} onClose={onClose} title="Photo Mode" height="90%">
+    <Sheet visible={visible} onClose={onClose} title="Photo Mode" height="92%">
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
-        <Card style={{ backgroundColor: '#0F172A', borderColor: '#1E293B', padding: 20 }}>
-          <View style={{ alignItems: 'center' }}>
-            <View style={[cs.heroIcon, { width: 64, height: 64, backgroundColor: '#1E293B' }]}>
-              <Icon name={company.logo || 'truck'} size={34} color="#5B8DF0" />
-            </View>
-            <Text style={[FONT.h2, { color: '#F8FAFC', marginTop: 10 }]}>{company.name}</Text>
-            <Text style={[FONT.tiny, { color: '#94A3B8', marginTop: 2 }]}>CEO {company.ceo} · HQ {hq?.name}</Text>
-            <View style={{ marginTop: 10, backgroundColor: '#1E293B', borderRadius: 20, paddingHorizontal: 14, paddingVertical: 6 }}>
-              <Text style={[FONT.body, { color: '#F4D35E', fontWeight: '800' }]}>Level {level} · {companyTitleOf(level)}</Text>
-            </View>
-            <Text style={[FONT.tiny, { color: '#64748B', marginTop: 8 }]}>Day {ageDays} of the empire</Text>
-          </View>
+        {/* Light / dark card toggle */}
+        <Row style={{ gap: 6, marginBottom: 12 }}>
+          <Chip label="Dark Card" icon="weather-night" active={mode === 'dark'} onPress={() => setMode('dark')} />
+          <Chip label="Light Card" icon="white-balance-sunny" active={mode === 'light'} onPress={() => setMode('light')} />
+        </Row>
 
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 16, borderTopWidth: 1, borderTopColor: '#1E293B', paddingTop: 6 }}>
-            <StatTile icon="map-marker-distance" label="Total KM" value={`${Math.round(state.stats.km).toLocaleString('en-IN')}`} />
-            <StatTile icon="cash-multiple" label="Lifetime Revenue" value={inrShort(state.stats.revenue)} color="#4ADE80" />
-            <StatTile icon="package-variant-closed-check" label="Deliveries" value={String(state.stats.deliveries)} />
-            <StatTile icon="truck" label="Fleet Size" value={String(state.trucks.length)} />
-            <StatTile icon="account-group" label="Staff" value={String(state.staff.length)} />
-            <StatTile icon="earth" label="Countries" value={String((state.unlockedCountries || ['IN']).length)} />
-            <StatTile icon="diamond-stone" label="Gems Found" value={String(gemsFound)} color="#F4D35E" />
-            <StatTile icon="trophy" label="Achievements" value={`${tiersUnlocked}/${totalTiers}`} color="#F4D35E" />
-            <StatTile icon="garage" label="Garages" value={String((state.hubs || []).length)} />
-          </View>
+        {/* Everything inside ViewShot is EXACTLY what gets captured as the PNG. */}
+        <ViewShot ref={shotRef} options={{ format: 'png', quality: 1, result: 'tmpfile' }}>
+          <View style={{ backgroundColor: t.bg, borderRadius: RADIUS.xl, padding: 22, borderWidth: 1, borderColor: t.border }}>
+            {/* Masthead */}
+            <Row style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+              <Row>
+                <View style={{ width: 30, height: 30, borderRadius: 8, backgroundColor: t.panel, alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name="truck-fast" size={17} color={t.accent} />
+                </View>
+                <Text style={{ marginLeft: 8, fontSize: 12, fontWeight: '800', color: t.faint, letterSpacing: 0.5 }}>TRUCK EMPIRE TYCOON</Text>
+              </Row>
+              <Text style={{ fontSize: 11, color: t.faint }}>{dateStr}</Text>
+            </Row>
 
-          {(longest || bestTrip) && (
-            <View style={{ marginTop: 8, borderTopWidth: 1, borderTopColor: '#1E293B', paddingTop: 12 }}>
-              {longest && (
-                <Row style={{ marginBottom: 8 }}>
-                  <Icon name="highway" size={16} color="#5B8DF0" />
-                  <Text style={[FONT.tiny, { color: '#94A3B8', marginLeft: 8, flex: 1 }]}>
-                    Longest haul ever: <Text style={{ color: '#F8FAFC', fontWeight: '700' }}>{cityById(longest.fromCityId)?.name} → {cityById(longest.toCityId)?.name}</Text> · {longest.km} km
-                  </Text>
-                </Row>
-              )}
-              {bestTrip && (
-                <Row>
-                  <Icon name="star-circle" size={16} color="#F4D35E" />
-                  <Text style={[FONT.tiny, { color: '#94A3B8', marginLeft: 8, flex: 1 }]}>
-                    Most profitable trip: <Text style={{ color: '#4ADE80', fontWeight: '700' }}>{cityById(bestTrip.fromCityId)?.name} → {cityById(bestTrip.toCityId)?.name}</Text> · {inr(bestTrip.net)}
-                  </Text>
-                </Row>
-              )}
+            {/* Identity */}
+            <View style={{ alignItems: 'center' }}>
+              <View style={{ width: 68, height: 68, borderRadius: 34, backgroundColor: t.panel, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: t.border }}>
+                <Icon name={company.logo || 'truck'} size={36} color={t.accent} />
+              </View>
+              <Text style={{ fontSize: 22, fontWeight: '800', color: t.text, marginTop: 12 }}>{company.name}</Text>
+              <Text style={{ fontSize: 12, color: t.sub, marginTop: 3 }}>CEO {company.ceo} · HQ {hq?.name}</Text>
+              <View style={{ marginTop: 12, backgroundColor: t.panel, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 7, borderWidth: 1, borderColor: t.border }}>
+                <Text style={{ fontSize: 14, fontWeight: '800', color: t.gold }}>Level {level} · {companyTitleOf(level)}</Text>
+              </View>
+              <Text style={{ fontSize: 11, color: t.faint, marginTop: 8 }}>Day {ageDays} of the empire</Text>
             </View>
-          )}
-        </Card>
-        <Btn title="Share Report Card" kind="green" icon="share-variant" style={{ marginTop: 14 }} onPress={doShare} />
-        <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 10 }]}>
-          Shares as text (WhatsApp, anywhere) — a full image export would need an extra native library, on the roadmap.
+
+            {/* Stat grid */}
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 18, borderTopWidth: 1, borderTopColor: t.border, paddingTop: 4 }}>
+              <PMStatTile icon="map-marker-distance" label="Total KM" value={Math.round(state.stats.km).toLocaleString('en-IN')} theme={t} />
+              <PMStatTile icon="cash-multiple" label="Lifetime Revenue" value={inrShort(state.stats.revenue)} color={t.good} theme={t} />
+              <PMStatTile icon="package-variant-closed-check" label="Deliveries" value={String(state.stats.deliveries)} theme={t} />
+              <PMStatTile icon="truck" label="Fleet Size" value={String(state.trucks.length)} theme={t} />
+              <PMStatTile icon="account-group" label="Staff" value={String(state.staff.length)} theme={t} />
+              <PMStatTile icon="earth" label="Countries" value={String((state.unlockedCountries || ['IN']).length)} theme={t} />
+              <PMStatTile icon="diamond-stone" label="Gems Found" value={String(gemsFound)} color={t.gold} theme={t} />
+              <PMStatTile icon="trophy" label="Achievements" value={`${tiersUnlocked}/${totalTiers}`} color={t.gold} theme={t} />
+              <PMStatTile icon="garage" label="Garages" value={String((state.hubs || []).length)} theme={t} />
+            </View>
+
+            {/* Records */}
+            {(longest || bestTrip) && (
+              <View style={{ marginTop: 6, borderTopWidth: 1, borderTopColor: t.border, paddingTop: 14 }}>
+                {longest && (
+                  <Row style={{ marginBottom: 9 }}>
+                    <Icon name="highway" size={16} color={t.accent} />
+                    <Text style={{ fontSize: 12, color: t.sub, marginLeft: 9, flex: 1 }}>
+                      Longest haul ever: <Text style={{ color: t.text, fontWeight: '700' }}>{cityById(longest.fromCityId)?.name} → {cityById(longest.toCityId)?.name}</Text> · {longest.km} km
+                    </Text>
+                  </Row>
+                )}
+                {bestTrip && (
+                  <Row>
+                    <Icon name="star-circle" size={16} color={t.gold} />
+                    <Text style={{ fontSize: 12, color: t.sub, marginLeft: 9, flex: 1 }}>
+                      Most profitable trip: <Text style={{ color: t.good, fontWeight: '700' }}>{cityById(bestTrip.fromCityId)?.name} → {cityById(bestTrip.toCityId)?.name}</Text> · {inr(bestTrip.net)}
+                    </Text>
+                  </Row>
+                )}
+              </View>
+            )}
+
+            {/* Footer */}
+            <Text style={{ fontSize: 10, color: t.faint, textAlign: 'center', marginTop: 18 }}>Built with Truck Empire Tycoon · Made in India</Text>
+          </View>
+        </ViewShot>
+
+        <Btn title={capturing ? 'Capturing…' : 'Share as Image'} kind="green" icon="share-variant" disabled={capturing}
+          style={{ marginTop: 16 }} onPress={doShare} />
+        <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 8 }]}>
+          Captures the card above as a real PNG, in whichever theme is selected, and opens your share sheet.
         </Text>
       </ScrollView>
     </Sheet>
   );
 }
+
 
 export function CompanyInsightsModal({ visible, onClose, onOpenSettings, onOpenPhotoMode }) {
   const state = useGame(s => s);
