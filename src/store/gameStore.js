@@ -437,6 +437,46 @@ export function buildWeekly(weekId, stats) {
   return { id: weekId, challenges: picks, snapshot: snap, claimed: [], jackpotPaid: false };
 }
 
+// ---------- 30-day login streak calendar (v3.0.0) ----------
+// Every day of the streak has its OWN reward — gold, cash, boosts, shields —
+// escalating to a day-30 mega chest. After day 30 the calendar repeats its
+// last week. Types: gold | cash | speed (1h 2×) | shield (24h) | double (2× next).
+export const STREAK_REWARDS = [
+  { day: 1, type: 'gold', amount: 2, icon: 'gold', label: '+2 Gold' },
+  { day: 2, type: 'gold', amount: 4, icon: 'gold', label: '+4 Gold' },
+  { day: 3, type: 'cash', amount: 200000, icon: 'cash', label: '₹2L Cash' },
+  { day: 4, type: 'gold', amount: 6, icon: 'gold', label: '+6 Gold' },
+  { day: 5, type: 'speed', icon: 'fast-forward', label: '2× Speed 1h' },
+  { day: 6, type: 'gold', amount: 8, icon: 'gold', label: '+8 Gold' },
+  { day: 7, type: 'cash', amount: 500000, icon: 'cash-multiple', label: '₹5L Cash' },
+  { day: 8, type: 'gold', amount: 8, icon: 'gold', label: '+8 Gold' },
+  { day: 9, type: 'gold', amount: 10, icon: 'gold', label: '+10 Gold' },
+  { day: 10, type: 'shield', icon: 'shield-check', label: 'Shield 24h' },
+  { day: 11, type: 'cash', amount: 800000, icon: 'cash-multiple', label: '₹8L Cash' },
+  { day: 12, type: 'gold', amount: 12, icon: 'gold', label: '+12 Gold' },
+  { day: 13, type: 'gold', amount: 12, icon: 'gold', label: '+12 Gold' },
+  { day: 14, type: 'double', icon: 'chevron-double-up', label: '2× Next Trip' },
+  { day: 15, type: 'cash', amount: 1200000, icon: 'cash-multiple', label: '₹12L Cash' },
+  { day: 16, type: 'gold', amount: 15, icon: 'gold', label: '+15 Gold' },
+  { day: 17, type: 'gold', amount: 15, icon: 'gold', label: '+15 Gold' },
+  { day: 18, type: 'speed', icon: 'fast-forward', label: '2× Speed 1h' },
+  { day: 19, type: 'cash', amount: 1500000, icon: 'cash-multiple', label: '₹15L Cash' },
+  { day: 20, type: 'gold', amount: 20, icon: 'gold', label: '+20 Gold' },
+  { day: 21, type: 'shield', icon: 'shield-check', label: 'Shield 24h' },
+  { day: 22, type: 'gold', amount: 20, icon: 'gold', label: '+20 Gold' },
+  { day: 23, type: 'cash', amount: 2000000, icon: 'cash-multiple', label: '₹20L Cash' },
+  { day: 24, type: 'gold', amount: 25, icon: 'gold', label: '+25 Gold' },
+  { day: 25, type: 'double', icon: 'chevron-double-up', label: '2× Next Trip' },
+  { day: 26, type: 'gold', amount: 30, icon: 'gold', label: '+30 Gold' },
+  { day: 27, type: 'cash', amount: 3000000, icon: 'cash-multiple', label: '₹30L Cash' },
+  { day: 28, type: 'shield', icon: 'shield-check', label: 'Shield 24h' },
+  { day: 29, type: 'gold', amount: 40, icon: 'gold', label: '+40 Gold' },
+  { day: 30, type: 'mega', gold: 50, cash: 5000000, icon: 'treasure-chest', label: 'MEGA: +50G + ₹50L' },
+];
+export const streakRewardFor = streak =>
+  STREAK_REWARDS[Math.min(Math.max(streak, 1), 30) - 1]
+  || STREAK_REWARDS[23 + ((streak - 24) % 7)]; // past 30: repeat the last week
+
 // Hidden gems — tap a specific existing UI element a set number of times in a
 // row (within a short window) to find one, once ever, for a big one-time
 // reward. `hint` stays vague and is all the player sees until it's found;
@@ -639,6 +679,7 @@ const initialState = {
   weatherDay: 0,
   lastCompanyLevel: 0, // last company level a reward was paid for
   weekly: null, // this week's challenges {id, challenges, snapshot, claimed, jackpotPaid}
+  updateGiftVersion: '', // last update-welcome-gift version already granted
   clockStart: 0, // real ms when day 1 hour 0 began
   lastSalaryDay: 0,
   lastContractDay: 0,
@@ -717,6 +758,7 @@ export const useGame = create(
         };
         set({
           phase: 'game',
+          updateGiftVersion: '3.0.0', // fresh companies skip the update gift
           company: { name, ceo, logo, avatar, hqCityId, code, createdAt: Date.now() },
           balance: startCapital - model.price,
           gold: 100,
@@ -817,9 +859,16 @@ export const useGame = create(
           if (lg.lastDay !== today) {
             const yesterday = new Date(now - 24 * 3600 * 1000).toDateString();
             const streak = lg.lastDay === yesterday ? lg.streak + 1 : 1;
-            const bonus = Math.min(streak, 7) * 2;
-            set({ login: { lastDay: today, streak, bestStreak: Math.max(lg.bestStreak || 0, streak) }, gold: get().gold + bonus });
-            get().notify('system', 'calendar-star', `Daily login bonus: +${bonus} Gold — day ${streak} streak${streak >= 7 ? ' (max!)' : ''}. Come back tomorrow for more.`);
+            const rw = streakRewardFor(streak);
+            set({ login: { lastDay: today, streak, bestStreak: Math.max(lg.bestStreak || 0, streak) } });
+            const cur = get();
+            if (rw.type === 'gold') set({ gold: cur.gold + rw.amount });
+            else if (rw.type === 'cash') { set({ balance: cur.balance + rw.amount }); get().logLedger('bonus', 'calendar-star', `Day ${streak} streak reward`, rw.amount); }
+            else if (rw.type === 'speed') set({ boosts: { ...cur.boosts, speedUntil: now + 3600 * 1000 } });
+            else if (rw.type === 'shield') set({ boosts: { ...cur.boosts, shieldUntil: now + 24 * 3600 * 1000 } });
+            else if (rw.type === 'double') set({ boosts: { ...cur.boosts, doubleNext: true } });
+            else if (rw.type === 'mega') { set({ gold: cur.gold + rw.gold, balance: cur.balance + rw.cash }); get().logLedger('bonus', 'treasure-chest', 'Day 30 MEGA streak chest', rw.cash); }
+            get().notify('system', rw.icon, `Day ${streak} streak reward: ${rw.label}!${streak < 30 ? ` Tomorrow: ${streakRewardFor(streak + 1).label}.` : ' Legendary dedication!'}`);
           }
         }
         const { day } = get().gameDay();
@@ -836,6 +885,19 @@ export const useGame = create(
           } else {
             set({ lastSalaryDay: day });
           }
+        }
+        // ---- v3.0.0 update welcome gift: one-time mega bonus for existing
+        // players when they first open the Two Horizons update. New companies
+        // never see it (createCompany stamps the version at birth).
+        if ((s.updateGiftVersion || '') !== '3.0.0') {
+          // Fresh get() — the login-streak block above may have just granted
+          // gold; using the stale snapshot would silently clobber it.
+          const gcur = get();
+          set({ updateGiftVersion: '3.0.0', gold: gcur.gold + 300, balance: gcur.balance + 25000000 });
+          get().logLedger('bonus', 'party-popper', 'Update 3.0.0 welcome gift', 25000000);
+          get().notify('system', 'party-popper',
+            'UPDATE 3.0.0 IS HERE — the biggest one ever! 17 new countries across two horizons: Thailand to the Philippines & Indonesia in the east, Saudi Arabia to Kenya & Ethiopia in the west. Welcome gift: +₹2.5 Crore + 300 Gold. Thank you for building your empire with us!');
+          play('coin', 1);
         }
         // ---- v2.4.0 daily/periodic systems ----
         // Weather: fresh zones each game day, only in plausible regions. New
@@ -1973,13 +2035,29 @@ export const useGame = create(
       },
 
       // ---------- weekly challenges ----------
+      // LIVE stat: lifetime stat + the in-flight share of every truck
+      // currently on the road — km and revenue tick up in real time across
+      // the whole fleet, not just when a delivery completes.
+      _liveStat(key) {
+        const s = get();
+        let v = s.stats[key] || 0;
+        if (key === 'km' || key === 'revenue') {
+          const now = Date.now();
+          for (const d of s.deliveries) {
+            const prog = Math.max(0, Math.min(1, (now - d.startedAt) / (d.endsAt - d.startedAt)));
+            if (key === 'km') v += d.route.roadKm * prog;
+            else v += (d.econ.gross || 0) * prog;
+          }
+        }
+        return Math.floor(v);
+      },
       weeklyProgress() {
         const s = get();
         const w = s.weekly;
         if (!w) return [];
         return w.challenges.map(ch => ({
           ...ch,
-          progress: Math.max(0, Math.floor((s.stats[ch.key] || 0) - (w.snapshot[ch.key] || 0))),
+          progress: Math.max(0, get()._liveStat(ch.key) - (w.snapshot[ch.key] || 0)),
           claimed: w.claimed.includes(ch.key),
         }));
       },
@@ -1990,7 +2068,7 @@ export const useGame = create(
         const ch = w.challenges.find(x => x.key === key);
         if (!ch) return { ok: false, err: 'Unknown challenge' };
         if (w.claimed.includes(key)) return { ok: false, err: 'Already claimed' };
-        const progress = Math.floor((s.stats[key] || 0) - (w.snapshot[key] || 0));
+        const progress = get()._liveStat(key) - (w.snapshot[key] || 0);
         if (progress < ch.target) return { ok: false, err: 'Not complete yet' };
         const claimed = [...w.claimed, key];
         const sweep = claimed.length === w.challenges.length && !w.jackpotPaid;

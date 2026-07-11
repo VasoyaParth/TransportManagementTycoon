@@ -12,6 +12,7 @@ import { FleetTab, RoutesTab, StaffTab, EconomyTab, MarketingTab, RewardsTab } f
 import {
   NewDeliveryModal, TruckDetailModal, BuyTruckModal, ContractsModal,
   PowerupsModal, NotificationsModal, SettingsModal, HubsModal, DriverDetailModal, CountriesModal, MiniGamesModal, HubInfoModal,
+  CompanyInsightsModal, NewsModal,
 } from './modals';
 import { haptic } from '../../engine/haptics';
 import Tutorial from './Tutorial';
@@ -174,6 +175,9 @@ export default function GameScreen() {
         </View>
         {/* Right-side action stack (garage / contracts / power-ups) */}
         <View style={st.actionStack}>
+          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'news' }); }}>
+            <Icon name="newspaper-variant-outline" size={19} color="#C0161C" />
+          </Pressable>
           <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'hubs' }); }}>
             <Icon name="garage" size={19} color={C.text} />
           </Pressable>
@@ -188,7 +192,7 @@ export default function GameScreen() {
           </Pressable>
         </View>
         {/* Floating company profile capsule (opens Settings → Profile) */}
-        <Pressable style={st.profileCap} onPress={() => { haptic('light'); setModal({ kind: 'settings', tab: 'profile' }); }}>
+        <Pressable style={st.profileCap} onPress={() => { haptic('light'); setModal({ kind: 'company' }); }}>
           <View style={st.logoCircle}><Icon name={company?.logo || 'truck'} size={16} color={C.blue} /></View>
           <View style={{ marginLeft: 7, flexShrink: 1 }}>
             <Text style={[FONT.tiny, { fontWeight: '800' }]} numberOfLines={1}>{company?.name}</Text>
@@ -265,6 +269,9 @@ export default function GameScreen() {
         onOpenTruck={(tid) => setModal({ kind: 'truck', truckId: tid })}
       />}
       {mounted('settings') && <SettingsModal visible={modal?.kind === 'settings'} onClose={() => setModal(null)} initialTab={modal?.tab} />}
+      {mounted('company') && <CompanyInsightsModal visible={modal?.kind === 'company'} onClose={() => setModal(null)}
+        onOpenSettings={() => setModal({ kind: 'settings', tab: 'company' })} />}
+      {mounted('news') && <NewsModal visible={modal?.kind === 'news'} onClose={() => setModal(null)} />}
 
       {/* First-time guided tour */}
       {settings.tutorialSeen !== true && (

@@ -86,9 +86,10 @@ function hubSvg(){return '<svg viewBox="0 0 30 26">'
 function boot(){
   var DATA = ${data};
   var pickMode = false;
-  // Whole playable region (India + every unlockable country: UAE and Iran in
-  // the west, Russia in the north, Malaysia/China in the east).
-  var REGION=L.latLngBounds([-9.0,30.0],[72.0,145.0]);
+  // Whole playable region: Kenya/Ethiopia in the southwest, Israel/Saudi in
+  // the west, Russia/Kazakhstan in the north, Indonesia/Philippines/Taiwan in
+  // the east — the two horizons of the empire.
+  var REGION=L.latLngBounds([-12.0,28.0],[72.0,150.0]);
   var map = L.map('map',{center:[DATA.hq.lat,DATA.hq.lng],zoom:6,zoomControl:false,
     attributionControl:false,minZoom:3,maxBounds:REGION,maxBoundsViscosity:0.7});
   // No on-screen zoom buttons — pinch-to-zoom keeps the map corners clean.

@@ -5,7 +5,7 @@ import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Swi
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, CONVOY_SYMBOLS, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, CONVOY_SYMBOLS, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
@@ -2199,8 +2199,12 @@ const ROADMAP_ITEMS = [
     desc: 'Book train wagons and air freight for long hauls — cheaper/faster trade-offs against your own trucks.' },
   { icon: 'star-circle', title: 'City Reputation', status: 'someday',
     desc: 'Deliver often to a city and it starts trusting you: better rates, faster loading, exclusive contracts.' },
-  { icon: 'newspaper-variant', title: 'Daily News Ticker', status: 'someday',
-    desc: 'An in-game newspaper reacting to your empire — fuel strikes, weather forecasts, market gossip that hints tomorrow\'s prices.' },
+  { icon: 'routes', title: 'Real Roads (Google-Maps style)', status: 'beta',
+    desc: 'Trucks following actual highway geometry bend by bend. Already LIVE in the private beta build — graduating here soon.' },
+  { icon: 'shield-home', title: 'Garage Upgrades', status: 'exploring',
+    desc: 'Level up garages: bigger fuel discounts, faster loading, covered parking that slows condition wear.' },
+  { icon: 'school', title: 'Driver Academy', status: 'exploring',
+    desc: 'Send drivers to training between trips — buy XP with time and cash instead of only earning it on the road.' },
   { icon: 'camera', title: 'Photo / Share Card', status: 'someday',
     desc: 'One-tap company stats card (fleet, net worth, km) to share on WhatsApp.' },
   { icon: 'music', title: 'Sound & Music Pass', status: 'someday',
@@ -2213,6 +2217,7 @@ const ROADMAP_ITEMS = [
     desc: 'True partner play — shared convoys and cargo exchange. Needs a server, so it lives at the very end of this list.' },
 ];
 const ROADMAP_STATUS = {
+  beta: { label: 'In Beta', color: '#C0161C', bg: '#C0161C22' },
   planned: { label: 'Planned', color: C.green, bg: C.greenSoft },
   exploring: { label: 'Exploring', color: C.blue, bg: C.blueSoft },
   someday: { label: 'Someday', color: C.amber, bg: C.amberSoft },
@@ -2980,6 +2985,252 @@ export function HubInfoModal({ visible, onClose, cityId, onNewDelivery, onOpenTr
   );
 }
 
+// ============ Company Insights (tap the profile capsule) ============
+// The company's own page: identity, level, health scorecard and smart tips —
+// a real dashboard, not a shortcut into Settings.
+export function CompanyInsightsModal({ visible, onClose, onOpenSettings }) {
+  const state = useGame(s => s);
+  const company = state.company;
+  const hq = company ? cityById(company.hqCityId) : null;
+  if (!company) return <Sheet visible={visible} onClose={onClose} title="Company" height="40%"><View /></Sheet>;
+  const xp = companyXP(state);
+  const level = companyLevelOf(xp);
+  const nextXp = companyXpForLevel(level + 1), curXp = companyXpForLevel(level);
+  const idle = state.trucks.filter(t => t.status === 'parked').length;
+  const broken = state.trucks.filter(t => t.status === 'broken').length;
+  const lowCond = state.trucks.filter(t => (t.condition == null ? 100 : t.condition) < 50).length;
+  const freeDrivers = state.staff.filter(x => x.role === 'driver' && !x.truckId).length;
+  const score = creditScoreOf(state.credit);
+  const fuel = fuelFactorForDay(state.gameDay().day);
+  const ageDays = Math.max(1, Math.round((Date.now() - company.createdAt) / 86400000));
+  const utilisation = state.trucks.length ? Math.round(((state.trucks.length - idle - broken) / state.trucks.length) * 100) : 0;
+
+  // Dynamic tips — only the ones that actually apply right now.
+  const tips = [];
+  if (idle > 0) tips.push({ icon: 'truck-alert-outline', text: `${idle} truck${idle > 1 ? 's' : ''} parked idle — every parked hour is money not earned. Use Depart All or dispatch from a garage.` });
+  if (broken > 0) tips.push({ icon: 'wrench-clock', text: `${broken} truck${broken > 1 ? 's' : ''} broken down. Repair them (mechanic or 15 Gold) before the backlog hurts.` });
+  if (lowCond > 0) tips.push({ icon: 'engine-off-outline', text: `${lowCond} truck${lowCond > 1 ? 's' : ''} below 50% condition — they drive slower every km. A service pays for itself.` });
+  if (fuel <= 0.95) tips.push({ icon: 'gas-station', text: `Diesel is CHEAP today (${Math.round((fuel - 1) * 100)}%). Dispatch long hauls now and save on every litre.` });
+  if (fuel >= 1.12) tips.push({ icon: 'gas-station-off', text: `Fuel spike today (+${Math.round((fuel - 1) * 100)}%). Short profitable runs beat cross-country marathons until it settles.` });
+  if ((state.weather || []).length) tips.push({ icon: 'weather-cloudy-alert', text: `${state.weather.length} weather zones active — check TET News before dispatching; routes through them run up to 30% slower.` });
+  if (freeDrivers === 0 && idle > 0) tips.push({ icon: 'account-plus', text: 'Idle trucks but no free drivers — hire from the Staff tab to put them to work.' });
+  if (score < 650) tips.push({ icon: 'bank-remove', text: `Credit score ${score} — pay EMIs on time to win back the bank's trust and unlock bigger loans.` });
+  if ((state.hubs || []).length < 3) tips.push({ icon: 'garage-variant', text: 'Garages give free refuelling + fast-travel. A garage on your busiest corridor compounds fast.' });
+  if (!state.campaigns.some(a => a.endsAt > Date.now())) tips.push({ icon: 'bullhorn-outline', text: 'No marketing running — check the Marketing tab ROI table; the right campaign pays for itself.' });
+  if (tips.length === 0) tips.push({ icon: 'check-decagram', text: 'Everything humming — fleet busy, books clean, skies clear. Time to expand into a new country?' });
+
+  return (
+    <Sheet visible={visible} onClose={onClose} title="Company Insights" height="88%">
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+        {/* Identity + level */}
+        <Card style={{ marginBottom: 12, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
+          <Row>
+            <View style={[cs.heroIcon, { width: 54, height: 54, backgroundColor: '#1E293B' }]}>
+              <Icon name={company.logo || 'truck'} size={28} color="#5B8DF0" />
+            </View>
+            <View style={{ marginLeft: 12, flex: 1 }}>
+              <Text style={[FONT.h2, { color: '#F8FAFC' }]}>{company.name}</Text>
+              <Text style={[FONT.tiny, { color: '#94A3B8' }]}>CEO {company.ceo} · HQ {hq?.name} · day {ageDays} of the empire</Text>
+            </View>
+          </Row>
+          <Row style={{ marginTop: 12, justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={[FONT.body, { color: '#F8FAFC', fontWeight: '800' }]}>Lv {level} · {companyTitleOf(level)}</Text>
+            <Text style={[FONT.tiny, { color: '#94A3B8' }]}>{(xp - curXp).toLocaleString('en-IN')}/{(nextXp - curXp).toLocaleString('en-IN')} XP</Text>
+          </Row>
+          <View style={{ height: 7, borderRadius: 4, backgroundColor: '#1E293B', marginTop: 6, overflow: 'hidden' }}>
+            <View style={{ width: `${((xp - curXp) / Math.max(1, nextXp - curXp)) * 100}%`, height: 7, backgroundColor: '#5B8DF0' }} />
+          </View>
+        </Card>
+
+        {/* Health scorecard */}
+        <SectionTitle icon="heart-pulse" text="Company Health" />
+        <Row style={{ marginBottom: 8, backgroundColor: C.bgSoft, borderRadius: RADIUS.md, paddingVertical: 10 }}>
+          <ContractStat icon="truck-fast" label="Fleet busy" value={`${utilisation}%`} color={utilisation >= 50 ? C.green : C.amber} />
+          <ContractStat icon="bank" label="Credit" value={String(score)} color={score >= 650 ? C.green : C.red} />
+          <ContractStat icon="account-group" label="Staff" value={String(state.staff.length)} />
+          <ContractStat icon="earth" label="Countries" value={String((state.unlockedCountries || ['IN']).length)} color={C.blue} />
+        </Row>
+        <Row style={{ marginBottom: 14, backgroundColor: C.bgSoft, borderRadius: RADIUS.md, paddingVertical: 10 }}>
+          <ContractStat icon="truck" label="Trucks" value={String(state.trucks.length)} />
+          <ContractStat icon="garage" label="Garages" value={String((state.hubs || []).length)} />
+          <ContractStat icon="package-variant-closed-check" label="Deliveries" value={String(state.stats.deliveries)} />
+          <ContractStat icon="cash-multiple" label="Revenue" value={inrShort(state.stats.revenue)} color={C.green} />
+        </Row>
+
+        {/* Smart tips */}
+        <SectionTitle icon="lightbulb-on-outline" text="Tips For You Right Now" />
+        <Card style={{ marginBottom: 14 }}>
+          {tips.slice(0, 6).map((t, i) => (
+            <Row key={i} style={[{ paddingVertical: 9, alignItems: 'flex-start' }, i > 0 && { borderTopWidth: 1, borderTopColor: C.border }]}>
+              <Icon name={t.icon} size={18} color={C.blue} style={{ marginTop: 1 }} />
+              <Text style={[FONT.body, { marginLeft: 9, flex: 1 }]}>{t.text}</Text>
+            </Row>
+          ))}
+        </Card>
+
+        <Btn title="Edit company (Settings)" kind="soft" icon="cog-outline" onPress={() => { onClose(); onOpenSettings && onOpenSettings(); }} />
+      </ScrollView>
+    </Sheet>
+  );
+}
+
+// ============ TET News 24×7 (fuel, weather, events, trip advice) ============
+// The news channel the notifications kept hinting at: fuel market moves,
+// live weather bulletins with the regions they cover, world events, and
+// concrete "dispatch here today" suggestions based on all of it.
+export function NewsModal({ visible, onClose }) {
+  const state = useGame(s => s);
+  const day = state.gameDay().day;
+  const fuel = fuelFactorForDay(day);
+  const fuelY = fuelFactorForDay(Math.max(1, day - 1));
+  const zones = state.weather || [];
+  const events = state.mapEvents || [];
+  const unlocked = state.unlockedCountries || ['IN'];
+
+  // Cities affected by each weather zone (big cities inside the blob).
+  const affected = (z) => CITIES.filter(c => {
+    if (c.tier > 2 || (c.country || 'IN') !== 'IN' && !unlocked.includes(c.country)) return false;
+    const kLat = 111, kLng = 111 * Math.cos((z.lat * Math.PI) / 180);
+    const dy = (c.lat - z.lat) * kLat, dx = (c.lng - z.lng) * kLng;
+    const d = Math.sqrt(dx * dx + dy * dy);
+    return d <= weatherRadiusAt(z, Math.atan2(dy, dx));
+  }).slice(0, 4);
+
+  // Suggested destinations: busy tier-1/2 unlocked cities with CLEAR skies.
+  const suggestions = useMemo(() => {
+    const inZone = (c) => zones.some(z => {
+      const kLat = 111, kLng = 111 * Math.cos((z.lat * Math.PI) / 180);
+      const dy = (c.lat - z.lat) * kLat, dx = (c.lng - z.lng) * kLng;
+      return Math.sqrt(dx * dx + dy * dy) <= weatherRadiusAt(z, Math.atan2(dy, dx));
+    });
+    return CITIES
+      .filter(c => c.tier <= 2 && !c.locality && unlocked.includes(c.country || 'IN') && !inZone(c))
+      .sort((a, b) => (b.pop || 0) - (a.pop || 0))
+      .filter((_, i) => (i + day) % 7 < 3) // rotate picks day to day
+      .slice(0, 4);
+  }, [zones, unlocked, day]);
+
+  const gossip = [
+    'Transporters association demands wider bypasses around metro mandis. Hamare drivers bole: "pehle chai ka thela hatao".',
+    'Insiders whisper the diesel market may turn tomorrow — watch the index. Ya mat dekho, tera kya jaata hai?',
+    'Border agents report record cargo volumes. One officer seen practising his stamp arm at the gym.',
+    'Veteran drivers say monsoon routes reward patience, not speed. Naye drivers say "kya?"',
+    'Freight rates firm up as festival demand builds. Mithai boxes officially cargo of the season.',
+  ][day % 5];
+
+  return (
+    <Sheet visible={visible} onClose={onClose} title="Apna News, Tera Kya Jata" height="88%">
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+        {/* TV masthead: red channel band + LIVE dot, like a real news channel */}
+        <View style={{ backgroundColor: '#C0161C', borderRadius: RADIUS.lg, padding: 12, marginBottom: 10 }}>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <Row>
+              <View style={{ backgroundColor: '#fff', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}>
+                <Text style={{ color: '#C0161C', fontWeight: '900', fontSize: 16, letterSpacing: 1 }}>APNA NEWS</Text>
+              </View>
+              <Text style={{ color: '#FFD7D8', fontWeight: '700', fontSize: 10, marginLeft: 8, alignSelf: 'flex-end' }}>Tera Kya Jata</Text>
+            </Row>
+            <Row style={{ backgroundColor: 'rgba(0,0,0,0.35)', borderRadius: 12, paddingHorizontal: 8, paddingVertical: 3 }}>
+              <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: '#FF4D4D', marginRight: 5, alignSelf: 'center' }} />
+              <Text style={{ color: '#fff', fontWeight: '900', fontSize: 10 }}>LIVE</Text>
+            </Row>
+          </Row>
+          <Text style={{ color: '#FFD7D8', fontSize: 10.5, marginTop: 6 }} numberOfLines={1}>
+            ● BREAKING ● Day {day} across the empire ● {zones.length} weather alerts ● Fuel {fuel > 1 ? 'UP' : fuel < 1 ? 'DOWN' : 'FLAT'} {Math.abs(Math.round((fuel - 1) * 100))}% ● Sabse tez, sabse bakwaas ●
+          </Text>
+        </View>
+
+        {/* Breaking: fuel market */}
+        <Card style={{ marginBottom: 12, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
+          <Row style={{ justifyContent: 'space-between', marginBottom: 6 }}>
+            <Pill text="FUEL DESK" icon="gas-station" color="#F4D35E" bg="#3B2F0B" />
+            <Pill text="EXCLUSIVE" icon="star-four-points" color="#fff" bg="#C0161C" />
+          </Row>
+          <Text style={[FONT.h3, { color: '#F8FAFC' }]}>
+            {fuel >= 1.12 ? `Diesel spikes ${Math.round((fuel - 1) * 100)}% nationwide` :
+              fuel <= 0.95 ? `Diesel crashes ${Math.round((1 - fuel) * 100)}% — pumps crowded` :
+                'Fuel market steady today'}
+          </Text>
+          <Text style={[FONT.tiny, { color: '#94A3B8', marginTop: 4 }]}>
+            ₹{Math.round(92 * fuel)}/L today vs ₹{Math.round(92 * fuelY)}/L yesterday ({fuel > fuelY ? 'rising' : fuel < fuelY ? 'falling' : 'flat'}).
+            {fuel <= 0.95 ? ' Editors say: dispatch the long hauls NOW.' : fuel >= 1.12 ? ' Editors say: keep runs short until it cools.' : ' No panic at the pumps.'}
+          </Text>
+        </Card>
+
+        {/* Weather bulletins */}
+        <SectionTitle icon="weather-cloudy-alert" text="Weather Bulletins" />
+        {zones.length === 0 ? (
+          <Card style={{ marginBottom: 12 }}><Text style={FONT.sub}>Clear skies across the network today — no advisories.</Text></Card>
+        ) : zones.map(z => {
+          const k = WEATHER_KINDS[z.kind] || {};
+          const cities = affected(z);
+          return (
+            <Card key={z.id} style={{ marginBottom: 8, borderLeftWidth: 4, borderLeftColor: k.color || C.blue }}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Row style={{ flex: 1 }}>
+                  <Icon name={k.icon || 'weather-pouring'} size={20} color={k.color || C.blue} />
+                  <View style={{ marginLeft: 9, flex: 1 }}>
+                    <Text style={[FONT.body, { fontWeight: '800' }]}>{k.label} over {z.name}</Text>
+                    <Text style={FONT.tiny}>
+                      Trucks {Math.round((1 - (k.slow || 1)) * 100)}% slower inside the zone.
+                      {cities.length ? ` Affects ${cities.map(c => c.name).join(', ')}.` : ''}
+                    </Text>
+                  </View>
+                </Row>
+              </Row>
+            </Card>
+          );
+        })}
+
+        {/* Trip advice */}
+        <SectionTitle icon="compass-outline" text="Where To Send Trucks Today" />
+        <Card style={{ marginBottom: 12 }}>
+          {suggestions.length === 0 ? (
+            <Text style={FONT.sub}>Rough weather everywhere — brave the slow lanes or wait for tomorrow's bulletin.</Text>
+          ) : suggestions.map((c, i) => (
+            <Row key={c.id} style={[{ paddingVertical: 9, justifyContent: 'space-between' }, i > 0 && { borderTopWidth: 1, borderTopColor: C.border }]}>
+              <Row style={{ flex: 1 }}>
+                <Icon name="weather-sunny" size={17} color={C.amber} />
+                <View style={{ marginLeft: 9, flex: 1 }}>
+                  <Text style={[FONT.body, { fontWeight: '700' }]}>{c.name}</Text>
+                  <Text style={FONT.tiny}>{c.state} · clear skies, big demand (pop {(c.pop / 1e6).toFixed(1)}M)</Text>
+                </View>
+              </Row>
+              <Pill text="Clear route" color={C.green} bg={C.greenSoft} icon="check" />
+            </Row>
+          ))}
+          <Text style={[FONT.tiny, { marginTop: 8 }]}>Picks rotate daily — clear-sky tier-1/2 cities in your unlocked countries.</Text>
+        </Card>
+
+        {/* World events */}
+        {events.length > 0 && (
+          <>
+            <SectionTitle icon="alert-decagram-outline" text="On The Wire" />
+            {events.map(ev => (
+              <Card key={ev.id} style={{ marginBottom: 8, padding: 12 }}>
+                <Row>
+                  <Icon name={ev.icon} size={17} color={ev.color || C.red} />
+                  <View style={{ marginLeft: 9, flex: 1 }}>
+                    <Text style={FONT.body}>{ev.label}</Text>
+                    <Text style={FONT.tiny}>{relTime(ev.ts)}</Text>
+                  </View>
+                </Row>
+              </Card>
+            ))}
+          </>
+        )}
+
+        {/* Gossip column */}
+        <SectionTitle icon="newspaper-variant-outline" text="The Gossip Column" />
+        <Card>
+          <Text style={[FONT.body, { fontStyle: 'italic' }]}>"{gossip}"</Text>
+          <Text style={[FONT.tiny, { marginTop: 6 }]}>— Apna News desk. 100% unverified, 200% confident. Tera kya jata?</Text>
+        </Card>
+      </ScrollView>
+    </Sheet>
+  );
+}
+
 // ============ World Expansion (unlock countries) ============
 export function CountriesModal({ visible, onClose }) {
   const toast = useToast();
@@ -2987,6 +3238,7 @@ export function CountriesModal({ visible, onClose }) {
   const balance = useGame(s => s.balance);
   const unlockCountry = useGame(s => s.unlockCountry);
   const [confirm, setConfirm] = useState(null);
+  const [showAllC, setShowAllC] = useState(false);
   useEffect(() => { if (!visible) setConfirm(null); }, [visible]);
 
   const cityCount = useMemo(() => {
@@ -3011,16 +3263,17 @@ export function CountriesModal({ visible, onClose }) {
           <Row style={{ justifyContent: 'space-between' }}>
             <Row style={{ flex: 1 }}>
               <Icon name="earth" size={20} color={C.blue} />
-              <Text style={[FONT.h3, { marginLeft: 6 }]}>Expand Across Asia</Text>
+              <Text style={[FONT.h3, { marginLeft: 6 }]}>Expand Across Two Horizons</Text>
             </Row>
             <Pill text={`${have}/${total} unlocked`} color={C.blue} bg="#fff" />
           </Row>
           <Text style={[FONT.tiny, { marginTop: 6, color: C.text }]}>
-            Unlock neighbouring countries to open hundreds of new cities. Each unlock pays a one-time welcome bonus. Cross-border hauls charge customs (extra time + fee per border) but pay big.
+            Unlock countries from Kenya to the Philippines — 30 nations, thousands of cities. Each unlock pays a one-time welcome bonus. Cross-border hauls charge customs (extra time + fee per border) but pay big.
           </Text>
         </Card>
 
-        {COUNTRIES.map(co => {
+        {/* Unlocked + first few locked, rest behind Show More (30 countries!) */}
+        {(showAllC ? COUNTRIES : COUNTRIES.filter((co, i) => unlocked.includes(co.code) || i < unlocked.length + 6)).map(co => {
           const isUnlocked = unlocked.includes(co.code);
           const afford = balance >= co.unlockCost;
           const cnt = cityCount[co.code] || 0;
@@ -3060,6 +3313,13 @@ export function CountriesModal({ visible, onClose }) {
             </Card>
           );
         })}
+        {!showAllC && COUNTRIES.length > unlocked.length + 6 && (
+          <Btn title={`Show all ${COUNTRIES.length} countries`} kind="soft" icon="chevron-down"
+            onPress={() => setShowAllC(true)} style={{ marginTop: 4 }} />
+        )}
+        {showAllC && (
+          <Btn title="Show less" kind="soft" icon="chevron-up" onPress={() => setShowAllC(false)} style={{ marginTop: 4 }} />
+        )}
       </ScrollView>
     </Sheet>
   );

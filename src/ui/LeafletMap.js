@@ -22,6 +22,7 @@ const PORT_DATA = ferryPorts();
 export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focus, onTruckTap, onHubTap, onReady, onOffline }) {
   const tapPortEgg = useEasterEggTap('port_master', 6);
   const tapFuelEgg = useEasterEggTap('fuel_sniffer', 7);
+  const tapHqEgg = useEasterEggTap('hq_home', 5); // was only wired on the old offline map
   const ref = useRef(null);
   const company = useGame(s => s.company);
   const trucks = useGame(s => s.trucks);
@@ -198,7 +199,7 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
         </View>
       )}
       <View style={st.controls}>
-        <Ctl icon="crosshairs-gps" onPress={() => inject('window.centerHQ()')} />
+        <Ctl icon="crosshairs-gps" onPress={() => { inject('window.centerHQ()'); tapHqEgg(); }} />
         <Ctl icon="gas-station" onPress={() => { inject('window.toggleStations()'); tapFuelEgg(); }} />
         <Ctl icon="city-variant-outline" onPress={() => inject('window.toggleCities()')} />
         <Ctl icon="anchor" onPress={() => {
