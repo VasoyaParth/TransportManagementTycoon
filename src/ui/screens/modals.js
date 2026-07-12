@@ -4130,13 +4130,43 @@ function PortfolioPanel({ stocks, portfolio, onBack, onOpen }) {
   );
 }
 
-function IpoLaunchPanel({ req, launchStock, toast, onBack, onLaunched }) {
+function IpoLaunchPanel({ req, insights, launchStock, toast, onBack, onLaunched, onOpenStock }) {
   return (
     <View>
       <Pressable onPress={onBack} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
         <Icon name="chevron-left" size={18} color={C.blue} />
         <Text style={[FONT.body, { color: C.blue, fontWeight: '700', marginLeft: 2 }]}>Back to market</Text>
       </Pressable>
+
+      {/* Once you've founded at least one company, this becomes YOUR IPO
+          dashboard — separate from the generic requirements card below —
+          showing founder shares remaining, sold, and real profit extracted. */}
+      {insights.length > 0 ? (
+        <>
+          <Text style={[FONT.tiny, { fontWeight: '800', color: C.sub, marginBottom: 6 }]}>YOUR FOUNDED COMPANIES</Text>
+          {insights.map(ins => (
+            <Pressable key={ins.stock.id} onPress={() => onOpenStock(ins.stock.id)}>
+              <Card style={{ marginBottom: 10, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <Text style={[FONT.body, { fontWeight: '800', color: '#F8FAFC' }]} numberOfLines={1}>{ins.stock.name}</Text>
+                  <Icon name="rocket-launch" size={16} color={C.gold} />
+                </Row>
+                <Row style={{ marginTop: 10, justifyContent: 'space-between' }}>
+                  <View><Text style={[FONT.tiny, { color: '#94A3B8' }]}>Founder shares</Text><Text style={[FONT.body, { color: '#F8FAFC', fontWeight: '800' }]}>{ins.founderShares.toLocaleString()}</Text></View>
+                  <View><Text style={[FONT.tiny, { color: '#94A3B8' }]}>Held now</Text><Text style={[FONT.body, { color: '#F8FAFC', fontWeight: '800' }]}>{ins.held.toLocaleString()}</Text></View>
+                  <View><Text style={[FONT.tiny, { color: '#94A3B8' }]}>Sold</Text><Text style={[FONT.body, { color: '#F8FAFC', fontWeight: '800' }]}>{ins.sold.toLocaleString()}</Text></View>
+                </Row>
+                <Row style={{ marginTop: 10, justifyContent: 'space-between' }}>
+                  <View><Text style={[FONT.tiny, { color: '#94A3B8' }]}>Current holding value</Text><Text style={[FONT.body, { color: '#4ADE80', fontWeight: '800' }]}>{inr(ins.currentValue)}</Text></View>
+                  <View><Text style={[FONT.tiny, { color: '#94A3B8' }]}>Profit extracted (sold)</Text><Text style={[FONT.body, { color: ins.proceeds >= 0 ? '#4ADE80' : '#F87171', fontWeight: '800' }]}>{inr(ins.proceeds)}</Text></View>
+                </Row>
+              </Card>
+            </Pressable>
+          ))}
+        </>
+      ) : null}
+
+      <Text style={[FONT.tiny, { fontWeight: '800', color: C.sub, marginBottom: 6 }]}>{insights.length > 0 ? 'LAUNCH ANOTHER' : 'LAUNCH REQUIREMENTS'}</Text>
       <Card style={{ marginBottom: 10, opacity: req.met ? 1 : 0.9 }}>
         <Row style={{ justifyContent: 'space-between' }}>
           <Text style={[FONT.h3, { fontWeight: '800' }]}>Launch Your Own IPO</Text>
@@ -4198,6 +4228,7 @@ export function StockMarketModal({ visible, onClose }) {
   const sellStock = useGame(s => s.sellStock);
   const launchStock = useGame(s => s.launchStock);
   const ipoRequirements = useGame(s => s.ipoRequirements);
+  const myIpoInsights = useGame(s => s.myIpoInsights);
   const tapMarketEgg = useEasterEggTap('market_watcher', 6);
   const [view, setView] = useState('list'); // 'list' | 'ipo' — two separate paths
   const [selectedId, setSelectedId] = useState(null);
@@ -4266,11 +4297,13 @@ export function StockMarketModal({ visible, onClose }) {
 
   if (view === 'ipo') {
     const req = ipoRequirements();
+    const insights = myIpoInsights();
     return (
       <Sheet visible={visible} onClose={onClose} title="Launch IPO" height="90%">
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
-          <IpoLaunchPanel req={req} launchStock={launchStock} toast={toast}
-            onBack={() => setView('list')} onLaunched={id => { setView('list'); setSelectedId(id); }} />
+          <IpoLaunchPanel req={req} insights={insights} launchStock={launchStock} toast={toast}
+            onBack={() => setView('list')} onLaunched={id => { setView('list'); setSelectedId(id); }}
+            onOpenStock={id => setSelectedId(id)} />
         </ScrollView>
       </Sheet>
     );
@@ -4289,18 +4322,25 @@ export function StockMarketModal({ visible, onClose }) {
 
   return (
     <Sheet visible={visible} onClose={onClose} title="Stock Market" height="90%">
-      <View style={{ flex: 1 }}>
+      {/* Everything here is ONE scrollable page — search first, then your
+          portfolio + quick actions, then the browse rails, then the full
+          list. Nothing is independently clipped or cut off. */}
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+        <TextInput value={query} onChangeText={t => { setQuery(t); setPage(1); }} placeholder="Search companies or sectors..."
+          placeholderTextColor={C.faint}
+          style={{ backgroundColor: C.bgSoft, borderRadius: RADIUS.md, borderWidth: 1, borderColor: C.border, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12, color: C.text }} />
+
         {insight ? (
-          <Card style={{ marginBottom: 10, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
+          <Card style={{ marginBottom: 12, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
             <Row style={{ justifyContent: 'space-between' }}>
               <View>
                 <Text style={[FONT.tiny, { color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 1 }]}>Your Portfolio</Text>
-                <Text style={[FONT.h1, { color: '#F8FAFC', marginTop: 2 }]}>{inrShort(insight.portfolioValue)}</Text>
+                <Text style={[FONT.h1, { color: '#F8FAFC', marginTop: 2 }]}>{inr(insight.portfolioValue)}</Text>
               </View>
               <View style={{ alignItems: 'flex-end' }}>
                 <Pressable onPress={tapMarketEgg}><Text style={[FONT.tiny, { color: '#94A3B8' }]}>{insight.count.toLocaleString()} listed</Text></Pressable>
                 <Text style={[FONT.tiny, { color: insight.portfolioValue >= insight.portfolioCost ? '#4ADE80' : '#F87171', marginTop: 4, fontWeight: '800' }]}>
-                  {insight.portfolioValue >= insight.portfolioCost ? '▲' : '▼'} {inrShort(Math.abs(insight.portfolioValue - insight.portfolioCost))} P&L
+                  {insight.portfolioValue >= insight.portfolioCost ? '▲' : '▼'} {inr(Math.abs(insight.portfolioValue - insight.portfolioCost))} P&L
                 </Text>
               </View>
             </Row>
@@ -4324,7 +4364,7 @@ export function StockMarketModal({ visible, onClose }) {
             </Row>
           </Card>
         ) : (
-          <Row style={{ gap: 8, marginBottom: 10 }}>
+          <Row style={{ gap: 8, marginBottom: 12 }}>
             <View style={{ flex: 1 }}>
               <Btn title="My Portfolio" kind="soft" icon="briefcase-outline" small onPress={() => setView('portfolio')} />
             </View>
@@ -4337,7 +4377,7 @@ export function StockMarketModal({ visible, onClose }) {
         {largeCap.length > 0 ? (
           <>
             <Text style={[FONT.tiny, { fontWeight: '800', color: C.sub, marginBottom: 6 }]}>LARGE CAP</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 12 }} style={{ marginBottom: 16 }}>
               {largeCap.map(st => <MiniStockCard key={st.id} stock={st} onPress={() => setSelectedId(st.id)} />)}
             </ScrollView>
           </>
@@ -4346,50 +4386,41 @@ export function StockMarketModal({ visible, onClose }) {
         {trending.length > 0 ? (
           <>
             <Text style={[FONT.tiny, { fontWeight: '800', color: C.sub, marginBottom: 6 }]}>TRENDING</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 12 }} style={{ marginBottom: 16 }}>
               {trending.map(st => <MiniStockCard key={st.id} stock={st} onPress={() => setSelectedId(st.id)} />)}
             </ScrollView>
           </>
         ) : null}
 
-        <Text style={[FONT.tiny, { fontWeight: '800', color: C.sub, marginBottom: 6 }]}>ALL COMPANIES</Text>
-        <TextInput value={query} onChangeText={t => { setQuery(t); setPage(1); }} placeholder="Search companies or sectors..."
-          placeholderTextColor={C.faint}
-          style={{ backgroundColor: C.bgSoft, borderRadius: RADIUS.md, borderWidth: 1, borderColor: C.border, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10, color: C.text }} />
-
-        <FlatList
-          data={visibleRows}
-          keyExtractor={s => s.id}
-          renderItem={({ item: st }) => {
-            const live = isMarketOpen(now) ? liveStockPrice(st, now) : st.price;
-            const ret = stockYearReturn(st);
-            const pos = portfolio[st.id];
-            return (
-              <Pressable onPress={() => setSelectedId(st.id)}>
-                <Card style={{ marginBottom: 8, padding: 10 }}>
-                  <Row style={{ justifyContent: 'space-between' }}>
-                    <View style={{ flex: 1 }}>
-                      <Row>
-                        <Text style={[FONT.body, { fontWeight: '700', flexShrink: 1 }]} numberOfLines={1}>{st.name}</Text>
-                        {pos ? <Icon name="briefcase-check" size={13} color={C.blue} style={{ marginLeft: 6 }} /> : null}
-                      </Row>
-                      <Text style={FONT.tiny}>{st.sector}</Text>
-                    </View>
-                    <View style={{ alignItems: 'flex-end' }}>
-                      <Text style={[FONT.mono, { fontWeight: '800' }]}>{inr(live)}</Text>
-                      <Text style={[FONT.tiny, { fontWeight: '800', color: ret >= 0 ? C.green : C.red }]}>
-                        {ret >= 0 ? '▲' : '▼'} {Math.abs(Math.round(ret * 1000) / 10)}%
-                      </Text>
-                    </View>
-                  </Row>
-                </Card>
-              </Pressable>
-            );
-          }}
-          ListFooterComponent={<LoadMore shown={visibleRows.length} total={filtered.length} onMore={() => setPage(p => p + 1)} />}
-          contentContainerStyle={{ paddingBottom: 24 }}
-        />
-      </View>
+        <Text style={[FONT.tiny, { fontWeight: '800', color: C.sub, marginBottom: 6 }]}>ALL COMPANIES · {filtered.length.toLocaleString()}</Text>
+        {visibleRows.map(st => {
+          const live = isMarketOpen(now) ? liveStockPrice(st, now) : st.price;
+          const ret = stockYearReturn(st);
+          const pos = portfolio[st.id];
+          return (
+            <Pressable key={st.id} onPress={() => setSelectedId(st.id)}>
+              <Card style={{ marginBottom: 8, padding: 10 }}>
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <View style={{ flex: 1 }}>
+                    <Row>
+                      <Text style={[FONT.body, { fontWeight: '700', flexShrink: 1 }]} numberOfLines={1}>{st.name}</Text>
+                      {pos ? <Icon name="briefcase-check" size={13} color={C.blue} style={{ marginLeft: 6 }} /> : null}
+                    </Row>
+                    <Text style={FONT.tiny}>{st.sector}</Text>
+                  </View>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={[FONT.mono, { fontWeight: '800' }]}>{inr(live)}</Text>
+                    <Text style={[FONT.tiny, { fontWeight: '800', color: ret >= 0 ? C.green : C.red }]}>
+                      {ret >= 0 ? '▲' : '▼'} {Math.abs(Math.round(ret * 1000) / 10)}%
+                    </Text>
+                  </View>
+                </Row>
+              </Card>
+            </Pressable>
+          );
+        })}
+        <LoadMore shown={visibleRows.length} total={filtered.length} onMore={() => setPage(p => p + 1)} />
+      </ScrollView>
     </Sheet>
   );
 }
@@ -4488,7 +4519,7 @@ export function CountriesModal({ visible, onClose }) {
   );
 }
 
-// Fires once, the moment an existing save first crosses into v10.8.6 — the
+// Fires once, the moment an existing save first crosses into v10.8.7 — the
 // final grand release. Pure celebration screen, no game logic.
 export function FinaleModal({ visible, onClose }) {
   const company = useGame(s => s.company);
@@ -4502,7 +4533,7 @@ export function FinaleModal({ visible, onClose }) {
         </View>
         <Text style={[FONT.h1, { textAlign: 'center' }]}>Congratulations, {company?.name}!</Text>
         <Text style={[FONT.body, { textAlign: 'center', marginTop: 10, color: C.sub, lineHeight: 20 }]}>
-          Truck Empire Tycoon just hit its final grand release — v10.8.6. The Stock Market is open, the roads are yours, and this
+          Truck Empire Tycoon just hit its final grand release — v10.8.7. The Stock Market is open, the roads are yours, and this
           send-off is for every kilometre you've driven to get here.
         </Text>
         <Card style={{ marginTop: 18, width: '100%', backgroundColor: '#0F172A', borderColor: '#1E293B' }}>

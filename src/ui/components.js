@@ -317,13 +317,18 @@ const sl = StyleSheet.create({
 
 // ---------- Stat card ----------
 export function Stat({ icon, label, value, color = C.text, sub }) {
+  // Fixed size, wraps to a 2nd line instead of auto-shrinking — RN's
+  // adjustsFontSizeToFit shrinks unpredictably hard on Android the moment
+  // ANY sibling card in the same row has slightly longer text, which made
+  // 3 of 4 Economy-tab cards read near-illegible while only the shortest
+  // (Distance) stayed full size. A fixed size + wrap is always readable.
   return (
-    <Card style={{ flex: 1, padding: 12, minWidth: 0, minHeight: 78, justifyContent: 'center' }}>
+    <Card style={{ flex: 1, padding: 12, minWidth: 0, minHeight: 82, justifyContent: 'center' }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
         <Icon name={icon} size={15} color={C.sub} />
         <Text style={[FONT.tiny, { marginLeft: 5, textTransform: 'uppercase', letterSpacing: 0.4 }]} numberOfLines={1}>{label}</Text>
       </View>
-      <Text style={[FONT.h3, { color, fontSize: 17 }]} numberOfLines={1} adjustsFontSizeToFit>{value}</Text>
+      <Text style={[FONT.h3, { color, fontSize: 15 }]} numberOfLines={2}>{value}</Text>
       {sub ? <Text style={FONT.tiny} numberOfLines={1}>{sub}</Text> : null}
     </Card>
   );

@@ -443,12 +443,16 @@ export const CARGO_TYPES = [
 ];
 
 export const CAMPAIGNS = [
+  { id: 'digital', name: 'Digital Push', cost: 15000, days: 3, boost: 0.05, icon: 'cellphone-marker',
+    desc: 'Quick social media ads and local search listings — cheap, short, fast to try.' },
   { id: 'city', name: 'City Campaign', cost: 50000, days: 7, boost: 0.10, icon: 'city-variant-outline',
     desc: 'Local radio spots and billboards around your HQ city.' },
   { id: 'regional', name: 'Regional Drive', cost: 200000, days: 14, boost: 0.25, icon: 'map-outline',
     desc: 'Regional TV, highway hoardings and dealer tie-ups across the state.' },
   { id: 'national', name: 'National Blitz', cost: 1000000, days: 30, boost: 0.50, icon: 'earth',
     desc: 'Prime-time national advertising. Everyone knows your name.' },
+  { id: 'influencer', name: 'Influencer Tour', cost: 2500000, days: 45, boost: 0.65, icon: 'star-circle-outline',
+    desc: 'Sponsored logistics-influencer tour across every major hub — the longest, strongest boost available.' },
 ];
 
 export const POWERUPS = [

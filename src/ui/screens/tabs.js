@@ -1065,7 +1065,9 @@ function RepayQuickAmounts({ remaining, balance, value, onChange }) {
 // Collateral picker — trucks + non-HQ garages the player can pledge, with a
 // live running total vs the 70% coverage bar so overshooting/undershooting
 // the requirement is obvious before they tap Apply.
+const COLLATERAL_PAGE = 5;
 function CollateralPicker({ amount, trucks, hubs, pledgedT, pledgedH, selTrucks, selHubs, onToggleTruck, onToggleHub }) {
+  const [page, setPage] = useState(1);
   const required = Math.ceil((amount || 0) * COLLATERAL_COVERAGE);
   const pledgeable = { truckIds: [...selTrucks], hubCityIds: [...selHubs] };
   const s = { trucks, hubs };
@@ -1073,6 +1075,13 @@ function CollateralPicker({ amount, trucks, hubs, pledgedT, pledgedH, selTrucks,
   const met = value >= required && required > 0;
   const availTrucks = trucks.filter(t => !pledgedT.has(t.id));
   const availHubs = hubs.filter(h => !h.hq && !pledgedH.has(h.cityId));
+  // One combined lazy-loaded list — 5 rows at a time — so pledging against
+  // a big fleet never renders (or lags on) the whole thing at once.
+  const items = useMemo(() => [
+    ...availTrucks.map(t => ({ kind: 'truck', t })),
+    ...availHubs.map(h => ({ kind: 'hub', h })),
+  ], [availTrucks, availHubs]);
+  const visible = items.slice(0, page * COLLATERAL_PAGE);
 
   return (
     <Card style={{ marginBottom: 10 }}>
@@ -1086,22 +1095,23 @@ function CollateralPicker({ amount, trucks, hubs, pledgedT, pledgedH, selTrucks,
         <View style={{ width: `${Math.min(100, required ? (value / required) * 100 : 0)}%`, height: 6, backgroundColor: met ? C.green : C.amber }} />
       </View>
       <View style={[st.pickerBox, { marginTop: 10 }]}>
-        {availTrucks.length === 0 && availHubs.length === 0 ? (
+        {items.length === 0 ? (
           <Text style={[FONT.tiny, { padding: 8 }]}>No free (unpledged) trucks or garages to offer as collateral.</Text>
-        ) : null}
-        {availTrucks.map(t => {
-          const model = modelById(t.modelId);
-          const val = collateralTotalValue(s, { truckIds: [t.id], hubCityIds: [] });
-          const on = selTrucks.includes(t.id);
-          return (
-            <Pressable key={t.id} style={st.pickerRow} onPress={() => onToggleTruck(t.id)}>
-              <Icon name={on ? 'checkbox-marked' : 'checkbox-blank-outline'} size={18} color={on ? C.blue : C.faint} />
-              <Text style={[FONT.tiny, { marginLeft: 8, flex: 1 }]} numberOfLines={1}>{t.customName || model.name}</Text>
-              <Text style={[FONT.tiny, { color: C.faint }]}>{inrShort(val)}</Text>
-            </Pressable>
-          );
-        })}
-        {availHubs.map(h => {
+        ) : visible.map(item => {
+          if (item.kind === 'truck') {
+            const t = item.t;
+            const model = modelById(t.modelId);
+            const val = collateralTotalValue(s, { truckIds: [t.id], hubCityIds: [] });
+            const on = selTrucks.includes(t.id);
+            return (
+              <Pressable key={t.id} style={st.pickerRow} onPress={() => onToggleTruck(t.id)}>
+                <Icon name={on ? 'checkbox-marked' : 'checkbox-blank-outline'} size={18} color={on ? C.blue : C.faint} />
+                <Text style={[FONT.tiny, { marginLeft: 8, flex: 1 }]} numberOfLines={1}>{t.customName || model.name}</Text>
+                <Text style={[FONT.tiny, { color: C.faint }]}>{inrShort(val)}</Text>
+              </Pressable>
+            );
+          }
+          const h = item.h;
           const val = collateralTotalValue(s, { truckIds: [], hubCityIds: [h.cityId] });
           const on = selHubs.includes(h.cityId);
           return (
@@ -1113,6 +1123,11 @@ function CollateralPicker({ amount, trucks, hubs, pledgedT, pledgedH, selTrucks,
           );
         })}
       </View>
+      {visible.length < items.length ? (
+        <Pressable onPress={() => setPage(p => p + 1)} style={{ paddingVertical: 10, alignItems: 'center' }}>
+          <Text style={[FONT.tiny, { color: C.blue, fontWeight: '700' }]}>Show more ({items.length - visible.length})</Text>
+        </Pressable>
+      ) : null}
     </Card>
   );
 }
@@ -1670,6 +1685,8 @@ export function MarketingTab() {
   const balance = useGame(s => s.balance);
   const settings = useGame(s => s.settings);
   const launchCampaign = useGame(s => s.launchCampaign);
+  const cancelCampaign = useGame(s => s.cancelCampaign);
+  const [confirmCancel, setConfirmCancel] = useState(null);
   const toast = useToast();
   const active = campaigns.filter(a => a.endsAt > Date.now());
   const now = useNow(active.length > 0);
@@ -1759,6 +1776,15 @@ export function MarketingTab() {
               <Pill text={`+${Math.round(def.boost * 100)}%`} color={C.green} bg={C.greenSoft} icon="trending-up" />
             </Row>
             <Progress pct={elapsed} color={C.green} style={{ marginTop: 12 }} />
+            <Btn title={confirmCancel === a.id ? 'Confirm — end this campaign' : 'Cancel campaign'}
+              kind={confirmCancel === a.id ? 'danger' : 'ghost'} small icon="bullhorn-off" style={{ marginTop: 10 }}
+              onPress={() => {
+                if (confirmCancel === a.id) {
+                  const r = cancelCampaign(a.id);
+                  toast(r.ok ? (r.refund > 0 ? `Cancelled — ${inr(r.refund)} refunded` : 'Cancelled') : r.err, r.ok ? 'success' : 'error');
+                  setConfirmCancel(null);
+                } else setConfirmCancel(a.id);
+              }} />
           </Card>
         );
       })}

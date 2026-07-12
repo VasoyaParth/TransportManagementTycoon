@@ -661,7 +661,7 @@ export const EASTER_EGGS = [
   { id: 'long_hauler', title: 'Long Hauler', hint: 'Obsessed with the odometer, ten times over.', where: 'Tap the Distance stat in the Economy tab 10 times fast.' },
   { id: 'ledger_lord', title: 'Ledger Lord', hint: 'A true auditor checks the books twelve times.', where: 'Tap the Company Ledger header icon 12 times fast.' },
   { id: 'streak_freak', title: 'Streak Freak', hint: 'Worship the daily flame, eleven-fold.', where: 'Tap the streak flame in the Rewards tab 11 times fast.' },
-  // v10.8.6 — a few final ones, including one for the other half of the team.
+  // v10.8.7 — a few final ones, including one for the other half of the team.
   { id: 'meet_jeel', title: 'Meet Jeel', hint: 'The other half of the team deserves a knock too.', where: 'Tap the Jeel Gajera developer card in Settings → About 8 times fast.' },
   { id: 'market_watcher', title: 'Market Watcher', hint: 'Some people just like watching numbers tick.', where: 'Tap the "listed" count in the Stock Market\'s portfolio card 6 times fast.' },
   { id: 'donor', title: 'Big Heart', hint: 'Giving it all away, one tap at a time.', where: 'Tap the Charity Drive icon in the Bank sheet 5 times fast.' },
@@ -725,7 +725,7 @@ export const ACHIEVEMENTS = [
     desc: 'Best daily-login streak reached.', levels: [3, 7, 14, 30, 90] },
   { id: 'big_spender', title: 'Big Spender', icon: 'gold', unit: 'gold',
     desc: 'Gold spent on power-ups and repairs.', levels: [25, 100, 400, 1200, 4000] },
-  // v10.8.6 — tracks fed by the new Stock Market / collateral loans / Charity Drive.
+  // v10.8.7 — tracks fed by the new Stock Market / collateral loans / Charity Drive.
   { id: 'market_mogul', title: 'Market Mogul', icon: 'finance', unit: '₹',
     desc: 'Stock portfolio value held at one time.', levels: [100000, 1000000, 10000000, 50000000, 200000000] },
   { id: 'diversified', title: 'Diversified', icon: 'chart-donut', unit: 'companies',
@@ -945,7 +945,7 @@ export const useGame = create(
         };
         set({
           phase: 'game',
-          updateGiftVersion: '3.0.0', // fresh companies skip only the old "two horizons" gift — the v10.8.6 Grand Finale (settings.finaleSeen) is NOT stamped here, so every new company still gets that celebration once
+          updateGiftVersion: '3.0.0', // fresh companies skip only the old "two horizons" gift — the v10.8.7 Grand Finale (settings.finaleSeen) is NOT stamped here, so every new company still gets that celebration once
           company: { name, ceo, logo, avatar, hqCityId, code, createdAt: Date.now() },
           balance: startCapital - model.price,
           gold: 100,
@@ -1096,7 +1096,7 @@ export const useGame = create(
             'UPDATE 3.0.0 IS HERE — the biggest one ever! 17 new countries across two horizons: Thailand to the Philippines & Indonesia in the east, Saudi Arabia to Kenya & Ethiopia in the west. Welcome gift: +₹2.5 Crore + 300 Gold. Thank you for building your empire with us!');
           play('coin', 1);
         }
-        // ---- v10.8.6 Grand Finale gift: the Stock Market goes live, and
+        // ---- v10.8.7 Grand Finale gift: the Stock Market goes live, and
         // this is the final major content release. Deliberately on its OWN
         // flag (settings.finaleSeen) instead of chaining onto
         // updateGiftVersion — every company (brand new or returning) gets
@@ -1108,9 +1108,9 @@ export const useGame = create(
             settings: { ...gcur.settings, finaleSeen: true },
             gold: gcur.gold + 500, balance: gcur.balance + 50000000,
           });
-          get().logLedger('bonus', 'party-popper', 'v10.8.6 Grand Finale gift — Stock Market is live!', 50000000);
+          get().logLedger('bonus', 'party-popper', 'v10.8.7 Grand Finale gift — Stock Market is live!', 50000000);
           get().notify('system', 'party-popper',
-            'CONGRATULATIONS — TRUCK EMPIRE TYCOON v10.8.6 IS HERE! The Stock Market has opened: 80 fixed companies to trade, a live ticker, candlestick charts, and your own IPO to launch once you\'ve earned it. This is our final grand release — thank you for building this empire with us. +₹5 Crore + 500 Gold to celebrate!');
+            'CONGRATULATIONS — TRUCK EMPIRE TYCOON v10.8.7 IS HERE! The Stock Market has opened: 80 fixed companies to trade, a live ticker, candlestick charts, and your own IPO to launch once you\'ve earned it. This is our final grand release — thank you for building this empire with us. +₹5 Crore + 500 Gold to celebrate!');
           play('coin', 1);
         }
         // ---- v2.4.0 daily/periodic systems ----
@@ -2094,6 +2094,26 @@ export const useGame = create(
         get().notify('system', 'bullhorn', `${def.name} launched! +${Math.round(def.boost * 100)}% revenue for ${def.days} days.`);
         return { ok: true };
       },
+      // Cancel a running campaign early — refunds the unused portion of what
+      // it cost, prorated by time remaining, so ending one to switch to a
+      // better one isn't just a sunk loss.
+      cancelCampaign(activeId) {
+        const s = get();
+        const a = s.campaigns.find(x => x.id === activeId);
+        if (!a || a.endsAt <= Date.now()) return { ok: false, err: 'Campaign not active' };
+        const def = CAMPAIGNS.find(c => c.id === a.campaignId);
+        if (!def) return { ok: false, err: 'Unknown campaign' };
+        const totalMs = a.endsAt - a.startedAt;
+        const remainingFrac = Math.max(0, Math.min(1, (a.endsAt - Date.now()) / totalMs));
+        const refund = Math.round(def.cost * remainingFrac * 0.5); // 50% of the unused-time value back
+        set({
+          balance: s.balance + refund,
+          campaigns: s.campaigns.filter(x => x.id !== activeId),
+        });
+        if (refund > 0) get().logLedger('marketing', 'bullhorn-off', `Cancelled · ${def.name}`, refund);
+        get().notify('system', 'bullhorn-off', `${def.name} cancelled${refund > 0 ? ` — ${inr(refund)} refunded` : ''}.`);
+        return { ok: true, refund };
+      },
 
       // ---------- contracts ----------
       acceptContract(contractId) {
@@ -2594,13 +2614,18 @@ export const useGame = create(
       // reads as "you earned the right to list", not a cash-code shortcut.
       ipoRequirements() {
         const s = get();
-        const req = { km: 100000, revenue: 500000000, deliveries: 300 };
+        const req = { km: 50000, revenue: 25000000, deliveries: 20 };
         return {
           ...req,
           have: { km: Math.floor(s.stats.km), revenue: Math.floor(s.stats.revenue), deliveries: s.stats.deliveries },
           met: s.stats.km >= req.km && s.stats.revenue >= req.revenue && s.stats.deliveries >= req.deliveries,
         };
       },
+      // Every founded company tracks its own `founderShares` (the original
+      // grant) alongside the live portfolio position, so post-launch we can
+      // show exactly how many of those founder shares have been sold off and
+      // how much real profit that's realized — a proper "my IPO" dashboard,
+      // not just another line in the main list.
       launchStock() {
         const s = get();
         const { met } = get().ipoRequirements();
@@ -2608,8 +2633,11 @@ export const useGame = create(
         const listingFee = 5000000;
         if (s.balance < listingFee) return { ok: false, err: `Need ${inr(listingFee)} listing fee` };
         const [fresh] = generateStockPool(1, Math.random);
-        const stock = { ...fresh, name: `${s.company?.name || 'Founder'} ${fresh.name.split(' ').slice(1).join(' ')}`, founder: 'player' };
         const founderShares = 5000;
+        const stock = {
+          ...fresh, name: `${s.company?.name || 'Founder'} ${fresh.name.split(' ').slice(1).join(' ')}`,
+          founder: 'player', founderShares, listingFee,
+        };
         set({
           balance: s.balance - listingFee,
           stocks: [...(s.stocks || []), stock],
@@ -2618,6 +2646,25 @@ export const useGame = create(
         get().logLedger('stock', 'rocket-launch', `IPO listed · ${stock.name}`, -listingFee);
         get().notify('system', 'rocket-launch', `${stock.name} just listed on the exchange — you hold ${founderShares.toLocaleString()} founder shares!`);
         return { ok: true, stock };
+      },
+      // Founder-IPO dashboard data: for every company you personally listed,
+      // how many founder shares are left, how many you've sold, and the real
+      // cash profit extracted from those sales (tracked via the ledger, so
+      // it reflects the ACTUAL sell prices at the time, not an estimate).
+      myIpoInsights() {
+        const s = get();
+        const founded = (s.stocks || []).filter(st => st.founder === 'player');
+        return founded.map(st => {
+          const pos = s.portfolio?.[st.id];
+          const held = pos?.shares || 0;
+          const sold = Math.max(0, (st.founderShares || 0) - held);
+          // Sum every individual sell entry for this company — each one
+          // already recorded its own real proceeds at the time of the sale.
+          const proceeds = (s.ledger || [])
+            .filter(e => e.kind === 'stock' && e.label.startsWith('Sold ') && e.label.endsWith(`× ${st.name}`))
+            .reduce((a, e) => a + e.amount, 0);
+          return { stock: st, founderShares: st.founderShares || 0, held, sold, currentValue: held * st.price, proceeds };
+        });
       },
 
       // ---------- fuel market ----------
