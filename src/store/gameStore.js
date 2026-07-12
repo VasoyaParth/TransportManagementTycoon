@@ -661,7 +661,7 @@ export const EASTER_EGGS = [
   { id: 'long_hauler', title: 'Long Hauler', hint: 'Obsessed with the odometer, ten times over.', where: 'Tap the Distance stat in the Economy tab 10 times fast.' },
   { id: 'ledger_lord', title: 'Ledger Lord', hint: 'A true auditor checks the books twelve times.', where: 'Tap the Company Ledger header icon 12 times fast.' },
   { id: 'streak_freak', title: 'Streak Freak', hint: 'Worship the daily flame, eleven-fold.', where: 'Tap the streak flame in the Rewards tab 11 times fast.' },
-  // v10.8.7 — a few final ones, including one for the other half of the team.
+  // v10.9.0 — a few final ones, including one for the other half of the team.
   { id: 'meet_jeel', title: 'Meet Jeel', hint: 'The other half of the team deserves a knock too.', where: 'Tap the Jeel Gajera developer card in Settings → About 8 times fast.' },
   { id: 'market_watcher', title: 'Market Watcher', hint: 'Some people just like watching numbers tick.', where: 'Tap the "listed" count in the Stock Market\'s portfolio card 6 times fast.' },
   { id: 'donor', title: 'Big Heart', hint: 'Giving it all away, one tap at a time.', where: 'Tap the Charity Drive icon in the Bank sheet 5 times fast.' },
@@ -725,7 +725,7 @@ export const ACHIEVEMENTS = [
     desc: 'Best daily-login streak reached.', levels: [3, 7, 14, 30, 90] },
   { id: 'big_spender', title: 'Big Spender', icon: 'gold', unit: 'gold',
     desc: 'Gold spent on power-ups and repairs.', levels: [25, 100, 400, 1200, 4000] },
-  // v10.8.7 — tracks fed by the new Stock Market / collateral loans / Charity Drive.
+  // v10.9.0 — tracks fed by the new Stock Market / collateral loans / Charity Drive.
   { id: 'market_mogul', title: 'Market Mogul', icon: 'finance', unit: '₹',
     desc: 'Stock portfolio value held at one time.', levels: [100000, 1000000, 10000000, 50000000, 200000000] },
   { id: 'diversified', title: 'Diversified', icon: 'chart-donut', unit: 'companies',
@@ -945,7 +945,7 @@ export const useGame = create(
         };
         set({
           phase: 'game',
-          updateGiftVersion: '3.0.0', // fresh companies skip only the old "two horizons" gift — the v10.8.7 Grand Finale (settings.finaleSeen) is NOT stamped here, so every new company still gets that celebration once
+          updateGiftVersion: '3.0.0', // fresh companies skip only the old "two horizons" gift — the v10.9.0 Grand Finale (settings.finaleSeen) is NOT stamped here, so every new company still gets that celebration once
           company: { name, ceo, logo, avatar, hqCityId, code, createdAt: Date.now() },
           balance: startCapital - model.price,
           gold: 100,
@@ -1096,7 +1096,7 @@ export const useGame = create(
             'UPDATE 3.0.0 IS HERE — the biggest one ever! 17 new countries across two horizons: Thailand to the Philippines & Indonesia in the east, Saudi Arabia to Kenya & Ethiopia in the west. Welcome gift: +₹2.5 Crore + 300 Gold. Thank you for building your empire with us!');
           play('coin', 1);
         }
-        // ---- v10.8.7 Grand Finale gift: the Stock Market goes live, and
+        // ---- v10.9.0 Grand Finale gift: the Stock Market goes live, and
         // this is the final major content release. Deliberately on its OWN
         // flag (settings.finaleSeen) instead of chaining onto
         // updateGiftVersion — every company (brand new or returning) gets
@@ -1108,9 +1108,9 @@ export const useGame = create(
             settings: { ...gcur.settings, finaleSeen: true },
             gold: gcur.gold + 500, balance: gcur.balance + 50000000,
           });
-          get().logLedger('bonus', 'party-popper', 'v10.8.7 Grand Finale gift — Stock Market is live!', 50000000);
+          get().logLedger('bonus', 'party-popper', 'v10.9.0 Grand Finale gift — Stock Market is live!', 50000000);
           get().notify('system', 'party-popper',
-            'CONGRATULATIONS — TRUCK EMPIRE TYCOON v10.8.7 IS HERE! The Stock Market has opened: 80 fixed companies to trade, a live ticker, candlestick charts, and your own IPO to launch once you\'ve earned it. This is our final grand release — thank you for building this empire with us. +₹5 Crore + 500 Gold to celebrate!');
+            'CONGRATULATIONS — TRUCK EMPIRE TYCOON v10.9.0 IS HERE! The Stock Market has opened: 80 fixed companies to trade, a live ticker, candlestick charts, and your own IPO to launch once you\'ve earned it. This is our final grand release — thank you for building this empire with us. +₹5 Crore + 500 Gold to celebrate!');
           play('coin', 1);
         }
         // ---- v2.4.0 daily/periodic systems ----

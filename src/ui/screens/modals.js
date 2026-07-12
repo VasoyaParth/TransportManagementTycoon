@@ -3783,8 +3783,19 @@ function LoadMore({ shown, total, onMore }) {
 // A candle/line chart built from a stock's daily-close history — synthetic
 // OHLC per point (deterministic jitter from the point's own values, not
 // stored) so candles look real without doubling the persisted data.
+// Turns a chart point's "day" into a readable label — real clock time for
+// the live 1H/3H windows, a calendar-style day count for everything else.
+function pointLabel(day, isLive) {
+  if (isLive) {
+    const d = new Date(day);
+    return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  }
+  return day <= 0 ? `Day ${day}` : `Day ${day}`;
+}
+
 function StockChart({ stock, days, mode, tf, now }) {
-  const W = 320, H = 140, PAD = 6;
+  const W = 320, H = 150, PAD = 6, AXIS_H = 16;
+  const [touchIdx, setTouchIdx] = useState(null);
   let points;
   if (tf?.live) {
     // Live 1H/3H windows are synthesized from the same deterministic jitter
@@ -3809,48 +3820,82 @@ function StockChart({ stock, days, mode, tf, now }) {
   const min = Math.min(...prices), max = Math.max(...prices);
   const span = Math.max(0.01, max - min);
   const x = i => PAD + (i / Math.max(1, points.length - 1)) * (W - PAD * 2);
-  const y = v => H - PAD - ((v - min) / span) * (H - PAD * 2);
+  const y = v => H - PAD - AXIS_H - ((v - min) / span) * (H - PAD * 2 - AXIS_H);
   const up = points[points.length - 1].price >= points[0].price;
   const color = up ? C.green : C.red;
 
-  if (mode === 'candle') {
-    const cw = Math.max(2, ((W - PAD * 2) / points.length) * 0.6);
-    return (
-      <Svg width={W} height={H}>
-        {points.map((p, i) => {
-          // Synthetic OHLC: open = previous close, close = this point,
-          // high/low nudged out by a tiny deterministic jitter.
-          const openP = i > 0 ? points[i - 1].price : p.price;
-          const closeP = p.price;
-          const seed = Math.abs(Math.sin(p.day * 12.9898 + i));
-          const wick = span * 0.04 * (0.3 + seed);
-          const hi = Math.max(openP, closeP) + wick;
-          const lo = Math.min(openP, closeP) - wick;
-          const cUp = closeP >= openP;
-          const cColor = cUp ? C.green : C.red;
-          const cx = x(i);
-          const bodyTop = y(Math.max(openP, closeP));
-          const bodyBot = y(Math.min(openP, closeP));
-          return (
-            <G key={i}>
-              <Path d={`M${cx} ${y(hi)} L${cx} ${y(lo)}`} stroke={cColor} strokeWidth={1} />
-              <Path
-                d={`M${cx - cw / 2} ${bodyTop} L${cx + cw / 2} ${bodyTop} L${cx + cw / 2} ${Math.max(bodyBot, bodyTop + 1)} L${cx - cw / 2} ${Math.max(bodyBot, bodyTop + 1)} Z`}
-                fill={cColor} />
-            </G>
-          );
-        })}
-      </Svg>
-    );
-  }
+  // Touch-scrub: dragging a finger across the chart snaps to the nearest
+  // point and shows its exact price + time — the closest RN equivalent of
+  // a desktop chart's mouse-hover tooltip.
+  const respond = (evt) => {
+    const lx = evt.nativeEvent.locationX;
+    const frac = Math.max(0, Math.min(1, (lx - PAD) / (W - PAD * 2)));
+    const idx = Math.round(frac * (points.length - 1));
+    setTouchIdx(Math.max(0, Math.min(points.length - 1, idx)));
+  };
+  const touched = touchIdx != null ? points[touchIdx] : null;
 
-  const line = points.map((p, i) => `${x(i)},${y(p.price)}`).join(' ');
-  const area = `${x(0)},${H - PAD} ${line} ${x(points.length - 1)},${H - PAD}`;
   return (
-    <Svg width={W} height={H}>
-      <Polyline points={area} fill={color} opacity={0.12} stroke="none" />
-      <Polyline points={line} fill="none" stroke={color} strokeWidth={2} />
-    </Svg>
+    <View>
+      {touched ? (
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4, paddingHorizontal: 2 }}>
+          <Text style={[FONT.tiny, { fontWeight: '800' }]}>{inr(touched.price)}</Text>
+          <Text style={[FONT.tiny, { color: C.faint }]}>{pointLabel(touched.day, !!tf?.live)}</Text>
+        </View>
+      ) : null}
+      <View
+        onStartShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => true}
+        onResponderGrant={respond}
+        onResponderMove={respond}
+        onResponderRelease={() => setTouchIdx(null)}
+      >
+        <Svg width={W} height={H}>
+          {mode === 'candle' ? (
+            (() => {
+              const cw = Math.max(2, ((W - PAD * 2) / points.length) * 0.6);
+              return points.map((p, i) => {
+                // Synthetic OHLC: open = previous close, close = this point,
+                // high/low nudged out by a tiny deterministic jitter.
+                const openP = i > 0 ? points[i - 1].price : p.price;
+                const closeP = p.price;
+                const seed = Math.abs(Math.sin(p.day * 12.9898 + i));
+                const wick = span * 0.04 * (0.3 + seed);
+                const hi = Math.max(openP, closeP) + wick;
+                const lo = Math.min(openP, closeP) - wick;
+                const cUp = closeP >= openP;
+                const cColor = cUp ? C.green : C.red;
+                const cx = x(i);
+                const bodyTop = y(Math.max(openP, closeP));
+                const bodyBot = y(Math.min(openP, closeP));
+                return (
+                  <G key={i}>
+                    <Path d={`M${cx} ${y(hi)} L${cx} ${y(lo)}`} stroke={cColor} strokeWidth={1} />
+                    <Path
+                      d={`M${cx - cw / 2} ${bodyTop} L${cx + cw / 2} ${bodyTop} L${cx + cw / 2} ${Math.max(bodyBot, bodyTop + 1)} L${cx - cw / 2} ${Math.max(bodyBot, bodyTop + 1)} Z`}
+                      fill={cColor} />
+                  </G>
+                );
+              });
+            })()
+          ) : (
+            <>
+              <Polyline points={`${x(0)},${H - PAD - AXIS_H} ${points.map((p, i) => `${x(i)},${y(p.price)}`).join(' ')} ${x(points.length - 1)},${H - PAD - AXIS_H}`}
+                fill={color} opacity={0.12} stroke="none" />
+              <Polyline points={points.map((p, i) => `${x(i)},${y(p.price)}`).join(' ')} fill="none" stroke={color} strokeWidth={2} />
+            </>
+          )}
+          {touched ? (
+            <G>
+              <Path d={`M${x(touchIdx)} ${PAD} L${x(touchIdx)} ${H - PAD - AXIS_H}`} stroke={C.faint} strokeWidth={1} strokeDasharray="3,3" />
+              <Circle cx={x(touchIdx)} cy={y(touched.price)} r={4} fill={color} stroke="#fff" strokeWidth={1.5} />
+            </G>
+          ) : null}
+          <SvgText x={x(0)} y={H - 3} fontSize={9} fill={C.faint}>{pointLabel(points[0].day, !!tf?.live)}</SvgText>
+          <SvgText x={x(points.length - 1)} y={H - 3} fontSize={9} fill={C.faint} textAnchor="end">{pointLabel(points[points.length - 1].day, !!tf?.live)}</SvgText>
+        </Svg>
+      </View>
+    </View>
   );
 }
 
@@ -4054,12 +4099,13 @@ function ShareStepper({ max, accent, costFor, costLabel = 'cost', onConfirm }) {
 // it does NOT share a page with buying/selling other companies' shares.
 // Dedicated portfolio screen — every held company with shares, avg cost,
 // current value, and P&L, tapping straight into that stock's detail view.
-function PortfolioPanel({ stocks, portfolio, onBack, onOpen }) {
+function PortfolioPanel({ stocks, portfolio, sellStock, toast, onBack, onOpen }) {
   // Self-ticking clock so every holding's value/P&L moves live while this
   // screen is open, same real-time feel as the main list and detail view —
   // independent of the parent's ticker so this works even if reached
   // straight from elsewhere later.
   const [now, setNow] = useState(Date.now());
+  const [confirmSellAll, setConfirmSellAll] = useState(false);
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 3000);
     return () => clearInterval(id);
@@ -4074,6 +4120,16 @@ function PortfolioPanel({ stocks, portfolio, onBack, onOpen }) {
   const totalCost = rows.reduce((a, r) => a + r.pos.shares * r.pos.avgCost, 0);
   const totalPL = totalValue - totalCost;
 
+  const sellAll = () => {
+    let soldValue = 0, failed = 0;
+    for (const r of rows) {
+      const res = sellStock(r.stock.id, r.pos.shares);
+      if (res.ok) soldValue += res.proceeds; else failed++;
+    }
+    toast(failed ? `Sold what the market would take — ${inr(soldValue)}` : `Sold everything — ${inr(soldValue)}`, 'success');
+    setConfirmSellAll(false);
+  };
+
   return (
     <View>
       <Pressable onPress={onBack} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
@@ -4085,40 +4141,58 @@ function PortfolioPanel({ stocks, portfolio, onBack, onOpen }) {
           <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: open ? '#4ADE80' : '#64748B', marginRight: 6 }} />
           <Text style={[FONT.tiny, { color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 1 }]}>Total Portfolio Value {open ? '· LIVE' : '· market closed'}</Text>
         </Row>
-        <Text style={[FONT.h1, { color: '#F8FAFC', marginTop: 2 }]}>{inrShort(totalValue)}</Text>
-        <Text style={[FONT.tiny, { color: totalPL >= 0 ? '#4ADE80' : '#F87171', marginTop: 4, fontWeight: '800' }]}>
-          {totalPL >= 0 ? '▲' : '▼'} {inrShort(Math.abs(totalPL))} overall P&L · {rows.length} holding{rows.length === 1 ? '' : 's'}
-        </Text>
+        <Text style={[FONT.h1, { color: '#F8FAFC', marginTop: 2 }]}>{inr(totalValue)}</Text>
+        <Row style={{ justifyContent: 'space-between', marginTop: 6 }}>
+          <Text style={[FONT.tiny, { color: '#64748B' }]}>Invested {inr(totalCost)}</Text>
+          <Text style={[FONT.tiny, { color: totalPL >= 0 ? '#4ADE80' : '#F87171', fontWeight: '800' }]}>
+            {totalPL >= 0 ? '▲' : '▼'} {inr(Math.abs(totalPL))} ({totalCost > 0 ? Math.abs(Math.round((totalPL / totalCost) * 1000) / 10) : 0}%)
+          </Text>
+        </Row>
+        <Text style={[FONT.tiny, { color: '#64748B', marginTop: 2 }]}>{rows.length} holding{rows.length === 1 ? '' : 's'}</Text>
       </Card>
+
       {rows.length === 0 ? (
         <Card style={{ alignItems: 'center', paddingVertical: 28 }}>
           <Icon name="briefcase-outline" size={40} color={C.faint} />
           <Text style={[FONT.h3, { marginTop: 10 }]}>No holdings yet</Text>
           <Text style={[FONT.sub, { marginTop: 4, textAlign: 'center' }]}>Buy shares in any company from the main market list to start building a portfolio.</Text>
         </Card>
-      ) : rows.map(({ stock, pos, live }) => {
-        const value = pos.shares * live;
-        const cost = pos.shares * pos.avgCost;
-        const pl = value - cost;
-        return (
-          <Pressable key={stock.id} onPress={() => onOpen(stock.id)}>
-            <Card style={{ marginBottom: 8, padding: 10 }}>
-              <Row style={{ justifyContent: 'space-between' }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[FONT.body, { fontWeight: '700' }]} numberOfLines={1}>{stock.name}</Text>
-                  <Text style={FONT.tiny}>{pos.shares} shares · avg {inrShort(pos.avgCost)}</Text>
-                </View>
-                <View style={{ alignItems: 'flex-end' }}>
-                  <Text style={[FONT.mono, { fontWeight: '800' }]}>{inrShort(value)}</Text>
-                  <Text style={[FONT.tiny, { fontWeight: '800', color: pl >= 0 ? C.green : C.red }]}>
-                    {pl >= 0 ? '+' : ''}{inrShort(pl)}
-                  </Text>
-                </View>
-              </Row>
-            </Card>
-          </Pressable>
-        );
-      })}
+      ) : (
+        <>
+          {rows.map(({ stock, pos, live }) => {
+            const value = pos.shares * live;
+            const cost = pos.shares * pos.avgCost;
+            const pl = value - cost;
+            const allocation = totalValue > 0 ? (value / totalValue) * 100 : 0;
+            return (
+              <Pressable key={stock.id} onPress={() => onOpen(stock.id)}>
+                <Card style={{ marginBottom: 8, padding: 10 }}>
+                  <Row style={{ justifyContent: 'space-between' }}>
+                    <View style={{ flex: 1, marginRight: 8 }}>
+                      <Text style={[FONT.body, { fontWeight: '700' }]} numberOfLines={1}>{stock.name}</Text>
+                      <Text style={FONT.tiny}>{pos.shares} shares · avg {inr(pos.avgCost)}</Text>
+                      <Text style={[FONT.tiny, { color: C.faint, marginTop: 2 }]}>Invested {inr(cost)} · {Math.round(allocation)}% of portfolio</Text>
+                    </View>
+                    <View style={{ alignItems: 'center' }}>
+                      <Sparkline stock={stock} width={54} height={24} color={pl >= 0 ? C.green : C.red} />
+                    </View>
+                  </Row>
+                  <Row style={{ justifyContent: 'space-between', marginTop: 8, backgroundColor: C.bgSoft, borderRadius: RADIUS.sm, padding: 8 }}>
+                    <View><Text style={FONT.tiny}>Current value</Text><Text style={[FONT.mono, { fontWeight: '800' }]}>{inr(value)}</Text></View>
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={FONT.tiny}>Profit / Loss</Text>
+                      <Text style={[FONT.mono, { fontWeight: '800', color: pl >= 0 ? C.green : C.red }]}>{pl >= 0 ? '+' : ''}{inr(pl)}</Text>
+                    </View>
+                  </Row>
+                </Card>
+              </Pressable>
+            );
+          })}
+          <Btn title={confirmSellAll ? `Confirm — sell everything (${inr(totalValue)})` : 'Sell All Holdings'}
+            kind={confirmSellAll ? 'danger' : 'ghost'} icon="cash-fast" style={{ marginTop: 4 }}
+            onPress={() => { if (confirmSellAll) sellAll(); else setConfirmSellAll(true); }} />
+        </>
+      )}
     </View>
   );
 }
@@ -4194,16 +4268,41 @@ function IpoLaunchPanel({ req, insights, launchStock, toast, onBack, onLaunched,
 }
 
 // A single card in the Large Cap / Trending horizontal rails.
+// Tiny embedded trend line — last ~30 daily closes, no axes, just a glance
+// at the shape of the move. Pure SVG, no chart-library dependency.
+function Sparkline({ stock, width = 70, height = 28, color }) {
+  const hist = (stock.history || []).slice(-30);
+  const points = hist.length >= 2 ? hist : [{ price: stock.price }, { price: stock.price }];
+  const prices = points.map(p => p.price);
+  const min = Math.min(...prices), max = Math.max(...prices);
+  const span = Math.max(0.01, max - min);
+  const x = i => (i / Math.max(1, points.length - 1)) * width;
+  const y = v => height - ((v - min) / span) * height;
+  const line = points.map((p, i) => `${x(i)},${y(p.price)}`).join(' ');
+  return (
+    <Svg width={width} height={height}>
+      <Polyline points={line} fill="none" stroke={color} strokeWidth={1.5} />
+    </Svg>
+  );
+}
+
+// Card width scales with the name length — long company names get a wider
+// card instead of being crushed/truncated, short ones stay compact.
 function MiniStockCard({ stock, onPress }) {
   const ret = stockYearReturn(stock);
   const up = ret >= 0;
+  const color = up ? C.green : C.red;
+  const width = Math.max(120, Math.min(190, stock.name.length * 6.5 + 40));
   return (
-    <Pressable onPress={onPress} style={{ width: 130, marginRight: 8 }}>
+    <Pressable onPress={onPress} style={{ width, marginRight: 8 }}>
       <Card style={{ padding: 10 }}>
         <Text style={[FONT.tiny, { fontWeight: '800' }]} numberOfLines={2}>{stock.name}</Text>
         <Text style={[FONT.tiny, { color: C.faint, marginTop: 2 }]} numberOfLines={1}>{stock.sector}</Text>
-        <Text style={[FONT.body, { fontWeight: '800', marginTop: 8 }]}>{inr(stock.price)}</Text>
-        <Text style={[FONT.tiny, { fontWeight: '800', color: up ? C.green : C.red, marginTop: 2 }]}>
+        <View style={{ marginTop: 6, alignItems: 'center' }}>
+          <Sparkline stock={stock} width={width - 20} height={26} color={color} />
+        </View>
+        <Text style={[FONT.body, { fontWeight: '800', marginTop: 4 }]}>{inr(stock.price)}</Text>
+        <Text style={[FONT.tiny, { fontWeight: '800', color, marginTop: 2 }]}>
           {up ? '▲' : '▼'} {Math.abs(Math.round(ret * 1000) / 10)}%
         </Text>
       </Card>
@@ -4246,6 +4345,7 @@ export function StockMarketModal({ visible, onClose }) {
   // open on the list view — never on every render, never in the background.
   const insight = useMemo(() => {
     if (!visible || selected || view !== 'list' || !stocks.length) return null;
+    const marketLive = isMarketOpen(now);
     let top = stocks[0], bottom = stocks[0];
     let portfolioValue = 0, portfolioCost = 0;
     for (const st of stocks) {
@@ -4253,10 +4353,14 @@ export function StockMarketModal({ visible, onClose }) {
       if (r > stockYearReturn(top)) top = st;
       if (r < stockYearReturn(bottom)) bottom = st;
       const pos = portfolio[st.id];
-      if (pos) { portfolioValue += pos.shares * st.price; portfolioCost += pos.shares * pos.avgCost; }
+      if (pos) {
+        const live = marketLive ? liveStockPrice(st, now) : st.price;
+        portfolioValue += pos.shares * live;
+        portfolioCost += pos.shares * pos.avgCost;
+      }
     }
     return { top, bottom, portfolioValue, portfolioCost, count: stocks.length };
-  }, [visible, selected, view, stocks, portfolio]);
+  }, [visible, selected, view, stocks, portfolio, now]);
 
   const filtered = useMemo(() => {
     if (!visible || selected || view !== 'list') return [];
@@ -4306,7 +4410,7 @@ export function StockMarketModal({ visible, onClose }) {
     return (
       <Sheet visible={visible} onClose={onClose} title="My Portfolio" height="90%">
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
-          <PortfolioPanel stocks={stocks} portfolio={portfolio}
+          <PortfolioPanel stocks={stocks} portfolio={portfolio} sellStock={sellStock} toast={toast}
             onBack={() => setView('list')} onOpen={id => { setView('list'); setSelectedId(id); }} />
         </ScrollView>
       </Sheet>
@@ -4327,8 +4431,12 @@ export function StockMarketModal({ visible, onClose }) {
           <Card style={{ marginBottom: 12, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
             <Row style={{ justifyContent: 'space-between' }}>
               <View>
-                <Text style={[FONT.tiny, { color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 1 }]}>Your Portfolio</Text>
+                <Row style={{ alignItems: 'center' }}>
+                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: isMarketOpen(now) ? '#4ADE80' : '#64748B', marginRight: 5 }} />
+                  <Text style={[FONT.tiny, { color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 1 }]}>Your Portfolio{isMarketOpen(now) ? ' · LIVE' : ''}</Text>
+                </Row>
                 <Text style={[FONT.h1, { color: '#F8FAFC', marginTop: 2 }]}>{inr(insight.portfolioValue)}</Text>
+                <Text style={[FONT.tiny, { color: '#64748B', marginTop: 2 }]}>Invested {inr(insight.portfolioCost)}</Text>
               </View>
               <View style={{ alignItems: 'flex-end' }}>
                 <Pressable onPress={tapMarketEgg}><Text style={[FONT.tiny, { color: '#94A3B8' }]}>{insight.count.toLocaleString()} listed</Text></Pressable>
@@ -4401,7 +4509,8 @@ export function StockMarketModal({ visible, onClose }) {
                     </Row>
                     <Text style={FONT.tiny}>{st.sector}</Text>
                   </View>
-                  <View style={{ alignItems: 'flex-end' }}>
+                  <Sparkline stock={st} width={48} height={22} color={ret >= 0 ? C.green : C.red} />
+                  <View style={{ alignItems: 'flex-end', marginLeft: 8 }}>
                     <Text style={[FONT.mono, { fontWeight: '800' }]}>{inr(live)}</Text>
                     <Text style={[FONT.tiny, { fontWeight: '800', color: ret >= 0 ? C.green : C.red }]}>
                       {ret >= 0 ? '▲' : '▼'} {Math.abs(Math.round(ret * 1000) / 10)}%
@@ -4512,7 +4621,7 @@ export function CountriesModal({ visible, onClose }) {
   );
 }
 
-// Fires once, the moment an existing save first crosses into v10.8.7 — the
+// Fires once, the moment an existing save first crosses into v10.9.0 — the
 // final grand release. Pure celebration screen, no game logic.
 export function FinaleModal({ visible, onClose }) {
   const company = useGame(s => s.company);
@@ -4526,7 +4635,7 @@ export function FinaleModal({ visible, onClose }) {
         </View>
         <Text style={[FONT.h1, { textAlign: 'center' }]}>Congratulations, {company?.name}!</Text>
         <Text style={[FONT.body, { textAlign: 'center', marginTop: 10, color: C.sub, lineHeight: 20 }]}>
-          Truck Empire Tycoon just hit its final grand release — v10.8.7. The Stock Market is open, the roads are yours, and this
+          Truck Empire Tycoon just hit its final grand release — v10.9.0. The Stock Market is open, the roads are yours, and this
           send-off is for every kilometre you've driven to get here.
         </Text>
         <Card style={{ marginTop: 18, width: '100%', backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
