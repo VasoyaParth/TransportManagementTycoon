@@ -946,7 +946,11 @@ function LedgerSheet({ visible, onClose }) {
   const ledger = useGame(s => s.ledger || []);
   const tapLedgerEgg = useEasterEggTap('ledger_lord', 12);
   const [page, setPage] = useState(1);
-  useEffect(() => { if (visible) setPage(1); }, [visible]);
+  // Days start CLOSED — tap a day's header to expand and see its entries.
+  // Keeps the initial render light even with months of history, and lets
+  // you scan day-by-day totals at a glance before drilling into any one.
+  const [expanded, setExpanded] = useState(() => new Set());
+  useEffect(() => { if (visible) { setPage(1); setExpanded(new Set()); } }, [visible]);
   const groups = useMemo(() => {
     const m = new Map();
     for (const e of ledger) {
@@ -958,6 +962,11 @@ function LedgerSheet({ visible, onClose }) {
     return [...m.values()].sort((a, b) => b.day - a.day);
   }, [ledger]);
   const shownGroups = groups.slice(0, page * LEDGER_PAGE);
+  const toggleDay = day => setExpanded(prev => {
+    const next = new Set(prev);
+    if (next.has(day)) next.delete(day); else next.add(day);
+    return next;
+  });
 
   return (
     <Sheet visible={visible} onClose={onClose} title="Company Ledger" height="88%">
@@ -980,44 +989,55 @@ function LedgerSheet({ visible, onClose }) {
         </Card>
         {groups.length === 0 ? (
           <EmptyState icon="notebook-outline" title="No entries yet" sub="Deliveries, salaries and every purchase will be booked here automatically." />
-        ) : shownGroups.map(g => (
-          <View key={g.day} style={{ marginBottom: 14 }}>
-            <Row style={{ justifyContent: 'space-between', marginBottom: 6, paddingHorizontal: 2 }}>
-              <Row>
-                <Icon name="calendar" size={14} color={C.sub} />
-                <Text style={[FONT.body, { fontWeight: '800', marginLeft: 5 }]}>Day {g.day}</Text>
-              </Row>
-              <Text style={[FONT.mono, { fontWeight: '800', color: g.net >= 0 ? C.green : C.red }]}>
-                {g.net >= 0 ? '+' : '−'}{inrShort(Math.abs(g.net))}
-              </Text>
-            </Row>
-            <Card style={{ padding: 0, overflow: 'hidden' }}>
-              {g.entries.map((e, i) => (
-                <Row key={e.id} style={[{ paddingVertical: 10, paddingHorizontal: 12, justifyContent: 'space-between' }, i > 0 && st.divider]}>
-                  <Row style={{ flex: 1, marginRight: 8 }}>
-                    <View style={{
-                      width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center',
-                      backgroundColor: e.amount >= 0 ? C.greenSoft : C.redSoft,
-                    }}>
-                      <Icon name={e.icon || 'cash'} size={15} color={e.amount >= 0 ? C.green : C.red} />
-                    </View>
-                    <View style={{ marginLeft: 9, flex: 1 }}>
-                      <Text style={FONT.body} numberOfLines={1}>{e.label}</Text>
-                      <Text style={FONT.tiny}>{relTime(e.ts)}</Text>
-                    </View>
+        ) : shownGroups.map(g => {
+          const open = expanded.has(g.day);
+          return (
+            <View key={g.day} style={{ marginBottom: 10 }}>
+              <Pressable onPress={() => toggleDay(g.day)}>
+                <Card style={{ padding: 0, overflow: 'hidden' }}>
+                  <Row style={{ justifyContent: 'space-between', paddingVertical: 10, paddingHorizontal: 12 }}>
+                    <Row>
+                      <Icon name={open ? 'chevron-down' : 'chevron-right'} size={16} color={C.sub} />
+                      <Icon name="calendar" size={14} color={C.sub} style={{ marginLeft: 6 }} />
+                      <Text style={[FONT.body, { fontWeight: '800', marginLeft: 5 }]}>Day {g.day}</Text>
+                      <Text style={[FONT.tiny, { marginLeft: 8, color: C.faint }]}>{g.entries.length} entr{g.entries.length === 1 ? 'y' : 'ies'}</Text>
+                    </Row>
+                    <Text style={[FONT.mono, { fontWeight: '800', color: g.net >= 0 ? C.green : C.red }]}>
+                      {g.net >= 0 ? '+' : '−'}{inrShort(Math.abs(g.net))}
+                    </Text>
                   </Row>
-                  <Text style={[FONT.mono, { fontWeight: '700', color: e.amount >= 0 ? C.green : C.red }]}>
-                    {e.amount >= 0 ? '+' : '−'}{inrShort(Math.abs(e.amount))}
-                  </Text>
-                </Row>
-              ))}
-              <Row style={[st.divider, { paddingVertical: 8, paddingHorizontal: 12, justifyContent: 'space-between', backgroundColor: C.bgSoft }]}>
-                <Text style={[FONT.tiny, { fontWeight: '800' }]}>IN {inrShort(g.income)} · OUT {inrShort(g.expense)}</Text>
-                <Text style={[FONT.tiny, { fontWeight: '800', color: g.net >= 0 ? C.green : C.red }]}>NET {g.net >= 0 ? '+' : '−'}{inrShort(Math.abs(g.net))}</Text>
-              </Row>
-            </Card>
-          </View>
-        ))}
+                  {open ? (
+                    <>
+                      {g.entries.map((e, i) => (
+                        <Row key={e.id} style={[{ paddingVertical: 10, paddingHorizontal: 12, justifyContent: 'space-between' }, st.divider]}>
+                          <Row style={{ flex: 1, marginRight: 8 }}>
+                            <View style={{
+                              width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center',
+                              backgroundColor: e.amount >= 0 ? C.greenSoft : C.redSoft,
+                            }}>
+                              <Icon name={e.icon || 'cash'} size={15} color={e.amount >= 0 ? C.green : C.red} />
+                            </View>
+                            <View style={{ marginLeft: 9, flex: 1 }}>
+                              <Text style={FONT.body} numberOfLines={1}>{e.label}</Text>
+                              <Text style={FONT.tiny}>{relTime(e.ts)}</Text>
+                            </View>
+                          </Row>
+                          <Text style={[FONT.mono, { fontWeight: '700', color: e.amount >= 0 ? C.green : C.red }]}>
+                            {e.amount >= 0 ? '+' : '−'}{inrShort(Math.abs(e.amount))}
+                          </Text>
+                        </Row>
+                      ))}
+                      <Row style={[st.divider, { paddingVertical: 8, paddingHorizontal: 12, justifyContent: 'space-between', backgroundColor: C.bgSoft }]}>
+                        <Text style={[FONT.tiny, { fontWeight: '800' }]}>IN {inrShort(g.income)} · OUT {inrShort(g.expense)}</Text>
+                        <Text style={[FONT.tiny, { fontWeight: '800', color: g.net >= 0 ? C.green : C.red }]}>NET {g.net >= 0 ? '+' : '−'}{inrShort(Math.abs(g.net))}</Text>
+                      </Row>
+                    </>
+                  ) : null}
+                </Card>
+              </Pressable>
+            </View>
+          );
+        })}
         {shownGroups.length < groups.length && (
           <Btn title={`Show more (${groups.length - shownGroups.length} more day${groups.length - shownGroups.length === 1 ? '' : 's'})`}
             kind="soft" icon="chevron-down" onPress={() => setPage(p => p + 1)} />
@@ -1031,22 +1051,14 @@ function LedgerSheet({ visible, onClose }) {
 // loans with EMI progress and early settlement. Premium dark banking look.
 // Quick-amount repay row — no free-text keyboard needed, just fast presets
 // plus a "Max" button, so partial repayment stays impossible to fat-finger.
-function RepayQuickAmounts({ remaining, balance, onPick }) {
-  const presets = [Math.round(remaining * 0.25), Math.round(remaining * 0.5), Math.round(remaining * 0.75)]
-    .filter((v, i, arr) => v > 0 && v < remaining && arr.indexOf(v) === i);
+function RepayQuickAmounts({ remaining, balance, value, onChange }) {
+  const cap = Math.max(1, Math.min(remaining, balance));
   return (
-    <Row style={{ gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-      {presets.map(v => (
-        <Pressable key={v} disabled={balance < v} onPress={() => onPick(v)}
-          style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: RADIUS.sm, backgroundColor: C.bgSoft, borderWidth: 1, borderColor: C.border, opacity: balance < v ? 0.4 : 1 }}>
-          <Text style={[FONT.tiny, { fontWeight: '700' }]}>{inrShort(v)}</Text>
-        </Pressable>
-      ))}
-      <Pressable disabled={balance <= 0} onPress={() => onPick(Math.min(remaining, balance))}
-        style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: RADIUS.sm, backgroundColor: C.greenSoft, borderWidth: 1, borderColor: C.green, opacity: balance <= 0 ? 0.4 : 1 }}>
-        <Text style={[FONT.tiny, { fontWeight: '700', color: C.green }]}>Max ({inrShort(Math.min(remaining, balance))})</Text>
-      </Pressable>
-    </Row>
+    <View style={{ marginTop: 8 }}>
+      <GameSlider min={0} max={cap} step={Math.max(1, Math.round(cap / 100))} value={Math.min(value, cap)} color={C.green}
+        onChange={onChange} minLabel="₹0" maxLabel={inrShort(cap)} />
+      <Text style={[FONT.tiny, { marginTop: 2 }]}>Drag to pick any amount, up to whichever is smaller — what's left owed or your balance.</Text>
+    </View>
   );
 }
 
@@ -1109,6 +1121,7 @@ function BankSheet({ visible, onClose }) {
   const toast = useToast();
   const balance = useGame(s => s.balance);
   const gold = useGame(s => s.gold);
+  const tapDonorEgg = useEasterEggTap('donor', 5);
   const loans = useGame(s => s.loans || []);
   const credit = useGame(s => s.credit);
   const trucks = useGame(s => s.trucks);
@@ -1127,7 +1140,10 @@ function BankSheet({ visible, onClose }) {
   const [selTrucks, setSelTrucks] = useState([]);
   const [selHubs, setSelHubs] = useState([]);
   const [repayAmt, setRepayAmt] = useState({}); // loanId -> picked amount
-  useEffect(() => { if (!visible) { setConfirm(null); setView('overview'); setSelTrucks([]); setSelHubs([]); } }, [visible]);
+  const [donateCash, setDonateCash] = useState(0);
+  const [donateGoldAmt, setDonateGoldAmt] = useState(0);
+  const [confirmDonate, setConfirmDonate] = useState(null); // 'cash' | 'gold' | null
+  useEffect(() => { if (!visible) { setConfirm(null); setView('overview'); setSelTrucks([]); setSelHubs([]); setConfirmDonate(null); } }, [visible]);
   const score = creditScoreOf(credit);
   const scorePct = ((score - 300) / 600) * 100;
   const scoreColor = score >= 720 ? C.green : score >= 600 ? C.amber : C.red;
@@ -1203,7 +1219,7 @@ function BankSheet({ visible, onClose }) {
                     <Text style={[FONT.tiny, { marginTop: 6, color: C.faint }]}>{pledgeCount} asset{pledgeCount > 1 ? 's' : ''} pledged as collateral on this loan.</Text>
                   ) : null}
                   <Text style={[FONT.tiny, { marginTop: 10 }]}>Repay any amount now:</Text>
-                  <RepayQuickAmounts remaining={ln.remaining} balance={balance} onPick={v => setRepayAmt(a => ({ ...a, [ln.id]: v }))} />
+                  <RepayQuickAmounts remaining={ln.remaining} balance={balance} value={picked} onChange={v => setRepayAmt(a => ({ ...a, [ln.id]: v }))} />
                   <Row style={{ gap: 8, marginTop: 10 }}>
                     <View style={{ flex: 1 }}>
                       <Btn title={picked ? `Pay ${inrShort(picked)} now` : 'Pick an amount above'} kind={picked ? 'primary' : 'ghost'} small icon="cash-check"
@@ -1241,39 +1257,41 @@ function BankSheet({ visible, onClose }) {
 
             {/* Charity Drive — a deliberate cash/gold sink for players who've
                 piled up more than they'll ever spend. No reward, on purpose —
-                the point is just to get rid of the excess. */}
+                the point is just to get rid of the excess. Slider to pick the
+                amount, separate confirm tap before anything actually happens
+                (same staged pattern as loan repayment above). */}
             <Card style={{ marginBottom: 12 }}>
               <Row>
-                <Icon name="hand-heart" size={18} color={C.red} />
+                <Pressable onPress={tapDonorEgg}><Icon name="hand-heart" size={18} color={C.red} /></Pressable>
                 <Text style={[FONT.body, { fontWeight: '800', marginLeft: 8 }]}>Charity Drive</Text>
               </Row>
               <Text style={[FONT.tiny, { marginTop: 2 }]}>Got more cash or gold than you'll ever spend? Donate it away — no reward, just a clean account.</Text>
               <Text style={[FONT.tiny, { marginTop: 10, fontWeight: '700' }]}>Cash — {inrShort(balance)} available</Text>
-              <Row style={{ gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-                {[0.1, 0.25, 0.5, 1].map(frac => {
-                  const amt = Math.round(balance * frac);
-                  if (amt <= 0) return null;
-                  return (
-                    <Pressable key={frac} onPress={() => { const r = donateMoney(amt); toast(r.ok ? `Donated ${inrShort(amt)}` : r.err, r.ok ? 'success' : 'error'); }}
-                      style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: RADIUS.sm, backgroundColor: C.bgSoft, borderWidth: 1, borderColor: C.border }}>
-                      <Text style={[FONT.tiny, { fontWeight: '700' }]}>{frac === 1 ? `All (${inrShort(amt)})` : `${Math.round(frac * 100)}% (${inrShort(amt)})`}</Text>
-                    </Pressable>
-                  );
-                })}
-              </Row>
-              <Text style={[FONT.tiny, { marginTop: 12, fontWeight: '700' }]}>Gold — {gold} available</Text>
-              <Row style={{ gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-                {[0.25, 0.5, 1].map(frac => {
-                  const amt = Math.round(gold * frac);
-                  if (amt <= 0) return null;
-                  return (
-                    <Pressable key={frac} onPress={() => { const r = donateGold(amt); toast(r.ok ? `Donated ${amt} Gold` : r.err, r.ok ? 'success' : 'error'); }}
-                      style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: RADIUS.sm, backgroundColor: C.bgSoft, borderWidth: 1, borderColor: C.border }}>
-                      <Text style={[FONT.tiny, { fontWeight: '700' }]}>{frac === 1 ? `All (${amt})` : `${Math.round(frac * 100)}% (${amt})`}</Text>
-                    </Pressable>
-                  );
-                })}
-              </Row>
+              <GameSlider min={0} max={Math.max(1, balance)} step={Math.max(1, Math.round(balance / 100))} value={Math.min(donateCash, balance)}
+                color={C.red} onChange={setDonateCash} minLabel="₹0" maxLabel={inrShort(balance)} />
+              <Btn title={donateCash > 0 ? (confirmDonate === 'cash' ? `Confirm — donate ${inrShort(donateCash)}` : `Donate ${inrShort(donateCash)}`) : 'Drag the slider to pick an amount'}
+                kind={donateCash > 0 ? 'soft' : 'ghost'} small disabled={donateCash <= 0} style={{ marginTop: 8 }}
+                onPress={() => {
+                  if (confirmDonate === 'cash') {
+                    const r = donateMoney(donateCash);
+                    toast(r.ok ? `Donated ${inrShort(donateCash)}` : r.err, r.ok ? 'success' : 'error');
+                    if (r.ok) setDonateCash(0);
+                    setConfirmDonate(null);
+                  } else setConfirmDonate('cash');
+                }} />
+              <Text style={[FONT.tiny, { marginTop: 14, fontWeight: '700' }]}>Gold — {gold} available</Text>
+              <GameSlider min={0} max={Math.max(1, gold)} step={1} value={Math.min(donateGoldAmt, gold)}
+                color={C.gold} onChange={setDonateGoldAmt} minLabel="0" maxLabel={String(gold)} />
+              <Btn title={donateGoldAmt > 0 ? (confirmDonate === 'gold' ? `Confirm — donate ${donateGoldAmt} Gold` : `Donate ${donateGoldAmt} Gold`) : 'Drag the slider to pick an amount'}
+                kind={donateGoldAmt > 0 ? 'soft' : 'ghost'} small disabled={donateGoldAmt <= 0} style={{ marginTop: 8 }}
+                onPress={() => {
+                  if (confirmDonate === 'gold') {
+                    const r = donateGold(donateGoldAmt);
+                    toast(r.ok ? `Donated ${donateGoldAmt} Gold` : r.err, r.ok ? 'success' : 'error');
+                    if (r.ok) setDonateGoldAmt(0);
+                    setConfirmDonate(null);
+                  } else setConfirmDonate('gold');
+                }} />
             </Card>
 
             <Btn title="Borrow Loan" icon="bank-plus" kind="green" onPress={() => setView('borrow')} />

@@ -318,13 +318,13 @@ const sl = StyleSheet.create({
 // ---------- Stat card ----------
 export function Stat({ icon, label, value, color = C.text, sub }) {
   return (
-    <Card style={{ flex: 1, padding: 12, minWidth: 0 }}>
+    <Card style={{ flex: 1, padding: 12, minWidth: 0, minHeight: 78, justifyContent: 'center' }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
         <Icon name={icon} size={15} color={C.sub} />
-        <Text style={[FONT.tiny, { marginLeft: 5, textTransform: 'uppercase', letterSpacing: 0.4 }]}>{label}</Text>
+        <Text style={[FONT.tiny, { marginLeft: 5, textTransform: 'uppercase', letterSpacing: 0.4 }]} numberOfLines={1}>{label}</Text>
       </View>
-      <Text style={[FONT.h3, { color, fontSize: 17 }]}>{value}</Text>
-      {sub ? <Text style={FONT.tiny}>{sub}</Text> : null}
+      <Text style={[FONT.h3, { color, fontSize: 17 }]} numberOfLines={1} adjustsFontSizeToFit>{value}</Text>
+      {sub ? <Text style={FONT.tiny} numberOfLines={1}>{sub}</Text> : null}
     </Card>
   );
 }
