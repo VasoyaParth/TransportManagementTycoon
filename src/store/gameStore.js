@@ -661,6 +661,10 @@ export const EASTER_EGGS = [
   { id: 'long_hauler', title: 'Long Hauler', hint: 'Obsessed with the odometer, ten times over.', where: 'Tap the Distance stat in the Economy tab 10 times fast.' },
   { id: 'ledger_lord', title: 'Ledger Lord', hint: 'A true auditor checks the books twelve times.', where: 'Tap the Company Ledger header icon 12 times fast.' },
   { id: 'streak_freak', title: 'Streak Freak', hint: 'Worship the daily flame, eleven-fold.', where: 'Tap the streak flame in the Rewards tab 11 times fast.' },
+  // v10.8.5 — a few final ones, including one for the other half of the team.
+  { id: 'meet_jeel', title: 'Meet Jeel', hint: 'The other half of the team deserves a knock too.', where: 'Tap the Jeel Gajera developer card in Settings → About 8 times fast.' },
+  { id: 'market_watcher', title: 'Market Watcher', hint: 'Some people just like watching numbers tick.', where: 'Tap the "listed" count in the Stock Market\'s portfolio card 6 times fast.' },
+  { id: 'donor', title: 'Big Heart', hint: 'Giving it all away, one tap at a time.', where: 'Tap the Charity Drive icon in the Bank sheet 5 times fast.' },
 ];
 const EASTER_EGG_REWARD = { cash: 1000000, gold: 15 }; // ₹10 lakhs + 15 Gold, per egg, one-time
 
@@ -721,6 +725,19 @@ export const ACHIEVEMENTS = [
     desc: 'Best daily-login streak reached.', levels: [3, 7, 14, 30, 90] },
   { id: 'big_spender', title: 'Big Spender', icon: 'gold', unit: 'gold',
     desc: 'Gold spent on power-ups and repairs.', levels: [25, 100, 400, 1200, 4000] },
+  // v10.8.5 — tracks fed by the new Stock Market / collateral loans / Charity Drive.
+  { id: 'market_mogul', title: 'Market Mogul', icon: 'finance', unit: '₹',
+    desc: 'Stock portfolio value held at one time.', levels: [100000, 1000000, 10000000, 50000000, 200000000] },
+  { id: 'diversified', title: 'Diversified', icon: 'chart-donut', unit: 'companies',
+    desc: 'Distinct companies held in your portfolio at once.', levels: [1, 3, 6, 10, 15] },
+  { id: 'day_trader', title: 'Day Trader', icon: 'swap-horizontal-bold', unit: 'trades',
+    desc: 'Stock buy/sell orders filled, lifetime.', levels: [1, 10, 50, 200, 500] },
+  { id: 'ipo_founder', title: 'IPO Founder', icon: 'rocket-launch', unit: 'IPOs',
+    desc: 'Companies you personally founded and listed.', levels: [1, 2, 3, 5, 8] },
+  { id: 'philanthropist', title: 'Philanthropist', icon: 'hand-heart', unit: '₹',
+    desc: 'Cash donated through the Charity Drive, lifetime.', levels: [100000, 1000000, 10000000, 50000000, 200000000] },
+  { id: 'collateral_king', title: 'Collateral King', icon: 'bank', unit: 'loans',
+    desc: 'Collateral-backed loans taken out, lifetime.', levels: [1, 3, 6, 12, 25] },
 ];
 // Current metric value for a track, computed from live state.
 export function achievementValue(s, id) {
@@ -749,6 +766,15 @@ export function achievementValue(s, id) {
     case 'mechanic_bff': return s.stats.mechanicCalls || 0;
     case 'daily_devotee': return Math.max(s.login?.bestStreak || 0, s.login?.streak || 0);
     case 'big_spender': return s.stats.goldSpent || 0;
+    case 'market_mogul': return Object.entries(s.portfolio || {}).reduce((a, [id, pos]) => {
+      const st = (s.stocks || []).find(x => x.id === id);
+      return a + (st ? pos.shares * st.price : 0);
+    }, 0);
+    case 'diversified': return Object.keys(s.portfolio || {}).length;
+    case 'day_trader': return s.stats.stockTrades || 0;
+    case 'ipo_founder': return (s.stocks || []).filter(x => x.founder === 'player').length;
+    case 'philanthropist': return s.stats.donated || 0;
+    case 'collateral_king': return s.stats.loansTaken || 0;
     default: return 0;
   }
 }
@@ -833,6 +859,7 @@ const initialState = {
   portfolio: {}, // stockId -> {shares, avgCost}
   lastStockDay: 0,
   stocksVersion: 0, // bump target for the fixed shared roster — see STOCKS_VERSION migration
+  pendingOrders: [], // buy/sell orders placed while the market was closed — auto-fill on next open
   weather: [], // today's active weather zones (regenerated each game day)
   weatherDay: 0,
   lastWeatherEvolveAt: 0, // real ms of the last gentle weather-evolution step
@@ -1286,6 +1313,21 @@ export const useGame = create(
         if (day > (s.lastStockDay || 0) && (get().stocks || []).length) {
           const updated = get().stocks.map(st => stockDailyStep(st, day));
           set({ stocks: updated, lastStockDay: day });
+        }
+        // Queued orders (placed while the market was closed) fill the
+        // moment it opens — checked every tick since "open" is a real-clock
+        // window, not a game-day event. Each fill uses whatever the price
+        // is right now, exactly like a real broker's queued order.
+        if (isMarketOpen() && (get().pendingOrders || []).length) {
+          const orders = get().pendingOrders;
+          set({ pendingOrders: [] });
+          for (const o of orders) {
+            const st = (get().stocks || []).find(x => x.id === o.stockId);
+            const r = o.kind === 'buy' ? get()._executeBuy(o.stockId, o.shares) : get()._executeSell(o.stockId, o.shares);
+            if (r.ok) get().notify('system', o.kind === 'buy' ? 'trending-up' : 'trending-down',
+              `Market's open — your queued order to ${o.kind} ${o.shares} × ${st?.name || 'a company'} just filled.`);
+            else get().notify('system', 'alert-circle-outline', `Queued ${o.kind} order for ${st?.name || 'a company'} couldn't fill: ${r.err}`);
+          }
         }
         // fresh contracts each day + flavor event
         if (day > s.lastContractDay) {
@@ -2378,7 +2420,7 @@ export const useGame = create(
           collateral: { truckIds: [...(collateral?.truckIds || [])], hubCityIds: [...(collateral?.hubCityIds || [])] },
           missedStreak: 0,
         };
-        set({ balance: s.balance + p.amount, loans: [...(s.loans || []), loan] });
+        set({ balance: s.balance + p.amount, loans: [...(s.loans || []), loan], stats: { ...s.stats, loansTaken: (s.stats.loansTaken || 0) + 1 } });
         get().logLedger('loan', 'bank-plus', `Loan disbursed · ${p.name}`, p.amount);
         get().notify('system', 'bank-plus', `${p.name} approved! ${inr(p.amount)} credited. EMI ${inr(loan.emi)} every ${LOAN_EMI_INTERVAL_DAYS} days × ${p.months}.`);
         play('coin', 0.9);
@@ -2405,7 +2447,7 @@ export const useGame = create(
           collateral: { truckIds: [...(collateral?.truckIds || [])], hubCityIds: [...(collateral?.hubCityIds || [])] },
           missedStreak: 0,
         };
-        set({ balance: s.balance + amt, loans: [...(s.loans || []), loan] });
+        set({ balance: s.balance + amt, loans: [...(s.loans || []), loan], stats: { ...s.stats, loansTaken: (s.stats.loansTaken || 0) + 1 } });
         get().logLedger('loan', 'bank-plus', `Loan disbursed · ${loan.name}`, amt);
         get().notify('system', 'bank-plus', `${loan.name} approved! ${inr(amt)} credited. EMI ${inr(emi)} every ${LOAN_EMI_INTERVAL_DAYS} days × ${months}.`);
         play('coin', 0.9);
@@ -2467,7 +2509,7 @@ export const useGame = create(
         const amt = Math.round(amount);
         if (!amt || amt <= 0) return { ok: false, err: 'Enter an amount to donate' };
         if (amt > s.balance) return { ok: false, err: `You only have ${inr(s.balance)}` };
-        set({ balance: s.balance - amt });
+        set({ balance: s.balance - amt, stats: { ...s.stats, donated: (s.stats.donated || 0) + amt } });
         get().logLedger('donation', 'hand-heart', 'Charity donation', -amt);
         get().notify('system', 'hand-heart', `Donated ${inr(amt)} to charity — no strings attached.`);
         return { ok: true };
@@ -2486,12 +2528,39 @@ export const useGame = create(
       // ---------- stock market ----------
       // Buying/selling carries a small spread (the "market maker's cut") so
       // day-trading in and out isn't free money — it's a real cost of entry.
+      // Public buy/sell check real trading hours first — outside 9:15 AM to
+      // 3:30 PM the order can't fill immediately (real exchanges don't run
+      // 24/7 either), so it's queued and auto-executed the next time the
+      // market opens (see the pendingOrders processing in dailyTick), same
+      // as a real broker's after-hours/GTT order would behave.
       buyStock(stockId, shares) {
+        const n = Math.max(0, Math.floor(shares));
+        if (!n) return { ok: false, err: 'Pick at least 1 share' };
+        if (!isMarketOpen()) {
+          const order = { id: uid('ord'), kind: 'buy', stockId, shares: n, queuedAt: Date.now() };
+          set({ pendingOrders: [...(get().pendingOrders || []), order] });
+          get().notify('system', 'clock-outline', `Market's closed — your order to buy ${n} shares is queued for the next open (9:15 AM).`);
+          return { ok: true, queued: true };
+        }
+        return get()._executeBuy(stockId, n);
+      },
+      sellStock(stockId, shares) {
+        const n = Math.max(0, Math.floor(shares));
+        if (!n) return { ok: false, err: 'Pick at least 1 share' };
+        if (!isMarketOpen()) {
+          const order = { id: uid('ord'), kind: 'sell', stockId, shares: n, queuedAt: Date.now() };
+          set({ pendingOrders: [...(get().pendingOrders || []), order] });
+          get().notify('system', 'clock-outline', `Market's closed — your order to sell ${n} shares is queued for the next open (9:15 AM).`);
+          return { ok: true, queued: true };
+        }
+        return get()._executeSell(stockId, n);
+      },
+      // Core execution — used directly when the market's open, and by the
+      // pendingOrders processor once it reopens.
+      _executeBuy(stockId, n) {
         const s = get();
         const st = (s.stocks || []).find(x => x.id === stockId);
         if (!st) return { ok: false, err: 'Company not found' };
-        const n = Math.max(0, Math.floor(shares));
-        if (!n) return { ok: false, err: 'Pick at least 1 share' };
         const cost = Math.round(n * st.price * 1.005);
         if (s.balance < cost) return { ok: false, err: `Need ${inr(cost)} to buy ${n} shares` };
         const pos = s.portfolio?.[stockId] || { shares: 0, avgCost: 0 };
@@ -2500,24 +2569,23 @@ export const useGame = create(
         set({
           balance: s.balance - cost,
           portfolio: { ...s.portfolio, [stockId]: { shares: totalShares, avgCost } },
+          stats: { ...s.stats, stockTrades: (s.stats.stockTrades || 0) + 1 },
         });
         get().logLedger('stock', 'trending-up', `Bought ${n} × ${st.name}`, -cost);
         return { ok: true, cost };
       },
-      sellStock(stockId, shares) {
+      _executeSell(stockId, n) {
         const s = get();
         const st = (s.stocks || []).find(x => x.id === stockId);
         if (!st) return { ok: false, err: 'Company not found' };
         const pos = s.portfolio?.[stockId];
-        const n = Math.max(0, Math.floor(shares));
-        if (!n) return { ok: false, err: 'Pick at least 1 share' };
         if (!pos || pos.shares < n) return { ok: false, err: `You only hold ${pos?.shares || 0} shares` };
         const proceeds = Math.round(n * st.price * 0.995);
         const remaining = pos.shares - n;
         const nextPortfolio = { ...s.portfolio };
         if (remaining <= 0) delete nextPortfolio[stockId];
         else nextPortfolio[stockId] = { ...pos, shares: remaining };
-        set({ balance: s.balance + proceeds, portfolio: nextPortfolio });
+        set({ balance: s.balance + proceeds, portfolio: nextPortfolio, stats: { ...s.stats, stockTrades: (s.stats.stockTrades || 0) + 1 } });
         get().logLedger('stock', 'trending-down', `Sold ${n} × ${st.name}`, proceeds);
         return { ok: true, proceeds };
       },

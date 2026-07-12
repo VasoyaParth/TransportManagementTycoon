@@ -2905,6 +2905,7 @@ function AboutTab({ onReplayTutorial }) {
   const tapVersionEgg = useEasterEggTap('version_detective', 6);
   const tapMakerEgg = useEasterEggTap('meet_the_maker', 7);
   const tapClaudeEgg = useEasterEggTap('hello_claude', 9);
+  const tapJeelEgg = useEasterEggTap('meet_jeel', 8);
 
   const check = async () => {
     setState({ status: 'checking', data: null, err: null });
@@ -3027,7 +3028,7 @@ function AboutTab({ onReplayTutorial }) {
       <Text style={cs.section}>Developed By</Text>
       <Card style={{ padding: 0 }}>
         {DEVELOPERS.map((dev, i) => {
-          const tapEgg = i === 0 ? tapMakerEgg : dev.eggId === 'hello_claude' ? tapClaudeEgg : null;
+          const tapEgg = i === 0 ? tapMakerEgg : dev.eggId === 'hello_claude' ? tapClaudeEgg : i === 1 ? tapJeelEgg : null;
           return (
             <Pressable key={dev.name} onPress={() => { if (tapEgg) tapEgg(); }}
               style={[{ flexDirection: 'row', alignItems: 'center', padding: 14 }, i > 0 && { borderTopWidth: 1, borderTopColor: C.border }]}>
@@ -4144,7 +4145,10 @@ function StockDetail({ stock, portfolio, balance, buyStock, sellStock, toast, on
       ) : null}
 
       <Card style={{ marginBottom: 10 }}>
-        <Text style={[FONT.body, { fontWeight: '800' }]}>Buy</Text>
+        <Row style={{ justifyContent: 'space-between' }}>
+          <Text style={[FONT.body, { fontWeight: '800' }]}>Buy</Text>
+          {pos ? <Text style={[FONT.tiny, { color: C.faint }]}>You hold {pos.shares} share{pos.shares === 1 ? '' : 's'}</Text> : null}
+        </Row>
         <ShareStepper max={maxAffordable} accent={C.green}
           costFor={n => Math.round(n * stock.price * 1.005)}
           onConfirm={n => {
@@ -4213,10 +4217,22 @@ function ShareStepper({ max, accent, costFor, costLabel = 'cost', onConfirm }) {
 // Dedicated portfolio screen — every held company with shares, avg cost,
 // current value, and P&L, tapping straight into that stock's detail view.
 function PortfolioPanel({ stocks, portfolio, onBack, onOpen }) {
+  // Self-ticking clock so every holding's value/P&L moves live while this
+  // screen is open, same real-time feel as the main list and detail view —
+  // independent of the parent's ticker so this works even if reached
+  // straight from elsewhere later.
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 3000);
+    return () => clearInterval(id);
+  }, []);
+  const open = isMarketOpen(now);
+
   const rows = Object.entries(portfolio)
     .map(([id, pos]) => ({ stock: stocks.find(s => s.id === id), pos }))
-    .filter(r => r.stock);
-  const totalValue = rows.reduce((a, r) => a + r.pos.shares * r.stock.price, 0);
+    .filter(r => r.stock)
+    .map(r => ({ ...r, live: open ? liveStockPrice(r.stock, now) : r.stock.price }));
+  const totalValue = rows.reduce((a, r) => a + r.pos.shares * r.live, 0);
   const totalCost = rows.reduce((a, r) => a + r.pos.shares * r.pos.avgCost, 0);
   const totalPL = totalValue - totalCost;
 
@@ -4227,7 +4243,10 @@ function PortfolioPanel({ stocks, portfolio, onBack, onOpen }) {
         <Text style={[FONT.body, { color: C.blue, fontWeight: '700', marginLeft: 2 }]}>Back to market</Text>
       </Pressable>
       <Card style={{ marginBottom: 10, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
-        <Text style={[FONT.tiny, { color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 1 }]}>Total Portfolio Value</Text>
+        <Row style={{ alignItems: 'center' }}>
+          <View style={{ width: 7, height: 7, borderRadius: 4, backgroundColor: open ? '#4ADE80' : '#64748B', marginRight: 6 }} />
+          <Text style={[FONT.tiny, { color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 1 }]}>Total Portfolio Value {open ? '· LIVE' : '· market closed'}</Text>
+        </Row>
         <Text style={[FONT.h1, { color: '#F8FAFC', marginTop: 2 }]}>{inrShort(totalValue)}</Text>
         <Text style={[FONT.tiny, { color: totalPL >= 0 ? '#4ADE80' : '#F87171', marginTop: 4, fontWeight: '800' }]}>
           {totalPL >= 0 ? '▲' : '▼'} {inrShort(Math.abs(totalPL))} overall P&L · {rows.length} holding{rows.length === 1 ? '' : 's'}
@@ -4239,8 +4258,8 @@ function PortfolioPanel({ stocks, portfolio, onBack, onOpen }) {
           <Text style={[FONT.h3, { marginTop: 10 }]}>No holdings yet</Text>
           <Text style={[FONT.sub, { marginTop: 4, textAlign: 'center' }]}>Buy shares in any company from the main market list to start building a portfolio.</Text>
         </Card>
-      ) : rows.map(({ stock, pos }) => {
-        const value = pos.shares * stock.price;
+      ) : rows.map(({ stock, pos, live }) => {
+        const value = pos.shares * live;
         const cost = pos.shares * pos.avgCost;
         const pl = value - cost;
         return (
@@ -4306,6 +4325,24 @@ function IpoLaunchPanel({ req, launchStock, toast, onBack, onLaunched }) {
   );
 }
 
+// A single card in the Large Cap / Trending horizontal rails.
+function MiniStockCard({ stock, onPress }) {
+  const ret = stockYearReturn(stock);
+  const up = ret >= 0;
+  return (
+    <Pressable onPress={onPress} style={{ width: 130, marginRight: 8 }}>
+      <Card style={{ padding: 10 }}>
+        <Text style={[FONT.tiny, { fontWeight: '800' }]} numberOfLines={2}>{stock.name}</Text>
+        <Text style={[FONT.tiny, { color: C.faint, marginTop: 2 }]} numberOfLines={1}>{stock.sector}</Text>
+        <Text style={[FONT.body, { fontWeight: '800', marginTop: 8 }]}>{inr(stock.price)}</Text>
+        <Text style={[FONT.tiny, { fontWeight: '800', color: up ? C.green : C.red, marginTop: 2 }]}>
+          {up ? '▲' : '▼'} {Math.abs(Math.round(ret * 1000) / 10)}%
+        </Text>
+      </Card>
+    </Pressable>
+  );
+}
+
 const STOCK_PAGE = 20;
 export function StockMarketModal({ visible, onClose }) {
   const toast = useToast();
@@ -4316,6 +4353,7 @@ export function StockMarketModal({ visible, onClose }) {
   const sellStock = useGame(s => s.sellStock);
   const launchStock = useGame(s => s.launchStock);
   const ipoRequirements = useGame(s => s.ipoRequirements);
+  const tapMarketEgg = useEasterEggTap('market_watcher', 6);
   const [view, setView] = useState('list'); // 'list' | 'ipo' — two separate paths
   const [selectedId, setSelectedId] = useState(null);
   const [query, setQuery] = useState('');
@@ -4358,6 +4396,17 @@ export function StockMarketModal({ visible, onClose }) {
     return list;
   }, [visible, selected, view, stocks, query]);
   const visibleRows = filtered.slice(0, page * STOCK_PAGE);
+
+  // Large Cap + Trending horizontal rails — a different way into the same
+  // 80-company list, browsable at a glance instead of only via search/scroll.
+  const largeCap = useMemo(() => {
+    if (!visible || selected || view !== 'list' || query.trim()) return [];
+    return [...stocks].sort((a, b) => stockFundamentals(b).marketCap - stockFundamentals(a).marketCap).slice(0, 10);
+  }, [visible, selected, view, stocks, query]);
+  const trending = useMemo(() => {
+    if (!visible || selected || view !== 'list' || query.trim()) return [];
+    return [...stocks].sort((a, b) => stockYearReturn(b) - stockYearReturn(a)).slice(0, 10);
+  }, [visible, selected, view, stocks, query]);
 
   if (selected) {
     return (
@@ -4404,7 +4453,7 @@ export function StockMarketModal({ visible, onClose }) {
                 <Text style={[FONT.h1, { color: '#F8FAFC', marginTop: 2 }]}>{inrShort(insight.portfolioValue)}</Text>
               </View>
               <View style={{ alignItems: 'flex-end' }}>
-                <Text style={[FONT.tiny, { color: '#94A3B8' }]}>{insight.count.toLocaleString()} listed</Text>
+                <Pressable onPress={tapMarketEgg}><Text style={[FONT.tiny, { color: '#94A3B8' }]}>{insight.count.toLocaleString()} listed</Text></Pressable>
                 <Text style={[FONT.tiny, { color: insight.portfolioValue >= insight.portfolioCost ? '#4ADE80' : '#F87171', marginTop: 4, fontWeight: '800' }]}>
                   {insight.portfolioValue >= insight.portfolioCost ? '▲' : '▼'} {inrShort(Math.abs(insight.portfolioValue - insight.portfolioCost))} P&L
                 </Text>
@@ -4440,6 +4489,25 @@ export function StockMarketModal({ visible, onClose }) {
           </Row>
         )}
 
+        {largeCap.length > 0 ? (
+          <>
+            <Text style={[FONT.tiny, { fontWeight: '800', color: C.sub, marginBottom: 6 }]}>LARGE CAP</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+              {largeCap.map(st => <MiniStockCard key={st.id} stock={st} onPress={() => setSelectedId(st.id)} />)}
+            </ScrollView>
+          </>
+        ) : null}
+
+        {trending.length > 0 ? (
+          <>
+            <Text style={[FONT.tiny, { fontWeight: '800', color: C.sub, marginBottom: 6 }]}>TRENDING</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+              {trending.map(st => <MiniStockCard key={st.id} stock={st} onPress={() => setSelectedId(st.id)} />)}
+            </ScrollView>
+          </>
+        ) : null}
+
+        <Text style={[FONT.tiny, { fontWeight: '800', color: C.sub, marginBottom: 6 }]}>ALL COMPANIES</Text>
         <TextInput value={query} onChangeText={t => { setQuery(t); setPage(1); }} placeholder="Search companies or sectors..."
           placeholderTextColor={C.faint}
           style={{ backgroundColor: C.bgSoft, borderRadius: RADIUS.md, borderWidth: 1, borderColor: C.border, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10, color: C.text }} />

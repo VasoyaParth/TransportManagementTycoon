@@ -1031,22 +1031,14 @@ function LedgerSheet({ visible, onClose }) {
 // loans with EMI progress and early settlement. Premium dark banking look.
 // Quick-amount repay row — no free-text keyboard needed, just fast presets
 // plus a "Max" button, so partial repayment stays impossible to fat-finger.
-function RepayQuickAmounts({ remaining, balance, onPick }) {
-  const presets = [Math.round(remaining * 0.25), Math.round(remaining * 0.5), Math.round(remaining * 0.75)]
-    .filter((v, i, arr) => v > 0 && v < remaining && arr.indexOf(v) === i);
+function RepayQuickAmounts({ remaining, balance, value, onChange }) {
+  const cap = Math.max(1, Math.min(remaining, balance));
   return (
-    <Row style={{ gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-      {presets.map(v => (
-        <Pressable key={v} disabled={balance < v} onPress={() => onPick(v)}
-          style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: RADIUS.sm, backgroundColor: C.bgSoft, borderWidth: 1, borderColor: C.border, opacity: balance < v ? 0.4 : 1 }}>
-          <Text style={[FONT.tiny, { fontWeight: '700' }]}>{inrShort(v)}</Text>
-        </Pressable>
-      ))}
-      <Pressable disabled={balance <= 0} onPress={() => onPick(Math.min(remaining, balance))}
-        style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: RADIUS.sm, backgroundColor: C.greenSoft, borderWidth: 1, borderColor: C.green, opacity: balance <= 0 ? 0.4 : 1 }}>
-        <Text style={[FONT.tiny, { fontWeight: '700', color: C.green }]}>Max ({inrShort(Math.min(remaining, balance))})</Text>
-      </Pressable>
-    </Row>
+    <View style={{ marginTop: 8 }}>
+      <GameSlider min={0} max={cap} step={Math.max(1, Math.round(cap / 100))} value={Math.min(value, cap)} color={C.green}
+        onChange={onChange} minLabel="₹0" maxLabel={inrShort(cap)} />
+      <Text style={[FONT.tiny, { marginTop: 2 }]}>Drag to pick any amount, up to whichever is smaller — what's left owed or your balance.</Text>
+    </View>
   );
 }
 
@@ -1109,6 +1101,7 @@ function BankSheet({ visible, onClose }) {
   const toast = useToast();
   const balance = useGame(s => s.balance);
   const gold = useGame(s => s.gold);
+  const tapDonorEgg = useEasterEggTap('donor', 5);
   const loans = useGame(s => s.loans || []);
   const credit = useGame(s => s.credit);
   const trucks = useGame(s => s.trucks);
@@ -1127,7 +1120,10 @@ function BankSheet({ visible, onClose }) {
   const [selTrucks, setSelTrucks] = useState([]);
   const [selHubs, setSelHubs] = useState([]);
   const [repayAmt, setRepayAmt] = useState({}); // loanId -> picked amount
-  useEffect(() => { if (!visible) { setConfirm(null); setView('overview'); setSelTrucks([]); setSelHubs([]); } }, [visible]);
+  const [donateCash, setDonateCash] = useState(0);
+  const [donateGoldAmt, setDonateGoldAmt] = useState(0);
+  const [confirmDonate, setConfirmDonate] = useState(null); // 'cash' | 'gold' | null
+  useEffect(() => { if (!visible) { setConfirm(null); setView('overview'); setSelTrucks([]); setSelHubs([]); setConfirmDonate(null); } }, [visible]);
   const score = creditScoreOf(credit);
   const scorePct = ((score - 300) / 600) * 100;
   const scoreColor = score >= 720 ? C.green : score >= 600 ? C.amber : C.red;
@@ -1203,7 +1199,7 @@ function BankSheet({ visible, onClose }) {
                     <Text style={[FONT.tiny, { marginTop: 6, color: C.faint }]}>{pledgeCount} asset{pledgeCount > 1 ? 's' : ''} pledged as collateral on this loan.</Text>
                   ) : null}
                   <Text style={[FONT.tiny, { marginTop: 10 }]}>Repay any amount now:</Text>
-                  <RepayQuickAmounts remaining={ln.remaining} balance={balance} onPick={v => setRepayAmt(a => ({ ...a, [ln.id]: v }))} />
+                  <RepayQuickAmounts remaining={ln.remaining} balance={balance} value={picked} onChange={v => setRepayAmt(a => ({ ...a, [ln.id]: v }))} />
                   <Row style={{ gap: 8, marginTop: 10 }}>
                     <View style={{ flex: 1 }}>
                       <Btn title={picked ? `Pay ${inrShort(picked)} now` : 'Pick an amount above'} kind={picked ? 'primary' : 'ghost'} small icon="cash-check"
@@ -1241,39 +1237,41 @@ function BankSheet({ visible, onClose }) {
 
             {/* Charity Drive — a deliberate cash/gold sink for players who've
                 piled up more than they'll ever spend. No reward, on purpose —
-                the point is just to get rid of the excess. */}
+                the point is just to get rid of the excess. Slider to pick the
+                amount, separate confirm tap before anything actually happens
+                (same staged pattern as loan repayment above). */}
             <Card style={{ marginBottom: 12 }}>
               <Row>
-                <Icon name="hand-heart" size={18} color={C.red} />
+                <Pressable onPress={tapDonorEgg}><Icon name="hand-heart" size={18} color={C.red} /></Pressable>
                 <Text style={[FONT.body, { fontWeight: '800', marginLeft: 8 }]}>Charity Drive</Text>
               </Row>
               <Text style={[FONT.tiny, { marginTop: 2 }]}>Got more cash or gold than you'll ever spend? Donate it away — no reward, just a clean account.</Text>
               <Text style={[FONT.tiny, { marginTop: 10, fontWeight: '700' }]}>Cash — {inrShort(balance)} available</Text>
-              <Row style={{ gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-                {[0.1, 0.25, 0.5, 1].map(frac => {
-                  const amt = Math.round(balance * frac);
-                  if (amt <= 0) return null;
-                  return (
-                    <Pressable key={frac} onPress={() => { const r = donateMoney(amt); toast(r.ok ? `Donated ${inrShort(amt)}` : r.err, r.ok ? 'success' : 'error'); }}
-                      style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: RADIUS.sm, backgroundColor: C.bgSoft, borderWidth: 1, borderColor: C.border }}>
-                      <Text style={[FONT.tiny, { fontWeight: '700' }]}>{frac === 1 ? `All (${inrShort(amt)})` : `${Math.round(frac * 100)}% (${inrShort(amt)})`}</Text>
-                    </Pressable>
-                  );
-                })}
-              </Row>
-              <Text style={[FONT.tiny, { marginTop: 12, fontWeight: '700' }]}>Gold — {gold} available</Text>
-              <Row style={{ gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-                {[0.25, 0.5, 1].map(frac => {
-                  const amt = Math.round(gold * frac);
-                  if (amt <= 0) return null;
-                  return (
-                    <Pressable key={frac} onPress={() => { const r = donateGold(amt); toast(r.ok ? `Donated ${amt} Gold` : r.err, r.ok ? 'success' : 'error'); }}
-                      style={{ paddingHorizontal: 10, paddingVertical: 6, borderRadius: RADIUS.sm, backgroundColor: C.bgSoft, borderWidth: 1, borderColor: C.border }}>
-                      <Text style={[FONT.tiny, { fontWeight: '700' }]}>{frac === 1 ? `All (${amt})` : `${Math.round(frac * 100)}% (${amt})`}</Text>
-                    </Pressable>
-                  );
-                })}
-              </Row>
+              <GameSlider min={0} max={Math.max(1, balance)} step={Math.max(1, Math.round(balance / 100))} value={Math.min(donateCash, balance)}
+                color={C.red} onChange={setDonateCash} minLabel="₹0" maxLabel={inrShort(balance)} />
+              <Btn title={donateCash > 0 ? (confirmDonate === 'cash' ? `Confirm — donate ${inrShort(donateCash)}` : `Donate ${inrShort(donateCash)}`) : 'Drag the slider to pick an amount'}
+                kind={donateCash > 0 ? 'soft' : 'ghost'} small disabled={donateCash <= 0} style={{ marginTop: 8 }}
+                onPress={() => {
+                  if (confirmDonate === 'cash') {
+                    const r = donateMoney(donateCash);
+                    toast(r.ok ? `Donated ${inrShort(donateCash)}` : r.err, r.ok ? 'success' : 'error');
+                    if (r.ok) setDonateCash(0);
+                    setConfirmDonate(null);
+                  } else setConfirmDonate('cash');
+                }} />
+              <Text style={[FONT.tiny, { marginTop: 14, fontWeight: '700' }]}>Gold — {gold} available</Text>
+              <GameSlider min={0} max={Math.max(1, gold)} step={1} value={Math.min(donateGoldAmt, gold)}
+                color={C.gold} onChange={setDonateGoldAmt} minLabel="0" maxLabel={String(gold)} />
+              <Btn title={donateGoldAmt > 0 ? (confirmDonate === 'gold' ? `Confirm — donate ${donateGoldAmt} Gold` : `Donate ${donateGoldAmt} Gold`) : 'Drag the slider to pick an amount'}
+                kind={donateGoldAmt > 0 ? 'soft' : 'ghost'} small disabled={donateGoldAmt <= 0} style={{ marginTop: 8 }}
+                onPress={() => {
+                  if (confirmDonate === 'gold') {
+                    const r = donateGold(donateGoldAmt);
+                    toast(r.ok ? `Donated ${donateGoldAmt} Gold` : r.err, r.ok ? 'success' : 'error');
+                    if (r.ok) setDonateGoldAmt(0);
+                    setConfirmDonate(null);
+                  } else setConfirmDonate('gold');
+                }} />
             </Card>
 
             <Btn title="Borrow Loan" icon="bank-plus" kind="green" onPress={() => setView('borrow')} />
