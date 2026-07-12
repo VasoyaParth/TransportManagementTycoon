@@ -2149,13 +2149,6 @@ function RestoreDiffCard({ current, incoming }) {
   );
 }
 
-// ============ QR Backup Transfer (phone-to-phone, no cable/internet) ============
-// A full save can't fit in one QR code (QR's hard capacity ceiling is a few
-// KB; a real save is much bigger) — so it's compressed and shown as a
-// SEQUENCE of QR codes that auto-advance; the receiving phone's camera
-// captures them in any order, and the moment every frame is in, the exact
-// same before/after diff card used for file restore appears before anything
-// is touched.
 function BackupTab({ onClose }) {
   const toast = useToast();
   const lastBackupAt = useGame(s => s.lastBackupAt);
