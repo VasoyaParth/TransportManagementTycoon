@@ -1413,10 +1413,10 @@ export function EconomyTab() {
   const ledger = useGame(s => s.ledger || []);
   const hubs = useGame(s => s.hubs || []);
   const pricing = useGame(s => s.pricing);
-  const savePricing = useGame(s => s.savePricing);
-  const [priceEdit, setPriceEdit] = useState(null); // cargo id whose slider is open
   const [ledgerOpen, setLedgerOpen] = useState(false);
   const [bankOpen, setBankOpen] = useState(false);
+  const [pricingOpen, setPricingOpen] = useState(false);
+  const customCount = useMemo(() => CARGO_TYPES.filter(cg => pricing[cg.id] != null && pricing[cg.id] !== cg.rate).length, [pricing]);
   const [barSel, setBarSel] = useState(null);   // tapped profit bar
   const [fuelSel, setFuelSel] = useState(null); // tapped fuel-history bar
   const fuelToday = useGame(s => s.fuelToday);
@@ -1622,60 +1622,91 @@ export function EconomyTab() {
         </Card>
       )}
 
-      <SectionTitle icon="tune" text="Freight Pricing (₹ / km · ton)" />
-      <Card style={{ marginBottom: 10, backgroundColor: C.blueSoft }}>
-        <Row>
-          <Icon name="information-outline" size={14} color={C.blue} />
-          <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.text }]}>
-            Set your own rate per cargo type. It applies instantly to every new delivery's freight revenue and profit preview — raise a rate to ₹20 and that cargo pays far more per ton per km.
-          </Text>
-        </Row>
-      </Card>
-      <Card>
-        {CARGO_TYPES.map((cg, i) => {
-          const custom = pricing[cg.id] != null && pricing[cg.id] !== cg.rate;
-          const v = pricing[cg.id] != null ? pricing[cg.id] : cg.rate;
-          const MINR = 2, MAXR = 25;
-          const open = priceEdit === cg.id;
-          return (
-            <View key={cg.id} style={[{ paddingVertical: 10 }, i > 0 && st.divider]}>
-              <Pressable onPress={() => { haptic('light'); setPriceEdit(open ? null : cg.id); }}>
-                <Row style={{ justifyContent: 'space-between' }}>
-                  <Row style={{ flex: 1 }}>
-                    <Icon name={cg.icon} size={18} color={C.sub} />
-                    <View style={{ marginLeft: 8, flex: 1 }}>
-                      <Row>
-                        <Text style={[FONT.body, { fontWeight: '600' }]} numberOfLines={1}>{cg.name}</Text>
-                        {custom ? <View style={{ marginLeft: 6 }}><Pill text="Custom" icon="tune" color={C.green} bg={C.greenSoft} /></View> : null}
-                      </Row>
-                      <Text style={FONT.tiny}>Default ₹{cg.rate}</Text>
-                    </View>
-                  </Row>
-                  <Row style={{ alignItems: 'center' }}>
-                    <Text style={[FONT.mono, { fontWeight: '800', minWidth: 52, textAlign: 'right', color: custom ? C.green : C.text }]}>₹{v}</Text>
-                    <Icon name={open ? 'chevron-up' : 'chevron-down'} size={18} color={C.faint} style={{ marginLeft: 6 }} />
-                  </Row>
-                </Row>
-              </Pressable>
-              {open && (
-                <View style={{ marginTop: 4 }}>
-                  <GameSlider min={MINR} max={MAXR} step={0.5} value={v} color={custom ? C.green : C.blue}
-                    onChange={nv => savePricing({ [cg.id]: nv })}
-                    minLabel={`₹${MINR}`} maxLabel={`₹${MAXR}`} />
-                  {custom && (
-                    <Btn title={`Reset to default ₹${cg.rate}`} kind="soft" small icon="restore"
-                      onPress={() => savePricing({ [cg.id]: cg.rate })} style={{ alignSelf: 'flex-start', marginTop: 4 }} />
-                  )}
-                </View>
-              )}
+      <SectionTitle icon="tune" text="Freight Pricing" />
+      <Card style={{ marginBottom: 10 }} onPress={() => setPricingOpen(true)}>
+        <Row style={{ justifyContent: 'space-between' }}>
+          <Row style={{ flex: 1 }}>
+            <View style={[st.iconCircle, { backgroundColor: C.blueSoft }]}>
+              <Icon name="tune" size={20} color={C.blue} />
             </View>
-          );
-        })}
+            <View style={{ marginLeft: 10, flex: 1 }}>
+              <Text style={FONT.h3}>Set Your Rates</Text>
+              <Text style={FONT.tiny} numberOfLines={2}>Custom ₹/km·ton pricing per cargo type — {customCount > 0 ? `${customCount} customized` : 'all at default'}</Text>
+            </View>
+          </Row>
+          <Icon name="chevron-right" size={20} color={C.faint} />
+        </Row>
       </Card>
 
       <LedgerSheet visible={ledgerOpen} onClose={() => setLedgerOpen(false)} />
       <BankSheet visible={bankOpen} onClose={() => setBankOpen(false)} />
+      <PricingSheet visible={pricingOpen} onClose={() => setPricingOpen(false)} />
     </ScrollView>
+  );
+}
+
+// Freight pricing — pulled out of the Economy tab into its own sheet so the
+// tab itself reads as a dashboard, not a settings page.
+function PricingSheet({ visible, onClose }) {
+  const pricing = useGame(s => s.pricing);
+  const savePricing = useGame(s => s.savePricing);
+  const [priceEdit, setPriceEdit] = useState(null);
+  useEffect(() => { if (!visible) setPriceEdit(null); }, [visible]);
+
+  return (
+    <Sheet visible={visible} onClose={onClose} title="Freight Pricing" height="85%">
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+        <Card style={{ marginBottom: 10, backgroundColor: C.blueSoft }}>
+          <Row>
+            <Icon name="information-outline" size={14} color={C.blue} />
+            <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.text }]}>
+              Set your own rate per cargo type. It applies instantly to every new delivery's freight revenue and profit preview — raise a rate to ₹20 and that cargo pays far more per ton per km.
+            </Text>
+          </Row>
+        </Card>
+        <Card>
+          {CARGO_TYPES.map((cg, i) => {
+            const custom = pricing[cg.id] != null && pricing[cg.id] !== cg.rate;
+            const v = pricing[cg.id] != null ? pricing[cg.id] : cg.rate;
+            const MINR = 2, MAXR = 25;
+            const open = priceEdit === cg.id;
+            return (
+              <View key={cg.id} style={[{ paddingVertical: 10 }, i > 0 && st.divider]}>
+                <Pressable onPress={() => { haptic('light'); setPriceEdit(open ? null : cg.id); }}>
+                  <Row style={{ justifyContent: 'space-between' }}>
+                    <Row style={{ flex: 1 }}>
+                      <Icon name={cg.icon} size={18} color={C.sub} />
+                      <View style={{ marginLeft: 8, flex: 1 }}>
+                        <Row>
+                          <Text style={[FONT.body, { fontWeight: '600' }]} numberOfLines={1}>{cg.name}</Text>
+                          {custom ? <View style={{ marginLeft: 6 }}><Pill text="Custom" icon="tune" color={C.green} bg={C.greenSoft} /></View> : null}
+                        </Row>
+                        <Text style={FONT.tiny}>Default ₹{cg.rate}</Text>
+                      </View>
+                    </Row>
+                    <Row style={{ alignItems: 'center' }}>
+                      <Text style={[FONT.mono, { fontWeight: '800', minWidth: 52, textAlign: 'right', color: custom ? C.green : C.text }]}>₹{v}</Text>
+                      <Icon name={open ? 'chevron-up' : 'chevron-down'} size={18} color={C.faint} style={{ marginLeft: 6 }} />
+                    </Row>
+                  </Row>
+                </Pressable>
+                {open && (
+                  <View style={{ marginTop: 4 }}>
+                    <GameSlider min={MINR} max={MAXR} step={0.5} value={v} color={custom ? C.green : C.blue}
+                      onChange={nv => savePricing({ [cg.id]: nv })}
+                      minLabel={`₹${MINR}`} maxLabel={`₹${MAXR}`} />
+                    {custom && (
+                      <Btn title={`Reset to default ₹${cg.rate}`} kind="soft" small icon="restore"
+                        onPress={() => savePricing({ [cg.id]: cg.rate })} style={{ alignSelf: 'flex-start', marginTop: 4 }} />
+                    )}
+                  </View>
+                )}
+              </View>
+            );
+          })}
+        </Card>
+      </ScrollView>
+    </Sheet>
   );
 }
 
@@ -1687,6 +1718,7 @@ export function MarketingTab() {
   const launchCampaign = useGame(s => s.launchCampaign);
   const cancelCampaign = useGame(s => s.cancelCampaign);
   const [confirmCancel, setConfirmCancel] = useState(null);
+  const [view, setView] = useState('overview'); // 'overview' | 'launch' — clean separation, matches Bank pattern
   const toast = useToast();
   const active = campaigns.filter(a => a.endsAt > Date.now());
   const now = useNow(active.length > 0);
@@ -1717,6 +1749,61 @@ export function MarketingTab() {
     return bp > 0 ? best : null;
   }, [dailyGross]);
   const soonest = active.length ? Math.min(...active.map(a => a.endsAt)) : 0;
+
+  if (view === 'launch') {
+    return (
+      <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
+        <Pressable onPress={() => setView('overview')} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+          <Icon name="chevron-left" size={18} color={C.blue} />
+          <Text style={[FONT.body, { color: C.blue, fontWeight: '700', marginLeft: 2 }]}>Back to overview</Text>
+        </Pressable>
+        <SectionTitle icon="rocket-launch-outline" text="Available Campaigns" />
+        {CAMPAIGNS.map(def => {
+          const isActive = active.some(a => a.campaignId === def.id);
+          const cannot = balance < def.cost;
+          const disabled = isActive || cannot;
+          return (
+            <Card key={def.id} style={{ marginBottom: 10 }}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Row style={{ flex: 1 }}>
+                  <View style={[st.iconCircle, { backgroundColor: C.blueSoft }]}>
+                    <Icon name={def.icon} size={20} color={C.blue} />
+                  </View>
+                  <View style={{ marginLeft: 10, flex: 1 }}>
+                    <Text style={FONT.h3}>{def.name}</Text>
+                    <Text style={FONT.tiny} numberOfLines={2}>{def.desc}</Text>
+                  </View>
+                </Row>
+                <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                  <Pill text={`+${Math.round(def.boost * 100)}%`} color={C.green} bg={C.greenSoft} />
+                  {bestId === def.id ? <Pill text="Best value" icon="star" color={C.gold} bg={C.amberSoft} /> : null}
+                </View>
+              </Row>
+              {dailyGross > 0 && (() => { const r = roiFor(def); return (
+                <Row style={{ marginTop: 10, backgroundColor: C.bgSoft, borderRadius: RADIUS.md, paddingVertical: 7, justifyContent: 'space-around' }}>
+                  <View style={{ alignItems: 'center' }}><Text style={[FONT.tiny, { fontWeight: '800', color: C.green }]}>{inrShort(r.extra)}</Text><Text style={[FONT.tiny, { fontSize: 9 }]}>est. extra revenue</Text></View>
+                  <View style={{ alignItems: 'center' }}><Text style={[FONT.tiny, { fontWeight: '800', color: r.profit >= 0 ? C.green : C.red }]}>{r.profit >= 0 ? '+' : '−'}{inrShort(Math.abs(r.profit))}</Text><Text style={[FONT.tiny, { fontSize: 9 }]}>est. net gain</Text></View>
+                  <View style={{ alignItems: 'center' }}><Text style={[FONT.tiny, { fontWeight: '800' }]}>{r.ratio.toFixed(1)}×</Text><Text style={[FONT.tiny, { fontSize: 9 }]}>return on spend</Text></View>
+                </Row>
+              ); })()}
+              <Row style={{ justifyContent: 'space-between', marginTop: 12 }}>
+                <Text style={FONT.sub}>{inr(def.cost)} · {def.days} days</Text>
+                <Btn
+                  title={isActive ? 'Running' : cannot ? 'Low funds' : 'Launch'}
+                  kind="blue" small disabled={disabled}
+                  onPress={() => {
+                    const r = launchCampaign(def.id);
+                    toast && toast(r.ok ? `${def.name} launched!` : r.err, r.ok ? 'success' : 'error');
+                    if (r.ok) setView('overview');
+                  }}
+                />
+              </Row>
+            </Card>
+          );
+        })}
+      </ScrollView>
+    );
+  }
 
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
@@ -1789,49 +1876,7 @@ export function MarketingTab() {
         );
       })}
 
-      <SectionTitle icon="rocket-launch-outline" text="Available Campaigns" />
-      {CAMPAIGNS.map(def => {
-        const isActive = active.some(a => a.campaignId === def.id);
-        const cannot = balance < def.cost;
-        const disabled = isActive || cannot;
-        return (
-          <Card key={def.id} style={{ marginBottom: 10 }}>
-            <Row style={{ justifyContent: 'space-between' }}>
-              <Row style={{ flex: 1 }}>
-                <View style={[st.iconCircle, { backgroundColor: C.blueSoft }]}>
-                  <Icon name={def.icon} size={20} color={C.blue} />
-                </View>
-                <View style={{ marginLeft: 10, flex: 1 }}>
-                  <Text style={FONT.h3}>{def.name}</Text>
-                  <Text style={FONT.tiny} numberOfLines={2}>{def.desc}</Text>
-                </View>
-              </Row>
-              <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                <Pill text={`+${Math.round(def.boost * 100)}%`} color={C.green} bg={C.greenSoft} />
-                {bestId === def.id ? <Pill text="Best value" icon="star" color={C.gold} bg={C.amberSoft} /> : null}
-              </View>
-            </Row>
-            {dailyGross > 0 && (() => { const r = roiFor(def); return (
-              <Row style={{ marginTop: 10, backgroundColor: C.bgSoft, borderRadius: RADIUS.md, paddingVertical: 7, justifyContent: 'space-around' }}>
-                <View style={{ alignItems: 'center' }}><Text style={[FONT.tiny, { fontWeight: '800', color: C.green }]}>{inrShort(r.extra)}</Text><Text style={[FONT.tiny, { fontSize: 9 }]}>est. extra revenue</Text></View>
-                <View style={{ alignItems: 'center' }}><Text style={[FONT.tiny, { fontWeight: '800', color: r.profit >= 0 ? C.green : C.red }]}>{r.profit >= 0 ? '+' : '−'}{inrShort(Math.abs(r.profit))}</Text><Text style={[FONT.tiny, { fontSize: 9 }]}>est. net gain</Text></View>
-                <View style={{ alignItems: 'center' }}><Text style={[FONT.tiny, { fontWeight: '800' }]}>{r.ratio.toFixed(1)}×</Text><Text style={[FONT.tiny, { fontSize: 9 }]}>return on spend</Text></View>
-              </Row>
-            ); })()}
-            <Row style={{ justifyContent: 'space-between', marginTop: 12 }}>
-              <Text style={FONT.sub}>{inr(def.cost)} · {def.days} days</Text>
-              <Btn
-                title={isActive ? 'Running' : cannot ? 'Low funds' : 'Launch'}
-                kind="blue" small disabled={disabled}
-                onPress={() => {
-                  const r = launchCampaign(def.id);
-                  toast && toast(r.ok ? `${def.name} launched!` : r.err, r.ok ? 'success' : 'error');
-                }}
-              />
-            </Row>
-          </Card>
-        );
-      })}
+      <Btn title="Launch New Campaign" icon="rocket-launch-outline" kind="green" onPress={() => setView('launch')} />
     </ScrollView>
   );
 }
