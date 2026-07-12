@@ -946,7 +946,11 @@ function LedgerSheet({ visible, onClose }) {
   const ledger = useGame(s => s.ledger || []);
   const tapLedgerEgg = useEasterEggTap('ledger_lord', 12);
   const [page, setPage] = useState(1);
-  useEffect(() => { if (visible) setPage(1); }, [visible]);
+  // Days start CLOSED — tap a day's header to expand and see its entries.
+  // Keeps the initial render light even with months of history, and lets
+  // you scan day-by-day totals at a glance before drilling into any one.
+  const [expanded, setExpanded] = useState(() => new Set());
+  useEffect(() => { if (visible) { setPage(1); setExpanded(new Set()); } }, [visible]);
   const groups = useMemo(() => {
     const m = new Map();
     for (const e of ledger) {
@@ -958,6 +962,11 @@ function LedgerSheet({ visible, onClose }) {
     return [...m.values()].sort((a, b) => b.day - a.day);
   }, [ledger]);
   const shownGroups = groups.slice(0, page * LEDGER_PAGE);
+  const toggleDay = day => setExpanded(prev => {
+    const next = new Set(prev);
+    if (next.has(day)) next.delete(day); else next.add(day);
+    return next;
+  });
 
   return (
     <Sheet visible={visible} onClose={onClose} title="Company Ledger" height="88%">
@@ -980,44 +989,55 @@ function LedgerSheet({ visible, onClose }) {
         </Card>
         {groups.length === 0 ? (
           <EmptyState icon="notebook-outline" title="No entries yet" sub="Deliveries, salaries and every purchase will be booked here automatically." />
-        ) : shownGroups.map(g => (
-          <View key={g.day} style={{ marginBottom: 14 }}>
-            <Row style={{ justifyContent: 'space-between', marginBottom: 6, paddingHorizontal: 2 }}>
-              <Row>
-                <Icon name="calendar" size={14} color={C.sub} />
-                <Text style={[FONT.body, { fontWeight: '800', marginLeft: 5 }]}>Day {g.day}</Text>
-              </Row>
-              <Text style={[FONT.mono, { fontWeight: '800', color: g.net >= 0 ? C.green : C.red }]}>
-                {g.net >= 0 ? '+' : '−'}{inrShort(Math.abs(g.net))}
-              </Text>
-            </Row>
-            <Card style={{ padding: 0, overflow: 'hidden' }}>
-              {g.entries.map((e, i) => (
-                <Row key={e.id} style={[{ paddingVertical: 10, paddingHorizontal: 12, justifyContent: 'space-between' }, i > 0 && st.divider]}>
-                  <Row style={{ flex: 1, marginRight: 8 }}>
-                    <View style={{
-                      width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center',
-                      backgroundColor: e.amount >= 0 ? C.greenSoft : C.redSoft,
-                    }}>
-                      <Icon name={e.icon || 'cash'} size={15} color={e.amount >= 0 ? C.green : C.red} />
-                    </View>
-                    <View style={{ marginLeft: 9, flex: 1 }}>
-                      <Text style={FONT.body} numberOfLines={1}>{e.label}</Text>
-                      <Text style={FONT.tiny}>{relTime(e.ts)}</Text>
-                    </View>
+        ) : shownGroups.map(g => {
+          const open = expanded.has(g.day);
+          return (
+            <View key={g.day} style={{ marginBottom: 10 }}>
+              <Pressable onPress={() => toggleDay(g.day)}>
+                <Card style={{ padding: 0, overflow: 'hidden' }}>
+                  <Row style={{ justifyContent: 'space-between', paddingVertical: 10, paddingHorizontal: 12 }}>
+                    <Row>
+                      <Icon name={open ? 'chevron-down' : 'chevron-right'} size={16} color={C.sub} />
+                      <Icon name="calendar" size={14} color={C.sub} style={{ marginLeft: 6 }} />
+                      <Text style={[FONT.body, { fontWeight: '800', marginLeft: 5 }]}>Day {g.day}</Text>
+                      <Text style={[FONT.tiny, { marginLeft: 8, color: C.faint }]}>{g.entries.length} entr{g.entries.length === 1 ? 'y' : 'ies'}</Text>
+                    </Row>
+                    <Text style={[FONT.mono, { fontWeight: '800', color: g.net >= 0 ? C.green : C.red }]}>
+                      {g.net >= 0 ? '+' : '−'}{inrShort(Math.abs(g.net))}
+                    </Text>
                   </Row>
-                  <Text style={[FONT.mono, { fontWeight: '700', color: e.amount >= 0 ? C.green : C.red }]}>
-                    {e.amount >= 0 ? '+' : '−'}{inrShort(Math.abs(e.amount))}
-                  </Text>
-                </Row>
-              ))}
-              <Row style={[st.divider, { paddingVertical: 8, paddingHorizontal: 12, justifyContent: 'space-between', backgroundColor: C.bgSoft }]}>
-                <Text style={[FONT.tiny, { fontWeight: '800' }]}>IN {inrShort(g.income)} · OUT {inrShort(g.expense)}</Text>
-                <Text style={[FONT.tiny, { fontWeight: '800', color: g.net >= 0 ? C.green : C.red }]}>NET {g.net >= 0 ? '+' : '−'}{inrShort(Math.abs(g.net))}</Text>
-              </Row>
-            </Card>
-          </View>
-        ))}
+                  {open ? (
+                    <>
+                      {g.entries.map((e, i) => (
+                        <Row key={e.id} style={[{ paddingVertical: 10, paddingHorizontal: 12, justifyContent: 'space-between' }, st.divider]}>
+                          <Row style={{ flex: 1, marginRight: 8 }}>
+                            <View style={{
+                              width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center',
+                              backgroundColor: e.amount >= 0 ? C.greenSoft : C.redSoft,
+                            }}>
+                              <Icon name={e.icon || 'cash'} size={15} color={e.amount >= 0 ? C.green : C.red} />
+                            </View>
+                            <View style={{ marginLeft: 9, flex: 1 }}>
+                              <Text style={FONT.body} numberOfLines={1}>{e.label}</Text>
+                              <Text style={FONT.tiny}>{relTime(e.ts)}</Text>
+                            </View>
+                          </Row>
+                          <Text style={[FONT.mono, { fontWeight: '700', color: e.amount >= 0 ? C.green : C.red }]}>
+                            {e.amount >= 0 ? '+' : '−'}{inrShort(Math.abs(e.amount))}
+                          </Text>
+                        </Row>
+                      ))}
+                      <Row style={[st.divider, { paddingVertical: 8, paddingHorizontal: 12, justifyContent: 'space-between', backgroundColor: C.bgSoft }]}>
+                        <Text style={[FONT.tiny, { fontWeight: '800' }]}>IN {inrShort(g.income)} · OUT {inrShort(g.expense)}</Text>
+                        <Text style={[FONT.tiny, { fontWeight: '800', color: g.net >= 0 ? C.green : C.red }]}>NET {g.net >= 0 ? '+' : '−'}{inrShort(Math.abs(g.net))}</Text>
+                      </Row>
+                    </>
+                  ) : null}
+                </Card>
+              </Pressable>
+            </View>
+          );
+        })}
         {shownGroups.length < groups.length && (
           <Btn title={`Show more (${groups.length - shownGroups.length} more day${groups.length - shownGroups.length === 1 ? '' : 's'})`}
             kind="soft" icon="chevron-down" onPress={() => setPage(p => p + 1)} />
