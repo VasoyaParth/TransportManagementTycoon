@@ -13,7 +13,7 @@ import {
   NewDeliveryModal, TruckDetailModal, TruckCustomizeModal, BuyTruckModal, ContractsModal,
   PowerupsModal, NotificationsModal, SettingsModal, HubsModal, DriverDetailModal, CountriesModal, MiniGamesModal, HubInfoModal,
   BuildingCustomizeModal, CompanyInsightsModal, NewsModal, PhotoModeModal, FinaleModal, FleetLiveryModal, IndustryRankingsModal,
-  AutopilotModal,
+  AutopilotModal, AuctionsModal,
 } from './modals';
 import { haptic } from '../../engine/haptics';
 import Tutorial from './Tutorial';
@@ -113,6 +113,9 @@ export default function GameScreen() {
       }
       for (const d of g.deliveries) {
         if (d.endsAt <= now) g.completeDelivery(d.id);
+      }
+      for (const m of g.staff) {
+        if (m.academyUntil && m.academyUntil <= now) g.finishAcademyIfDue(m.id);
       }
       g.dailyTick();
       // PERF: the header only shows day + real-world minute, so only trigger a
@@ -254,6 +257,9 @@ export default function GameScreen() {
               <Pressable style={[st.actionBtn, { marginBottom: 8 }]} onPress={() => { haptic('light'); setModal({ kind: 'autopilot' }); }}>
                 <Icon name="steering" size={19} color={C.blue} />
               </Pressable>
+              <Pressable style={[st.actionBtn, { marginBottom: 8 }]} onPress={() => { haptic('light'); setModal({ kind: 'auctions' }); }}>
+                <Icon name="gavel" size={19} color={C.text} />
+              </Pressable>
             </ScrollView>
           </Animated.View>
           <Pressable style={[st.actionBtn, drawerOpen && { backgroundColor: C.blueSoft, borderColor: C.blue }]} onPress={toggleDrawer}>
@@ -353,6 +359,7 @@ export default function GameScreen() {
       {mounted('fleetLivery') && <FleetLiveryModal visible={modal?.kind === 'fleetLivery'} onClose={() => setModal(null)} />}
       {mounted('rankings') && <IndustryRankingsModal visible={modal?.kind === 'rankings'} onClose={() => setModal(null)} />}
       {mounted('autopilot') && <AutopilotModal visible={modal?.kind === 'autopilot'} onClose={() => setModal(null)} />}
+      {mounted('auctions') && <AuctionsModal visible={modal?.kind === 'auctions'} onClose={() => setModal(null)} />}
       {mounted('countries') && <CountriesModal visible={modal?.kind === 'countries'} onClose={() => setModal(null)} />}
       {mounted('games') && <MiniGamesModal visible={modal?.kind === 'games'} onClose={() => setModal(null)} />}
       {mounted('buy') && <BuyTruckModal visible={modal?.kind === 'buy'} onClose={() => setModal(null)}

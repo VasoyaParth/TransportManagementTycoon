@@ -7,7 +7,7 @@ import RNShare from 'react-native-share';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider, smartSearch, DropdownPicker } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST_MIN, LIVERY_COST_MAX, liveryCostFor, FLEET_LIVERY_DISCOUNT, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds, licenseRequiredFor } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST_MIN, LIVERY_COST_MAX, liveryCostFor, FLEET_LIVERY_DISCOUNT, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds, licenseRequiredFor, INSURANCE_PREMIUM_PCT, INSURANCE_RECOVERY, ACADEMY_TIERS } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
@@ -904,6 +904,90 @@ export function AutopilotModal({ visible, onClose }) {
   );
 }
 
+// ============ Truck Auctions ============
+// A rotating weekly stock of discounted used trucks (buy them straight into
+// the fleet, parked at HQ), plus a "sell into the auction" path that pays a
+// bidding-war bonus over the normal trade-in resale value.
+export function AuctionsModal({ visible, onClose }) {
+  const toast = useToast();
+  const auctionListings = useGame(s => s.auctionListings || []);
+  const trucks = useGame(s => s.trucks);
+  const buyAuctionListing = useGame(s => s.buyAuctionListing);
+  const sellToAuction = useGame(s => s.sellToAuction);
+  const truckResale = useGame(s => s.truckResale);
+  const [page, setPage] = useState('buy');
+
+  const sellable = trucks.filter(t => t.status === 'parked' || t.status === 'broken');
+
+  return (
+    <Sheet visible={visible} onClose={onClose} title="Truck Auctions" height="88%">
+      <DropdownPicker
+        icon="gavel"
+        options={[{ key: 'buy', label: `This Week's Stock (${auctionListings.length})` }, { key: 'sell', label: 'Sell a Truck' }]}
+        value={page} onChange={setPage}
+        hint="Switch between buying this week's used stock and auctioning off one of your own trucks."
+      />
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+        {page === 'buy' ? (
+          auctionListings.length === 0 ? (
+            <Card style={{ alignItems: 'center', padding: 24 }}>
+              <Icon name="gavel" size={34} color={C.faint} />
+              <Text style={[FONT.body, { marginTop: 8, textAlign: 'center' }]}>No stock right now — check back when a fresh batch rolls in.</Text>
+            </Card>
+          ) : auctionListings.map(l => {
+            const m = modelById(l.modelId);
+            return (
+              <Card key={l.id} style={{ marginBottom: 10 }}>
+                <Row>
+                  <Icon name={m.icon} size={22} color={C.blue} />
+                  <View style={{ marginLeft: 9, flex: 1 }}>
+                    <Text style={[FONT.body, { fontWeight: '800' }]}>{m.name}</Text>
+                    <Text style={FONT.tiny}>{l.condition}% condition · {l.km.toLocaleString('en-IN')} km driven · list price {inr(m.price)}</Text>
+                  </View>
+                </Row>
+                <Row style={{ justifyContent: 'space-between', marginTop: 8, alignItems: 'center' }}>
+                  <Text style={[FONT.h3, { color: C.green }]}>{inr(l.price)}</Text>
+                  <Btn title="Buy" kind="green" small onPress={() => {
+                    const r = buyAuctionListing(l.id);
+                    toast(r.ok ? 'Truck won — parked at HQ!' : r.err, r.ok ? 'success' : 'error');
+                  }} />
+                </Row>
+              </Card>
+            );
+          })
+        ) : (
+          sellable.length === 0 ? (
+            <Card style={{ alignItems: 'center', padding: 24 }}>
+              <Icon name="truck-outline" size={34} color={C.faint} />
+              <Text style={[FONT.body, { marginTop: 8, textAlign: 'center' }]}>No eligible truck to sell right now (must be parked or broken, and not your last one).</Text>
+            </Card>
+          ) : sellable.map(t => {
+            const m = modelById(t.modelId);
+            const base = truckResale(t.id);
+            return (
+              <Card key={t.id} style={{ marginBottom: 10 }}>
+                <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Row style={{ flex: 1, marginRight: 8 }}>
+                    <Icon name={m.icon} size={20} color={C.sub} />
+                    <View style={{ marginLeft: 9, flex: 1 }}>
+                      <Text style={[FONT.body, { fontWeight: '700' }]}>{t.customName || m.name}</Text>
+                      <Text style={FONT.tiny}>Normal resale ~{inr(base)} — an auction typically pays 10-30% more</Text>
+                    </View>
+                  </Row>
+                  <Btn title="Auction it" kind="soft" small onPress={() => {
+                    const r = sellToAuction(t.id);
+                    toast(r.ok ? `Sold for ${inr(r.value)}!` : r.err, r.ok ? 'success' : 'error');
+                  }} />
+                </Row>
+              </Card>
+            );
+          })
+        )}
+      </ScrollView>
+    </Sheet>
+  );
+}
+
 function RoutePreview({ points }) {
   const W = 300, H = 110, pad = 10;
   if (!points || points.length < 2) return null;
@@ -1156,6 +1240,8 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
   const serviceTruck = useGame(s => s.serviceTruck);
   const sellTruck = useGame(s => s.sellTruck);
   const truckResale = useGame(s => s.truckResale);
+  const insureTruck = useGame(s => s.insureTruck);
+  const cancelInsurance = useGame(s => s.cancelInsurance);
   const [confirmSell, setConfirmSell] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   useEffect(() => { if (!visible) { setConfirmSell(false); setHistoryOpen(false); } }, [visible]);
@@ -1214,6 +1300,27 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
           {condition < 55 && truck.status !== 'delivering' && (
             <Btn title={`Service · ${inr(serviceCost)}`} kind="soft" small icon="wrench" onPress={doService} style={{ marginTop: 4 }} />
           )}
+        </Card>
+
+        <Card style={{ marginTop: 10 }}>
+          <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+            <Row style={{ flex: 1, marginRight: 8 }}>
+              <Icon name="shield-car" size={16} color={truck.insured ? C.green : C.sub} />
+              <View style={{ marginLeft: 8, flex: 1 }}>
+                <Text style={[FONT.body, { fontWeight: '700' }]}>Cargo Insurance</Text>
+                <Text style={FONT.tiny}>
+                  {truck.insured
+                    ? `Insured — ${Math.round(INSURANCE_RECOVERY * 100)}% of incident losses covered`
+                    : `${inr(Math.round(m.price * INSURANCE_PREMIUM_PCT))}/mo — recovers most theft/accident/weather losses`}
+                </Text>
+              </View>
+            </Row>
+            <Btn title={truck.insured ? 'Cancel' : 'Insure'} kind={truck.insured ? 'soft' : 'green'} small
+              onPress={() => {
+                const r = truck.insured ? cancelInsurance(truck.id) : insureTruck(truck.id);
+                toast(r.ok ? (truck.insured ? 'Insurance cancelled' : 'Insured!') : r.err, r.ok ? 'success' : 'error');
+              }} />
+          </Row>
         </Card>
 
         {licenseStatus && !licenseStatus.qualified && truck.status === 'parked' && (
@@ -2661,6 +2768,7 @@ export function DriverDetailModal({ visible, onClose, staffId, onShowOnMap }) {
   const trucks = useGame(s => s.trucks);
   const deliveries = useGame(s => s.deliveries);
   const promoteStaff = useGame(s => s.promoteStaff);
+  const sendToAcademy = useGame(s => s.sendToAcademy);
   const member = staff.find(x => x.id === staffId);
   const truck = member && member.truckId ? trucks.find(t => t.id === member.truckId) : null;
   const d = truck ? deliveries.find(x => x.truckId === truck.id) : null;
@@ -2723,6 +2831,38 @@ export function DriverDetailModal({ visible, onClose, staffId, onShowOnMap }) {
             />
           );
         })()}
+
+        {/* Driver Academy — buy XP with time + cash instead of only earning
+            it on the road. Drivers only; mechanics have no XP/level track. */}
+        {member.role === 'driver' && (
+          (member.academyUntil || 0) > Date.now() ? (
+            <Card style={{ marginBottom: 12, borderColor: C.blue, backgroundColor: C.blueSoft }}>
+              <Row>
+                <Icon name="school" size={16} color={C.blue} />
+                <Text style={[FONT.tiny, { marginLeft: 8, flex: 1, color: C.text }]}>
+                  In training ({ACADEMY_TIERS.find(t => t.id === member.academyTier)?.name || 'Course'}) — back in {fmtDur((member.academyUntil - Date.now()) / 1000)}, +{(member.academyGain || 0).toLocaleString('en-IN')} XP on graduation.
+                </Text>
+              </Row>
+            </Card>
+          ) : (
+            <Card style={{ marginBottom: 12 }}>
+              <Text style={[FONT.body, { fontWeight: '700', marginBottom: 8 }]}>Driver Academy</Text>
+              <Text style={[FONT.tiny, { marginBottom: 10 }]}>Send {member.name} off the road for real-world training — a lump XP bonus waiting when they graduate.</Text>
+              {ACADEMY_TIERS.map(tier => (
+                <Row key={tier.id} style={{ justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6 }}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={[FONT.sub, { fontWeight: '700' }]}>{tier.name}</Text>
+                    <Text style={FONT.tiny}>{tier.hours}h · +{tier.xpGain.toLocaleString('en-IN')} XP</Text>
+                  </View>
+                  <Btn title={inr(tier.cost)} kind="soft" small onPress={() => {
+                    const r = sendToAcademy(member.id, tier.id);
+                    toast(r.ok ? `${member.name} left for training!` : r.err, r.ok ? 'success' : 'error');
+                  }} />
+                </Row>
+              ))}
+            </Card>
+          )
+        )}
 
         {/* Current delivery */}
         {d && m ? (
@@ -3162,10 +3302,10 @@ const ROADMAP_ITEMS = [
     desc: 'Engine, tyres, GPS and security upgrades per truck — security cuts theft risk, tyres cut bursts, engine adds pace.' },
   { icon: 'robot-industrial', title: 'Rival AI Companies', status: 'exploring',
     desc: '2–3 bot transport companies that snap up contracts you ignore, buy garages before you and fight you on a live leaderboard.' },
-  { icon: 'shield-car', title: 'Cargo Insurance Policies', status: 'planned',
-    desc: 'Monthly premium per truck; insured trucks recover most of the money lost to theft, accidents and weather damage.' },
-  { icon: 'gavel', title: 'Truck Auctions', status: 'planned',
-    desc: 'A weekly second-hand auction house — bid on used rigs below market price, sell your old ones to the highest bidder.' },
+  { icon: 'shield-car', title: 'Cargo Insurance Policies', status: 'shipped',
+    desc: 'SHIPPED — open a truck\'s detail page: a monthly premium per truck, and insured trucks recover most of the money lost to theft, accidents and weather damage.' },
+  { icon: 'gavel', title: 'Truck Auctions', status: 'shipped',
+    desc: 'SHIPPED — new gavel icon on the map\'s action drawer: a weekly rotating stock of discounted used rigs to buy, plus auctioning off your own trucks for above-normal resale.' },
   { icon: 'firework', title: 'Festival Seasons', status: 'planned',
     desc: 'Diwali, Holi and New Year events: limited-time cargo rushes, double tips, festive map skins and special rewards.' },
   { icon: 'account-group', title: 'Driver Union Events', status: 'exploring',
@@ -3182,8 +3322,8 @@ const ROADMAP_ITEMS = [
     desc: 'Trucks following actual highway geometry bend by bend. Already LIVE in the private beta build — graduating here soon.' },
   { icon: 'shield-home', title: 'Garage Upgrades', status: 'exploring',
     desc: 'Level up garages: bigger fuel discounts, faster loading, covered parking that slows condition wear.' },
-  { icon: 'school', title: 'Driver Academy', status: 'exploring',
-    desc: 'Send drivers to training between trips — buy XP with time and cash instead of only earning it on the road.' },
+  { icon: 'school', title: 'Driver Academy', status: 'shipped',
+    desc: 'SHIPPED — open any driver\'s detail page: send them off the road for real-world training, buying a lump XP bonus with time and cash instead of only earning it on the road.' },
   { icon: 'camera', title: 'Photo Mode — Empire Report Card', status: 'shipped',
     desc: 'SHIPPED — open from Company Insights (tap your profile pill): a trophy-style stats card with records (longest haul, best trip) and one-tap share.' },
   { icon: 'music', title: 'Sound & Music Pass', status: 'someday',
