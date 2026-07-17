@@ -341,6 +341,17 @@ function boot(){
     var coords=c.points.map(function(p){return [p.lat,p.lng];});
     corridorLines[c.id]=L.polyline(coords,{color:'#2563EB',weight:3,opacity:.22}).addTo(map);
   }
+  // Saved Autopilot custom routes — each drawn in its own colour, dashed so
+  // they read distinctly from a live delivery's solid route line. Redrawn
+  // wholesale on every call (cheap: a handful of routes, not per-second).
+  var customRouteLayer=L.layerGroup().addTo(map);
+  window.setCustomRoutes=function(routes){
+    customRouteLayer.clearLayers();
+    (routes||[]).forEach(function(r){
+      var coords=r.points.map(function(p){return [p.lat,p.lng];});
+      customRouteLayer.addLayer(L.polyline(coords,{color:r.color,weight:4,opacity:.85,dashArray:'8 6'}));
+    });
+  };
 
   // Apply live state pushed from RN
   window.applyState=function(s){

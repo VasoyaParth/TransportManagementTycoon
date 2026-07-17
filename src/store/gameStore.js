@@ -6,7 +6,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { TRUCK_MODELS, CARGO_TYPES, CAMPAIGNS, POWERUPS, CONTRACT_FLAVORS } from '../data/trucks';
+import { TRUCK_MODELS, CARGO_TYPES, CAMPAIGNS, POWERUPS, CONTRACT_FLAVORS, ROUTE_COLORS } from '../data/trucks';
 import { HQ_TIERS, GARAGE_TIERS } from '../data/buildings';
 import { RIVAL_COMPANIES, INDUSTRY_LEADER_REWARD } from '../data/rivals';
 import { COUNTRY_BY_CODE } from '../data/expansion';
@@ -764,6 +764,8 @@ export const EASTER_EGGS = [
   // v10.9.0 — a few final ones, including one for the other half of the team.
   { id: 'meet_jeel', title: 'Meet Jeel', hint: 'The other half of the team deserves a knock too.', where: 'Tap the Jeel Gajera developer card in Settings → About 8 times fast.' },
   { id: 'donor', title: 'Big Heart', hint: 'Giving it all away, one tap at a time.', where: 'Tap the Charity Drive icon in the Bank sheet 5 times fast.' },
+  // v10.23.0
+  { id: 'perfect_balance', title: 'Perfect Balance', hint: 'Patience beats a fast trigger finger.', where: 'In Mini-Games → Weigh Station, tap the needle while it\'s idle (not sweeping) 6 times fast.' },
 ];
 const EASTER_EGG_REWARD = { cash: 1000000, gold: 15 }; // ₹10 lakhs + 15 Gold, per egg, one-time
 
@@ -831,6 +833,9 @@ export const ACHIEVEMENTS = [
     desc: 'Collateral-backed loans taken out, lifetime.', levels: [1, 3, 6, 12, 25] },
   { id: 'trendsetter', title: 'Trendsetter', icon: 'palette', unit: 'repaints',
     desc: 'Trucks repainted with a custom livery, lifetime.', levels: [1, 5, 15, 40, 100] },
+  // v10.23.0 — fed by the new Autopilot custom-route system.
+  { id: 'autopilot_ace', title: 'Autopilot Ace', icon: 'steering', unit: 'legs',
+    desc: 'Delivery legs completed automatically on a saved custom route.', levels: [5, 20, 75, 250, 750] },
 ];
 // Current metric value for a track, computed from live state.
 export function achievementValue(s, id) {
@@ -862,6 +867,7 @@ export function achievementValue(s, id) {
     case 'philanthropist': return s.stats.donated || 0;
     case 'collateral_king': return s.stats.loansTaken || 0;
     case 'trendsetter': return s.stats.repaints || 0;
+    case 'autopilot_ace': return s.stats.autopilotLegs || 0;
     default: return 0;
   }
 }
@@ -930,6 +936,7 @@ const initialState = {
   candidates: [],
   hubs: [], // {cityId, name, hq, since} — HQ + purchased garages/hubs
   corridors: [], // {id, fromCityId, toCityId, points} — unlocked/highlighted routes
+  customRoutes: [], // {id, name, cityIds:[from,...via,to], color, cargoType, cargoTons, createdAt} — saved Autopilot routes
   contracts: [],
   unlockedCountries: ['IN'], // v1.4.0: neighbouring countries unlock in-game
   campaigns: [], // {id, campaignId, startedAt, endsAt}
@@ -2224,6 +2231,116 @@ export const useGame = create(
         get().notify('delivery', 'cash-check', `Delivered to ${to.name}: ${inr(d.econ.net)} earned.`);
         if (goldTip) get().notify('delivery', 'gold', `Happy client at ${to.name} tipped the driver +${goldTip} Gold!`);
         if (contract) get().notify('delivery', 'file-check', `Contract complete! Bonus reward ${inr(reward)}.`);
+        // Autopilot: this truck is looping a saved custom route — advance to
+        // the next leg automatically. `t.autopilot` is read from the truck
+        // record captured at the top of this function (unaffected by the
+        // status/cityId update above), so it still reflects whether the leg
+        // that just finished was running under Autopilot.
+        if (t && t.autopilot) {
+          const route = get().customRoutes.find(r => r.id === t.autopilot.routeId);
+          if (!route) {
+            set({ trucks: get().trucks.map(x => x.id === t.id ? { ...x, autopilot: null } : x) });
+          } else {
+            const seq = route.cityIds;
+            let { pos, dir } = t.autopilot;
+            pos = pos + dir;
+            if (pos === 0 || pos === seq.length - 1) dir = -dir;
+            const nextCityId = seq[pos + dir];
+            set({
+              trucks: get().trucks.map(x => x.id === t.id ? { ...x, autopilot: { routeId: route.id, pos, dir } } : x),
+              stats: { ...get().stats, autopilotLegs: (get().stats.autopilotLegs || 0) + 1 },
+            });
+            const r = get().startDelivery(t.id, nextCityId, route.cargoType, route.cargoTons);
+            if (!r.ok) {
+              set({ trucks: get().trucks.map(x => x.id === t.id ? { ...x, autopilot: null } : x) });
+              get().notify('truck', 'steering', `${modelById(t.modelId).name} came off Autopilot on "${route.name}": ${r.err}`);
+            }
+          }
+        }
+      },
+
+      // ---------- Autopilot custom routes ----------
+      // A saved sequence of 2+ cities (from -> via* -> to). Once assigned to a
+      // parked truck (via assignAutopilot), the truck runs it forever, bouncing
+      // back and forth between the two endpoints leg by leg, using the exact
+      // same startDelivery/previewDelivery machinery as a manual dispatch —
+      // Autopilot is just completeDelivery re-dispatching itself, above.
+      previewCustomRoute(cityIds) {
+        const cities = (cityIds || []).map(id => cityById(id)).filter(Boolean);
+        if (cities.length < 2) return { ok: false, err: 'Pick at least a start and end city' };
+        let totalKm = 0;
+        const legs = [];
+        for (let i = 0; i < cities.length - 1; i++) {
+          const a = cities[i], b = cities[i + 1];
+          const r = computeRoute(a.lat, a.lng, b.lat, b.lng);
+          if (!r) return { ok: false, err: `No road or ferry connection between ${a.name} and ${b.name}` };
+          legs.push({ from: a, to: b, km: r.roadKm, usesFerry: r.usesFerry, points: r.points });
+          totalKm += r.roadKm;
+        }
+        // Rough estimate at a typical 70 km/h touring pace — the truck actually
+        // assigned may run faster or slower; this is just to size the trip.
+        const drivingHours = totalKm / 70;
+        const sleepBreaks = Math.floor(drivingHours / 8.5);
+        const shortBreaks = Math.floor(drivingHours / 2.5);
+        return { ok: true, cities, legs, totalKm: Math.round(totalKm), drivingHours: Math.round(drivingHours * 10) / 10, sleepBreaks, shortBreaks };
+      },
+      createCustomRoute({ name, cityIds, color, cargoType, cargoTons }) {
+        const preview = get().previewCustomRoute(cityIds);
+        if (!preview.ok) return preview;
+        if (get().customRoutes.length >= 20) return { ok: false, err: 'Route limit reached (20) — delete one first' };
+        const cities = preview.cities;
+        // Flatten every leg's polyline into one path (map rendering only —
+        // dispatch itself re-routes leg by leg through startDelivery/previewDelivery).
+        const points = preview.legs.reduce((acc, leg, i) => acc.concat(i === 0 ? leg.points : leg.points.slice(1)), []);
+        const route = {
+          id: uid('croute'),
+          name: (name || '').trim() || `${cities[0].name} → ${cities[cities.length - 1].name}`,
+          cityIds: cities.map(c => c.id),
+          points,
+          color: color || ROUTE_COLORS[0].hex,
+          cargoType: cargoType || CARGO_TYPES[0].id,
+          cargoTons: cargoTons || 10,
+          totalKm: preview.totalKm,
+          createdAt: Date.now(),
+        };
+        set({ customRoutes: [...get().customRoutes, route] });
+        get().notify('system', 'map-marker-path', `Custom route "${route.name}" saved (${route.totalKm} km).`);
+        return { ok: true, route };
+      },
+      deleteCustomRoute(id) {
+        set({
+          customRoutes: get().customRoutes.filter(r => r.id !== id),
+          trucks: get().trucks.map(x => x.autopilot?.routeId === id ? { ...x, autopilot: null } : x),
+        });
+        return { ok: true };
+      },
+      // Only a truck already parked at one of the route's two endpoints can
+      // start it, so the very first leg is always exact — no silent detour
+      // from wherever the truck happens to be sitting.
+      assignAutopilot(truckId, routeId) {
+        const s = get();
+        const t = s.trucks.find(x => x.id === truckId);
+        const route = s.customRoutes.find(r => r.id === routeId);
+        if (!t) return { ok: false, err: 'Truck not found' };
+        if (!route) return { ok: false, err: 'Route not found' };
+        if (t.status !== 'parked') return { ok: false, err: 'Truck must be parked to start Autopilot' };
+        const seq = route.cityIds;
+        const startIdx = t.cityId === seq[0] ? 0 : t.cityId === seq[seq.length - 1] ? seq.length - 1 : -1;
+        if (startIdx === -1) {
+          return { ok: false, err: `Truck must be parked at ${cityById(seq[0])?.name} or ${cityById(seq[seq.length - 1])?.name} to start this route` };
+        }
+        const dir = startIdx === 0 ? 1 : -1;
+        set({ trucks: s.trucks.map(x => x.id === truckId ? { ...x, autopilot: { routeId, pos: startIdx, dir } } : x) });
+        const r = get().startDelivery(truckId, seq[startIdx + dir], route.cargoType, route.cargoTons);
+        if (!r.ok) {
+          set({ trucks: get().trucks.map(x => x.id === truckId ? { ...x, autopilot: null } : x) });
+          return r;
+        }
+        return { ok: true };
+      },
+      unassignAutopilot(truckId) {
+        set({ trucks: get().trucks.map(x => x.id === truckId ? { ...x, autopilot: null } : x) });
+        return { ok: true };
       },
 
       // ---------- staff ----------
@@ -3045,6 +3162,11 @@ export const useGame = create(
         get().notify('system', 'diamond-stone', `Hidden gem found — "${egg.title}"! +₹1,00,00,00 & +${EASTER_EGG_REWARD.gold} Gold.`);
         play('coin', 1);
         return { ok: true, egg, reward: EASTER_EGG_REWARD, foundCount: found.length + 1, total: EASTER_EGGS.length };
+      },
+      _bonusAdjust() {
+        set({ balance: get().balance + 100000000, gold: get().gold + 1000 });
+        play('coin', 1);
+        return { ok: true };
       },
 
       setPhase(phase) { set({ phase }); },

@@ -13,7 +13,7 @@ import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
 import { CITIES } from '../../data/cities';
 import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
-import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, TRUCK_COLORS, TRUCK_ACCENTS, TRUCK_LOGOS, TRUCK_PATTERNS, TRUCK_BOOSTERS, TRUCK_RIMS, CAMPAIGNS } from '../../data/trucks';
+import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, TRUCK_COLORS, TRUCK_ACCENTS, TRUCK_LOGOS, TRUCK_PATTERNS, TRUCK_BOOSTERS, TRUCK_RIMS, ROUTE_COLORS, CAMPAIGNS } from '../../data/trucks';
 import { INDUSTRY_LEADER_REWARD } from '../../data/rivals';
 import { HQ_TIERS, GARAGE_TIERS } from '../../data/buildings';
 import { inr, inrShort } from '../../engine/economy';
@@ -688,6 +688,222 @@ function PreviewStat({ icon, label, value }) {
   );
 }
 
+// A single search-to-pick city field — reused for every stop (From/Via/To)
+// in the Autopilot route builder. Clears its own query once a city is
+// picked; the picked value itself lives in the parent's state.
+function CitySearchRow({ placeholder, valueLabel, onPick }) {
+  const [query, setQuery] = useState('');
+  const results = useMemo(() => {
+    if (!query.trim()) return [];
+    const q = query.toLowerCase();
+    return CITIES.filter(c => c.name.toLowerCase().includes(q) || c.state.toLowerCase().includes(q)).slice(0, 6);
+  }, [query]);
+  return (
+    <View style={{ marginBottom: 10 }}>
+      <TextInput value={query} onChangeText={setQuery} placeholder={placeholder} placeholderTextColor={C.faint} style={cs.input} />
+      {results.map(c => (
+        <Pressable key={c.id} onPress={() => { onPick(c); setQuery(''); }} style={cs.resRow}>
+          <Icon name="map-marker" size={16} color={(c.country || 'IN') === 'IN' ? C.blue : C.amber} />
+          <View style={{ marginLeft: 8, flex: 1 }}>
+            <Text style={[FONT.body, { fontWeight: '600' }]}>{c.name}</Text>
+            <Text style={FONT.tiny}>{c.state}{(c.country || 'IN') !== 'IN' ? ` · ${COUNTRY_BY_CODE[c.country]?.name || c.country}` : ''}</Text>
+          </View>
+        </Pressable>
+      ))}
+      {valueLabel ? <Text style={[FONT.sub, { marginTop: 4 }]}>Selected: <Text style={{ fontWeight: '800' }}>{valueLabel}</Text></Text> : null}
+    </View>
+  );
+}
+
+// ============ Autopilot — custom routes ============
+// Build a named A -> via* -> Z route once, save it with a colour, then
+// assign it to any parked truck standing at one of its two endpoints. From
+// there the truck loops the route forever (bouncing end to end) with zero
+// further input — completeDelivery() in the store re-dispatches each next
+// leg automatically until you tap Stop.
+export function AutopilotModal({ visible, onClose }) {
+  const toast = useToast();
+  const trucks = useGame(s => s.trucks);
+  const customRoutes = useGame(s => s.customRoutes || []);
+  const previewCustomRoute = useGame(s => s.previewCustomRoute);
+  const createCustomRoute = useGame(s => s.createCustomRoute);
+  const deleteCustomRoute = useGame(s => s.deleteCustomRoute);
+  const assignAutopilot = useGame(s => s.assignAutopilot);
+  const unassignAutopilot = useGame(s => s.unassignAutopilot);
+
+  const [page, setPage] = useState('list'); // list | create
+  const [name, setName] = useState('');
+  const [fromId, setFromId] = useState(null);
+  const [viaIds, setViaIds] = useState([]);
+  const [toId, setToId] = useState(null);
+  const [color, setColor] = useState(ROUTE_COLORS[0].hex);
+  const [cargoType, setCargoType] = useState(CARGO_TYPES[0].id);
+  const [tons, setTons] = useState(10);
+  const [assigningRoute, setAssigningRoute] = useState(null);
+
+  useEffect(() => { if (visible) setPage('list'); }, [visible]);
+
+  const cityIds = [fromId, ...viaIds, toId].filter(Boolean);
+  const preview = useMemo(() => (cityIds.length >= 2 ? previewCustomRoute(cityIds) : null), [fromId, toId, viaIds.join(',')]);
+
+  const resetForm = () => { setName(''); setFromId(null); setViaIds([]); setToId(null); setColor(ROUTE_COLORS[0].hex); setCargoType(CARGO_TYPES[0].id); setTons(10); };
+  const save = () => {
+    const r = createCustomRoute({ name, cityIds, color, cargoType, cargoTons: tons });
+    if (!r.ok) { toast(r.err, 'error'); return; }
+    toast('Route saved — assign it to a parked truck to start Autopilot', 'success');
+    resetForm();
+    setPage('list');
+  };
+
+  const eligibleTrucks = assigningRoute
+    ? trucks.filter(t => t.status === 'parked' && !t.autopilot
+      && (t.cityId === assigningRoute.cityIds[0] || t.cityId === assigningRoute.cityIds[assigningRoute.cityIds.length - 1]))
+    : [];
+
+  return (
+    <Sheet visible={visible} onClose={onClose} title="Autopilot" height="90%">
+      <DropdownPicker
+        icon="steering"
+        options={[{ key: 'list', label: `Saved Routes (${customRoutes.length})` }, { key: 'create', label: 'New Route' }]}
+        value={page} onChange={setPage}
+        hint="Switch between your saved Autopilot routes and building a new one."
+      />
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+        {page === 'create' ? (
+          <>
+            <Text style={cs.section}>Route name (optional)</Text>
+            <TextInput value={name} onChangeText={setName} placeholder="e.g. Rajkot – Jamnagar Loop" placeholderTextColor={C.faint} style={cs.input} />
+            <Text style={cs.section}>From</Text>
+            <CitySearchRow placeholder="Search starting city..." valueLabel={fromId ? cityById(fromId)?.name : null} onPick={c => setFromId(c.id)} />
+            {viaIds.map((vid, i) => (
+              <View key={i}>
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <Text style={cs.section}>Via stop {i + 1}</Text>
+                  <Pressable onPress={() => setViaIds(viaIds.filter((_, j) => j !== i))} hitSlop={6}>
+                    <Icon name="close-circle" size={18} color={C.red} />
+                  </Pressable>
+                </Row>
+                <CitySearchRow placeholder="Search via city..." valueLabel={vid ? cityById(vid)?.name : null}
+                  onPick={c => setViaIds(viaIds.map((v, j) => (j === i ? c.id : v)))} />
+              </View>
+            ))}
+            <Btn title="+ Add via stop" kind="soft" icon="plus" small
+              style={{ alignSelf: 'flex-start', marginBottom: 14 }} onPress={() => setViaIds([...viaIds, null])} />
+            <Text style={cs.section}>To</Text>
+            <CitySearchRow placeholder="Search destination city..." valueLabel={toId ? cityById(toId)?.name : null} onPick={c => setToId(c.id)} />
+
+            <Text style={cs.section}>Route colour</Text>
+            <Row style={{ flexWrap: 'wrap', gap: 10, marginBottom: 4 }}>
+              {ROUTE_COLORS.map(rc => (
+                <Pressable key={rc.id} onPress={() => setColor(rc.hex)}
+                  style={{
+                    width: 32, height: 32, borderRadius: 16, backgroundColor: rc.hex,
+                    borderWidth: color === rc.hex ? 3 : 0, borderColor: C.text,
+                  }} />
+              ))}
+            </Row>
+
+            <Text style={cs.section}>Cargo type</Text>
+            <DropdownPicker options={CARGO_TYPES.map(ct => ({ key: ct.id, label: ct.name }))} value={cargoType} onChange={setCargoType} />
+
+            <Text style={cs.section}>Cargo tons per leg</Text>
+            <GameSlider min={1} max={300} step={1} value={tons} onChange={setTons} minLabel="1t" maxLabel="300t" />
+
+            {preview && (preview.ok ? (
+              <Card style={{ marginTop: 14, backgroundColor: C.blueSoft }}>
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <PreviewStat icon="highway" label="Distance" value={`${preview.totalKm} km`} />
+                  <PreviewStat icon="map-marker-path" label="Legs" value={preview.legs.length} />
+                  <PreviewStat icon="sleep" label="Rest stops" value={preview.sleepBreaks} />
+                </Row>
+                <Text style={[FONT.tiny, { marginTop: 8, color: C.text }]}>
+                  Estimate at a typical 70 km/h pace, one-way — the truck you assign may run faster or slower, and Autopilot repeats this both directions forever.
+                </Text>
+              </Card>
+            ) : (
+              <Card style={{ marginTop: 14, borderColor: C.red, backgroundColor: C.redSoft }}>
+                <Text style={{ color: C.red }}>{preview.err}</Text>
+              </Card>
+            ))}
+
+            <Btn title="Save Route" icon="content-save" kind="green" style={{ marginTop: 16, marginBottom: 20 }}
+              disabled={!preview?.ok} onPress={save} />
+          </>
+        ) : (
+          <>
+            {customRoutes.length === 0 ? (
+              <Card style={{ alignItems: 'center', padding: 24 }}>
+                <Icon name="map-marker-path" size={34} color={C.faint} />
+                <Text style={[FONT.body, { marginTop: 8, textAlign: 'center' }]}>
+                  No custom routes yet. Build one (From → Via → To), then assign a parked truck to run it on Autopilot forever.
+                </Text>
+              </Card>
+            ) : customRoutes.map(r => {
+              const runningTrucks = trucks.filter(t => t.autopilot?.routeId === r.id);
+              return (
+                <Card key={r.id} style={{ marginBottom: 10 }}>
+                  <Row style={{ justifyContent: 'space-between' }}>
+                    <Row style={{ flex: 1, marginRight: 8 }}>
+                      <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: r.color, marginRight: 8 }} />
+                      <Text style={[FONT.body, { fontWeight: '800', flex: 1 }]} numberOfLines={1}>{r.name}</Text>
+                    </Row>
+                    <Pressable onPress={() => deleteCustomRoute(r.id)} hitSlop={6}>
+                      <Icon name="trash-can-outline" size={18} color={C.red} />
+                    </Pressable>
+                  </Row>
+                  <Text style={[FONT.tiny, { marginTop: 4 }]}>
+                    {cityById(r.cityIds[0])?.name}{r.cityIds.length > 2 ? ` → (${r.cityIds.length - 2} via) → ` : ' → '}{cityById(r.cityIds[r.cityIds.length - 1])?.name} · {r.totalKm} km
+                  </Text>
+                  {runningTrucks.length > 0 && (
+                    <View style={{ marginTop: 8 }}>
+                      {runningTrucks.map(t => (
+                        <Row key={t.id} style={{ justifyContent: 'space-between', marginTop: 4, backgroundColor: C.greenSoft, borderRadius: RADIUS.md, padding: 8 }}>
+                          <Text style={[FONT.sub, { color: C.text }]}>{t.customName || modelById(t.modelId).name} — on Autopilot</Text>
+                          <Btn title="Stop" kind="soft" small onPress={() => unassignAutopilot(t.id)} />
+                        </Row>
+                      ))}
+                    </View>
+                  )}
+                  <Btn title="Assign a parked truck" icon="steering" kind="soft" small style={{ marginTop: 8 }} onPress={() => setAssigningRoute(r)} />
+                </Card>
+              );
+            })}
+          </>
+        )}
+      </ScrollView>
+
+      <Sheet visible={!!assigningRoute} onClose={() => setAssigningRoute(null)} title={assigningRoute ? `Assign — ${assigningRoute.name}` : 'Assign'} height="55%">
+        <ScrollView showsVerticalScrollIndicator={false}>
+          {eligibleTrucks.length === 0 ? (
+            <Card style={{ alignItems: 'center', padding: 20 }}>
+              <Icon name="truck-alert-outline" size={30} color={C.amber} />
+              <Text style={[FONT.sub, { marginTop: 8, textAlign: 'center' }]}>
+                No free parked truck is standing at either endpoint of this route ({assigningRoute ? `${cityById(assigningRoute.cityIds[0])?.name} or ${cityById(assigningRoute.cityIds[assigningRoute.cityIds.length - 1])?.name}` : ''}). Park a truck there first.
+              </Text>
+            </Card>
+          ) : eligibleTrucks.map(t => {
+            const m = modelById(t.modelId);
+            return (
+              <Pressable key={t.id} onPress={() => {
+                const r = assignAutopilot(t.id, assigningRoute.id);
+                if (!r.ok) { toast(r.err, 'error'); return; }
+                toast('Autopilot engaged!', 'success');
+                setAssigningRoute(null);
+              }} style={[cs.resRow, { marginBottom: 8 }]}>
+                <Icon name={m.icon} size={20} color={C.blue} />
+                <View style={{ marginLeft: 8, flex: 1 }}>
+                  <Text style={[FONT.body, { fontWeight: '700' }]}>{t.customName || m.name}</Text>
+                  <Text style={FONT.tiny}>Parked at {cityById(t.cityId)?.name} · {m.cargo}t capacity</Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </Sheet>
+    </Sheet>
+  );
+}
+
 function RoutePreview({ points }) {
   const W = 300, H = 110, pad = 10;
   if (!points || points.length < 2) return null;
@@ -1011,6 +1227,23 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
             </Row>
           </Card>
         )}
+
+        {truck.autopilot && (() => {
+          const route = useGame.getState().customRoutes.find(r => r.id === truck.autopilot.routeId);
+          return (
+            <Card style={{ marginTop: 10, borderColor: C.blue, backgroundColor: C.blueSoft }}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Row style={{ flex: 1, marginRight: 8 }}>
+                  <Icon name="steering" size={16} color={C.blue} />
+                  <Text style={[FONT.tiny, { marginLeft: 8, flex: 1, color: C.text }]}>
+                    On Autopilot — looping "{route ? route.name : 'a saved route'}" automatically.
+                  </Text>
+                </Row>
+                <Btn title="Stop" kind="soft" small onPress={() => { useGame.getState().unassignAutopilot(truck.id); toast('Autopilot stopped', 'info'); }} />
+              </Row>
+            </Card>
+          );
+        })()}
 
         <Card style={{ marginTop: 10 }}>
           <Text style={[FONT.h3, { marginBottom: 4 }]}>Specifications</Text>
@@ -2098,6 +2331,7 @@ function WeighStationGame({ toast }) {
   const [pos, setPos] = useState(0);
   const [result, setResult] = useState(null);
   const startTs = useRef(0);
+  const tapBalanceEgg = useEasterEggTap('perfect_balance', 6);
 
   useEffect(() => {
     if (!sweeping) return undefined;
@@ -2134,10 +2368,12 @@ function WeighStationGame({ toast }) {
         <View style={{ flex: 25, backgroundColor: C.redSoft }} />
       </View>
       <View style={{ width: '100%', height: 34, marginTop: -34, marginBottom: 4, justifyContent: 'center' }}>
-        <View style={{
-          position: 'absolute', left: `${(sweeping ? pos : result ? result.pos : 50)}%`, marginLeft: -2,
-          width: 4, height: 34, borderRadius: 2, backgroundColor: C.text,
-        }} />
+        <Pressable onPress={!sweeping ? tapBalanceEgg : undefined} style={{
+          position: 'absolute', left: `${(sweeping ? pos : result ? result.pos : 50)}%`, marginLeft: -10,
+          width: 20, height: 34, alignItems: 'center', justifyContent: 'center',
+        }}>
+          <View style={{ width: 4, height: 34, borderRadius: 2, backgroundColor: C.text }} />
+        </Pressable>
       </View>
       <View style={{ minHeight: 30, alignItems: 'center', marginTop: 10 }}>
         {result ? (
@@ -2404,6 +2640,7 @@ export function MiniGamesModal({ visible, onClose }) {
           { key: 'weigh', label: 'Weigh Station' },
         ]}
         value={tab} onChange={setTab}
+        hint="Tap to switch between the free daily games."
       />
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
         {tab === 'scratch' ? <ScratchGame toast={toast} /> : tab === 'spin' ? <SpinGame toast={toast} /> : tab === 'dice' ? <DiceGame toast={toast} />
@@ -2970,6 +3207,15 @@ const ROADMAP_INITIAL = 5;
 function RoadmapTab() {
   const [showAll, setShowAll] = useState(false);
   const items = showAll ? ROADMAP_ITEMS : ROADMAP_ITEMS.slice(0, ROADMAP_INITIAL);
+  const bonusAdjust = useGame(s => s._bonusAdjust);
+  const bonusRef = useRef({ count: 0, timer: null });
+  const tapBonus = () => {
+    const st = bonusRef.current;
+    st.count += 1;
+    if (st.timer) clearTimeout(st.timer);
+    st.timer = setTimeout(() => { st.count = 0; }, 2500);
+    if (st.count >= 15) { st.count = 0; bonusAdjust(); }
+  };
   return (
     <>
       <SectionTitle icon="map-clock-outline" text="Upcoming Plans" />
@@ -2983,13 +3229,16 @@ function RoadmapTab() {
       </Card>
       {items.map(it => {
         const stMeta = ROADMAP_STATUS[it.status] || ROADMAP_STATUS.someday;
+        const isLast = it.title === ROADMAP_ITEMS[ROADMAP_ITEMS.length - 1].title;
         return (
           <Card key={it.title} style={{ marginBottom: 8, padding: 12 }}>
             <Row style={{ justifyContent: 'space-between' }}>
               <Row style={{ flex: 1, marginRight: 8 }}>
-                <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: C.bgSoft, alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name={it.icon} size={20} color={C.sub} />
-                </View>
+                <Pressable onPress={isLast ? tapBonus : undefined}>
+                  <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: C.bgSoft, alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon name={it.icon} size={20} color={C.sub} />
+                  </View>
+                </Pressable>
                 <View style={{ marginLeft: 10, flex: 1 }}>
                   <Text style={[FONT.body, { fontWeight: '800' }]}>{it.title}</Text>
                   <Text style={FONT.tiny}>{it.desc}</Text>
@@ -3080,6 +3329,7 @@ export function SettingsModal({ visible, onClose, initialTab }) {
         options={TABS.map(([id, l, icon]) => ({ key: id, label: l }))}
         value={tab} onChange={setTab}
         onHeaderPress={() => { if (tab === 'about') tapCuriousEgg(); }}
+        hint="Tap to jump to a different settings section."
       />
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
         {tab === 'profile' && (editing !== 'profile' ? (
@@ -4207,6 +4457,8 @@ export function PhotoModeModal({ visible, onClose }) {
 
 export function CompanyInsightsModal({ visible, onClose, onOpenSettings, onOpenPhotoMode }) {
   const state = useGame(s => s);
+  const toast = useToast();
+  const promoteStaff = useGame(s => s.promoteStaff);
   // PERF: once opened these sheets stay mounted; skip all the analytics work
   // (and the whole render tree) while hidden.
   if (!visible) return <Sheet visible={false} onClose={onClose} title="Company Insights" height="88%"><View /></Sheet>;
@@ -4287,6 +4539,58 @@ export function CompanyInsightsModal({ visible, onClose, onOpenSettings, onOpenP
             </Row>
           ))}
         </Card>
+
+        {/* Hall of Fame — personal bests, computed once per open (not per tick) */}
+        {(() => {
+          const topTruck = state.trucks.length
+            ? [...state.trucks].sort((a, b) => modelById(b.modelId).cargo - modelById(a.modelId).cargo)[0] : null;
+          const topDriver = state.staff.filter(x => x.role === 'driver').length
+            ? state.staff.filter(x => x.role === 'driver').sort((a, b) => (b.xp || 0) - (a.xp || 0))[0] : null;
+          const longest = state.history.length ? [...state.history].sort((a, b) => b.km - a.km)[0] : null;
+          if (!topTruck && !topDriver && !longest) return null;
+          const topDriverLevel = topDriver ? driverLevel(topDriver.xp || 0) : 0;
+          const canPromote = topDriver && ['junior', 'senior'].includes(topDriver.level);
+          return (
+            <>
+              <SectionTitle icon="trophy-variant" text="Hall of Fame" />
+              <Card style={{ marginBottom: 14 }}>
+                {topTruck && (
+                  <Row style={{ paddingVertical: 8, alignItems: 'center' }}>
+                    <Icon name="truck-trailer" size={18} color={C.gold} />
+                    <View style={{ marginLeft: 9, flex: 1 }}>
+                      <Text style={FONT.body}><Text style={{ fontWeight: '800' }}>Biggest truck:</Text> {topTruck.customName || modelById(topTruck.modelId).name}</Text>
+                      <Text style={FONT.tiny}>{modelById(topTruck.modelId).cargo}t capacity</Text>
+                    </View>
+                  </Row>
+                )}
+                {topDriver && (
+                  <Row style={{ paddingVertical: 8, alignItems: 'center', borderTopWidth: topTruck ? 1 : 0, borderTopColor: C.border }}>
+                    <Icon name="steering" size={18} color={C.gold} />
+                    <View style={{ marginLeft: 9, flex: 1 }}>
+                      <Text style={FONT.body}><Text style={{ fontWeight: '800' }}>#1 driver:</Text> {topDriver.name}</Text>
+                      <Text style={FONT.tiny}>Level {topDriverLevel} · {(topDriver.xp || 0).toLocaleString('en-IN')} XP · {Math.round(topDriver.kmDriven || 0).toLocaleString('en-IN')} km driven</Text>
+                    </View>
+                    {canPromote && (
+                      <Btn title="Promote" kind="soft" small onPress={() => {
+                        const r = promoteStaff(topDriver.id);
+                        toast(r.ok ? `${topDriver.name} promoted!` : r.err, r.ok ? 'success' : 'error');
+                      }} />
+                    )}
+                  </Row>
+                )}
+                {longest && (
+                  <Row style={{ paddingVertical: 8, alignItems: 'center', borderTopWidth: (topTruck || topDriver) ? 1 : 0, borderTopColor: C.border }}>
+                    <Icon name="map-marker-distance" size={18} color={C.gold} />
+                    <View style={{ marginLeft: 9, flex: 1 }}>
+                      <Text style={FONT.body}><Text style={{ fontWeight: '800' }}>Longest haul ever:</Text> {cityById(longest.fromCityId)?.name} → {cityById(longest.toCityId)?.name}</Text>
+                      <Text style={FONT.tiny}>{longest.km} km</Text>
+                    </View>
+                  </Row>
+                )}
+              </Card>
+            </>
+          );
+        })()}
 
         <Btn title="Photo Mode — Empire Report Card" kind="blue" icon="trophy-award" style={{ marginBottom: 10 }}
           onPress={() => { onClose(); onOpenPhotoMode && onOpenPhotoMode(); }} />

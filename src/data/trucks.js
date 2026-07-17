@@ -450,6 +450,12 @@ export const TRUCK_MODELS = [
     desc: 'The ultimate B-double — bigger engine, bigger tanks, bigger everything.',
     speed: 87, cargo: 46, tank: 650, eff: 2.4, range: 1600, maint: 15, build: 4200, price: 18500000,
   },
+  {
+    id: 'scanix-ranger-6220', name: 'Scanix Ranger 6220', brand: 'Scanix',
+    tier: 3, propulsion: 'diesel', rating: 4.7, icon: 'truck-trailer', shape: 'semi',
+    desc: 'A stretched single-trailer semi that closes the gap between everyday haulers and the mega-tier — real tonnage, still an affordable buy.',
+    speed: 82, cargo: 55, tank: 480, eff: 3.0, range: 1450, maint: 13, build: 3000, price: 10500000,
+  },
   // ---- v10.17.0 mega-hauler tier — beyond anything else in the catalog,
   // priced (and taxed by maintenance/build time) to match: these are
   // aspirational trophy purchases for a company that's already an empire,
@@ -478,6 +484,12 @@ export const TRUCK_MODELS = [
     desc: 'The new top of the catalog — a diesel-electric hybrid mega-hauler that out-tons the MH-250 and still sips less fuel per ton, thanks to regenerative braking down every mountain pass.',
     speed: 60, cargo: 350, tank: 1900, eff: 1.3, range: 2000, maint: 42, build: 17000, price: 185000000,
   },
+  {
+    id: 'voltra-outback-roadtrain', name: 'Voltra Outback Road-Train', brand: 'Voltra',
+    tier: 3, propulsion: 'diesel', rating: 4.9, icon: 'truck-trailer', shape: 'doubletrailer',
+    desc: 'A quad-trailer road-train — the longest vehicle on the network by far. It backs up traffic at every toll booth and drivers need a special endorsement just to reverse it.',
+    speed: 55, cargo: 300, tank: 1750, eff: 1.2, range: 1900, maint: 38, build: 15500, price: 150000000,
+  },
 ];
 
 // Truck livery colours for customization (id + hex + display name).
@@ -492,6 +504,20 @@ export const TRUCK_COLORS = [
   { id: 'gold', name: 'Golden', hex: '#B7791F' },
   { id: 'rose', name: 'Rose', hex: '#D6336C' },
   { id: 'sky', name: 'Sky', hex: '#2980B9' },
+];
+
+// Custom-route (Autopilot) line colours — a distinct palette from truck
+// paint so a saved route's colour on the map never gets mistaken for a
+// truck's livery.
+export const ROUTE_COLORS = [
+  { id: 'blue', name: 'Blue', hex: '#2563EB' },
+  { id: 'green', name: 'Green', hex: '#12A150' },
+  { id: 'orange', name: 'Orange', hex: '#E67E22' },
+  { id: 'pink', name: 'Pink', hex: '#D6336C' },
+  { id: 'purple', name: 'Purple', hex: '#7D3C98' },
+  { id: 'teal', name: 'Teal', hex: '#0E7C86' },
+  { id: 'red', name: 'Red', hex: '#C0392B' },
+  { id: 'amber', name: 'Amber', hex: '#D97706' },
 ];
 
 // Livery emblem choices for trucks (MaterialCommunityIcons).
