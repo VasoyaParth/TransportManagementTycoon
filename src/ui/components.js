@@ -185,24 +185,29 @@ export function DropdownPicker({ label, icon, options, value, onChange, style, o
       {hint ? <Text style={{ fontSize: 11, color: C.faint, marginTop: 4, marginLeft: 2 }}>{hint}</Text> : null}
       {open && (
         <View style={{
-          position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4,
+          position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4, maxHeight: 260,
           borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.md, backgroundColor: '#fff', overflow: 'hidden',
           shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 12,
         }}>
-          {options.map((o, i) => {
-            const sel = o.key === value;
-            return (
-              <Pressable key={o.key} onPress={() => { haptic('light'); play('tap', 0.3); onChange(o.key); setOpen(false); }}
-                style={{
-                  flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-                  paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: C.border,
-                  backgroundColor: sel ? C.blueSoft : '#fff',
-                }}>
-                <Text style={{ fontSize: 13, fontWeight: sel ? '700' : '500', color: sel ? C.blue : C.text }}>{o.label}</Text>
-                {sel ? <Icon name="check" size={15} color={C.blue} /> : null}
-              </Pressable>
-            );
-          })}
+          {/* Own ScrollView + nestedScrollEnabled so a long option list scrolls
+              itself on drag instead of the gesture falling through to whatever
+              scroll view sits behind this absolutely-positioned panel. */}
+          <ScrollView nestedScrollEnabled bounces={false} keyboardShouldPersistTaps="handled" style={{ maxHeight: 260 }}>
+            {options.map((o, i) => {
+              const sel = o.key === value;
+              return (
+                <Pressable key={o.key} onPress={() => { haptic('light'); play('tap', 0.3); onChange(o.key); setOpen(false); }}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                    paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: C.border,
+                    backgroundColor: sel ? C.blueSoft : '#fff',
+                  }}>
+                  <Text style={{ fontSize: 13, fontWeight: sel ? '700' : '500', color: sel ? C.blue : C.text }}>{o.label}</Text>
+                  {sel ? <Icon name="check" size={15} color={C.blue} /> : null}
+                </Pressable>
+              );
+            })}
+          </ScrollView>
         </View>
       )}
     </View>

@@ -353,6 +353,21 @@ function boot(){
     });
   };
 
+  // Autopilot route-builder "picked so far" dots (From/Via/To) — shown ONLY
+  // while the RN side is in Autopilot map-pick mode, cleared once picking
+  // ends or the set changes (redrawn wholesale, same as setCustomRoutes).
+  var pickMarkerLayer=L.layerGroup().addTo(map);
+  window.setPickMarkers=function(markers){
+    pickMarkerLayer.clearLayers();
+    (markers||[]).forEach(function(mk){
+      pickMarkerLayer.addLayer(L.marker([mk.lat,mk.lng],{icon:L.divIcon({className:'',
+        html:'<div style="background:'+(mk.color||'#2563EB')+';color:#fff;font:700 10px sans-serif;'
+          +'padding:3px 7px;border-radius:12px;border:2px solid #fff;white-space:nowrap;'
+          +'box-shadow:0 2px 5px rgba(0,0,0,.35);transform:translate(-50%,-100%)">'+mk.label+'</div>',
+        iconSize:[1,1],iconAnchor:[0,0]}),zIndexOffset:1100}));
+    });
+  };
+
   // Apply live state pushed from RN
   window.applyState=function(s){
     var live={};

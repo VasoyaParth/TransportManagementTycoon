@@ -19,7 +19,7 @@ const CITY_DATA = CITIES.map(c => ({ id: c.id, name: c.name, state: c.state, lat
 const STATION_DATA = STATIONS.map(s => ({ lat: s.lat, lng: s.lng, type: s.type, price: s.price, name: s.name }));
 const PORT_DATA = ferryPorts();
 
-export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focus, onTruckTap, onHubTap, onReady, onOffline }) {
+export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, pickMarkers, pickLabel, focus, onTruckTap, onHubTap, onReady, onOffline }) {
   const tapPortEgg = useEasterEggTap('port_master', 6);
   const tapFuelEgg = useEasterEggTap('fuel_sniffer', 7);
   const tapHqEgg = useEasterEggTap('hq_home', 5); // was only wired on the old offline map
@@ -200,6 +200,9 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
   }, [ready, customRoutes]);
 
   useEffect(() => { if (ready) inject(`window.setPickMode(${!!pickingMode})`); }, [pickingMode, ready]);
+  // Autopilot route-builder in-progress dots (From/Via/To already chosen) —
+  // only meaningful while pickingMode is on for that flow; cleared once it ends.
+  useEffect(() => { if (ready) inject(`window.setPickMarkers(${JSON.stringify(pickMarkers || [])})`); }, [ready, pickMarkers]);
   useEffect(() => { if (ready && focus) inject(`window.focusOn(${focus.lat},${focus.lng},${focus.scale ? 9 : 7})`); }, [focus, ready]);
 
   // Safety: if the map never becomes ready (no internet / CDN blocked), fall back.
@@ -235,7 +238,7 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
       {pickingMode && (
         <View style={st.pickBanner}>
           <Icon name="map-marker-question" size={16} color="#fff" />
-          <Text style={st.pickTxt}>Tap a city to set the destination</Text>
+          <Text style={st.pickTxt}>{pickLabel || 'Tap a city to set the destination'}</Text>
           <Pressable onPress={onCancelPick}><Text style={[st.pickTxt, { textDecorationLine: 'underline' }]}>Cancel</Text></Pressable>
         </View>
       )}

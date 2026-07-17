@@ -38,11 +38,17 @@ const nextRefreshDelay = () =>
 // breaks down entirely. Higher tiers cost more but cover more.
 export const INSURANCE_PLANS = [
   { id: 'basic', name: 'Basic Cover', icon: 'shield-outline', pctOfPrice: 0.006, incidentRecovery: 0.6, repairDiscount: 0,
-    desc: 'Cheapest option — recovers 60% of incident cash losses. No help with a full breakdown repair bill.' },
+    desc: 'Cheapest option — recovers 60% of incident cash losses. No help with a full breakdown repair bill.',
+    covered: ['60% of on-road incident cash losses (theft, accident, weather)', 'Lowest monthly premium of the 3 tiers'],
+    notCovered: ['Breakdown repair bills — you pay 100% of the repair cost', 'The remaining 40% of any incident loss'] },
   { id: 'standard', name: 'Standard Cover', icon: 'shield-half-full', pctOfPrice: 0.012, incidentRecovery: 0.85, repairDiscount: 0.5,
-    desc: 'Recovers 85% of incident losses, plus half off the repair bill if the truck breaks down.' },
+    desc: 'Recovers 85% of incident losses, plus half off the repair bill if the truck breaks down.',
+    covered: ['85% of on-road incident cash losses', '50% off breakdown repair bills', 'Balanced premium for the extra cover'],
+    notCovered: ['The remaining 15% of any incident loss', 'The other 50% of a breakdown repair bill'] },
   { id: 'premium', name: 'Premium Cover', icon: 'shield-check', pctOfPrice: 0.02, incidentRecovery: 1.0, repairDiscount: 1.0,
-    desc: 'Full incident recovery and free repairs on a full breakdown — total peace of mind.' },
+    desc: 'Full incident recovery and free repairs on a full breakdown — total peace of mind.',
+    covered: ['100% of on-road incident cash losses', '100% free breakdown repairs', 'Zero out-of-pocket cost on any covered event'],
+    notCovered: ['Nothing — this tier covers every incident and repair in full'] },
 ];
 // Old saves stored a plain `insured: true` boolean (pre-v10.25.0) — this
 // treats that as equivalent to the Basic plan so nobody's cover silently
@@ -1787,6 +1793,24 @@ export const useGame = create(
       cancelInsurance(truckId) {
         set({ trucks: get().trucks.map(x => x.id === truckId ? { ...x, insurancePlan: null, insured: undefined } : x) });
         return { ok: true };
+      },
+      // Bulk-apply one plan to every truck that isn't already on it (skips
+      // trucks already on that exact tier so re-running is a safe no-op for them).
+      insureAllTrucks(planId) {
+        const s = get();
+        const plan = INSURANCE_PLANS.find(p => p.id === planId);
+        if (!plan) return { ok: false, err: 'Unknown insurance plan' };
+        let count = 0;
+        set({
+          trucks: s.trucks.map(x => {
+            if (insurancePlanOf(x)?.id === planId) return x;
+            count += 1;
+            return { ...x, insurancePlan: planId, insured: undefined };
+          }),
+        });
+        if (count === 0) return { ok: false, err: `Whole fleet is already on ${plan.name}` };
+        get().notify('system', plan.icon, `${plan.name} applied to ${count} truck${count === 1 ? '' : 's'}.`);
+        return { ok: true, count };
       },
 
       // Resale value: depreciates with distance driven & deliveries (old age).
