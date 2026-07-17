@@ -466,6 +466,7 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
     return previewDelivery(truckId, dest, cargo, clampTons);
   }, [truckId, dest, cargo, clampTons]);
 
+  if (!visible) return <Sheet visible={false} onClose={onClose} title="New Delivery" height="88%"><View /></Sheet>;
   const destCity = dest ? cityById(dest) : null;
   const licenseStatus = truckId ? truckLicenseStatus(truckId) : null;
 
@@ -746,6 +747,11 @@ export function AutopilotModal({ visible, onClose }) {
   const cityIds = [fromId, ...viaIds, toId].filter(Boolean);
   const preview = useMemo(() => (cityIds.length >= 2 ? previewCustomRoute(cityIds) : null), [fromId, toId, viaIds.join(',')]);
 
+  // PERF: skip the rest of the body (list filtering, JSX tree) while hidden —
+  // this modal stays mounted once opened, so without this it kept doing that
+  // work on every relevant store change even off-screen.
+  if (!visible) return <Sheet visible={false} onClose={onClose} title="Autopilot" height="90%"><View /></Sheet>;
+
   const resetForm = () => { setName(''); setFromId(null); setViaIds([]); setToId(null); setColor(ROUTE_COLORS[0].hex); setCargoType(CARGO_TYPES[0].id); setTons(10); };
   const save = () => {
     const r = createCustomRoute({ name, cityIds, color, cargoType, cargoTons: tons });
@@ -917,6 +923,7 @@ export function AuctionsModal({ visible, onClose }) {
   const truckResale = useGame(s => s.truckResale);
   const [page, setPage] = useState('buy');
 
+  if (!visible) return <Sheet visible={false} onClose={onClose} title="Truck Auctions" height="88%"><View /></Sheet>;
   const sellable = trucks.filter(t => t.status === 'parked' || t.status === 'broken');
 
   return (
@@ -995,6 +1002,8 @@ export function AuctionsModal({ visible, onClose }) {
 export function InsuranceModal({ visible, onClose }) {
   const trucks = useGame(s => s.trucks);
   const [manageId, setManageId] = useState(null);
+
+  if (!visible) return <Sheet visible={false} onClose={onClose} title="Cargo Insurance" height="88%"><View /></Sheet>;
   const insuredCount = trucks.filter(t => insurancePlanOf(t)).length;
 
   return (
@@ -1726,6 +1735,8 @@ export function FleetLiveryModal({ visible, onClose }) {
   const liveryPresets = useGame(s => s.liveryPresets || []);
   const applyPresetToFleet = useGame(s => s.applyPresetToFleet);
   const deleteLiveryPreset = useGame(s => s.deleteLiveryPreset);
+
+  if (!visible) return <Sheet visible={false} onClose={onClose} title="Fleet Livery" height="86%"><View /></Sheet>;
   // Matches applyPresetToFleet()'s own key-detection so the price shown here
   // is exactly what gets charged.
   const presetKeys = p => ['color', 'accentColor', 'logoIcon', 'pattern', 'booster', 'rimColor'].filter(k => p[k] != null && p[k] !== 'none');
@@ -1912,6 +1923,8 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
     else if (sort === 'price-desc') sorted.sort((a, b) => b.price - a.price);
     return sorted;
   }, [sort, query]);
+
+  if (!visible) return <Sheet visible={false} onClose={onClose} title="Truck Showroom" height="86%"><View /></Sheet>;
   const buy = (m) => {
     const r = buyTruck(m.id, buyInsurancePlan);
     if (r.ok) { toast(`${m.name} ordered — building at HQ`, 'success'); setConfirmModel(null); }
@@ -2082,6 +2095,7 @@ export function ContractsModal({ visible, onClose, onAccept }) {
   const company = useGame(s => s.company);
   const acceptContract = useGame(s => s.acceptContract);
   useTick(visible);
+  if (!visible) return <Sheet visible={false} onClose={onClose} title="Contracts" height="86%"><View /></Sheet>;
   const now = Date.now();
   const hq = company ? cityById(company.hqCityId) : null;
   const rank = c => c.status === 'available' && c.expiresAt > now ? 0 : c.status === 'inprogress' ? 1 : c.status === 'done' ? 2 : 3;
@@ -2198,6 +2212,7 @@ export function PowerupsModal({ visible, onClose, onOpenGames }) {
   const tapGoldDiggerEgg = useEasterEggTap('gold_digger', 10);
   useEffect(() => { if (visible) { setPage('store'); setExpand(null); setXGold(g => Math.min(Math.max(1, g), Math.max(1, gold))); } }, [visible]);
   useEffect(() => { setXGold(g => Math.min(Math.max(1, g), Math.max(1, gold))); }, [gold]);
+  if (!visible) return <Sheet visible={false} onClose={onClose} title="Power-Ups Store" height="86%"><View /></Sheet>;
   const xClamp = Math.min(Math.max(1, xGold), Math.max(1, gold));
   const exchange = () => {
     const r = convertGoldToCash(xClamp);
@@ -2826,6 +2841,7 @@ export function MiniGamesModal({ visible, onClose }) {
   const [tab, setTab] = useState('scratch');
   const tapMidasEgg = useEasterEggTap('midas_touch', 7);
   useEffect(() => { if (visible) setTab('scratch'); }, [visible]);
+  if (!visible) return <Sheet visible={false} onClose={onClose} title="Free Gold Games" height="86%"><View /></Sheet>;
   return (
     <Sheet visible={visible} onClose={onClose} title="Free Gold Games" height="86%">
       <Card style={{ marginBottom: 12, backgroundColor: C.bgSoft }}>
@@ -2872,7 +2888,7 @@ export function DriverDetailModal({ visible, onClose, staffId, onShowOnMap }) {
   const truck = member && member.truckId ? trucks.find(t => t.id === member.truckId) : null;
   const d = truck ? deliveries.find(x => x.truckId === truck.id) : null;
   useTick(visible && !!d);
-  if (!member) return <Sheet visible={visible} onClose={onClose} title="Driver" height="40%"><View /></Sheet>;
+  if (!visible || !member) return <Sheet visible={visible && !!member} onClose={onClose} title="Driver" height="40%"><View /></Sheet>;
 
   const role = STAFF_ROLES.find(r => r.id === member.role);
   const level = STAFF_LEVELS.find(l => l.id === member.level);
@@ -3092,6 +3108,7 @@ export function NotificationsModal({ visible, onClose }) {
   const tapInboxEgg = useEasterEggTap('inbox_zero', 5);
   useEffect(() => { if (visible) setShownCount(NOTIF_PAGE); }, [visible, query]);
   useEffect(() => { if (!visible) setConfirmClear(false); }, [visible]);
+  if (!visible) return <Sheet visible={false} onClose={onClose} title="Notifications" height="82%"><View /></Sheet>;
   // Search replaces the old All/Deliveries/System filter chips — matches the
   // message text plus the category ("delivery" or "system"), so typing
   // either category name still narrows the list the same way the chips did.
@@ -3558,8 +3575,10 @@ export function SettingsModal({ visible, onClose, initialTab }) {
     ['eggs', 'Easter Eggs', 'egg-easter'], ['roadmap', 'Roadmap', 'map-clock-outline'],
     ['about', 'About', 'information-outline'],
   ];
-  const day = gameDay().day;
   const foundEggs = useGame(s => s.easterEggs?.found || []);
+
+  if (!visible) return <Sheet visible={false} onClose={onClose} title="Settings" height="88%"><View /></Sheet>;
+  const day = gameDay().day;
 
   return (
     <Sheet visible={visible} onClose={onClose} title="Settings" height="88%">
@@ -4052,6 +4071,7 @@ export function HubsModal({ visible, onClose, onShowOnMap }) {
     }).slice(0, 15);
   }, [query, hubs.length]);
   const sellHub = useGame(s => s.sellHub);
+  if (!visible) return <Sheet visible={false} onClose={onClose} title="Garages & Network" height="88%"><View /></Sheet>;
   const buy = (c) => { const r = buyHub(c.id); toast(r.ok ? `Garage opened in ${c.name}!` : r.err, r.ok ? 'success' : 'error'); };
   const sell = (h) => { const r = sellHub(h.cityId); toast(r.ok ? `Garage sold for ${inrShort(r.refund)}` : r.err, r.ok ? 'success' : 'error'); };
 
@@ -4188,7 +4208,7 @@ export function HubInfoModal({ visible, onClose, cityId, onNewDelivery, onOpenTr
 
   const hub = hubs.find(h => h.cityId === cityId);
   const city = cityId ? cityById(cityId) : null;
-  if (!hub || !city) return <Sheet visible={visible} onClose={onClose} title="Garage" height="40%"><View /></Sheet>;
+  if (!visible || !hub || !city) return <Sheet visible={visible && !!hub && !!city} onClose={onClose} title="Garage" height="40%"><View /></Sheet>;
 
   const isHQ = !!hub.hq;
   const buildingTiers = isHQ ? HQ_TIERS : GARAGE_TIERS;
@@ -4695,13 +4715,28 @@ export function PhotoModeModal({ visible, onClose }) {
 
 
 export function CompanyInsightsModal({ visible, onClose, onOpenSettings, onOpenPhotoMode }) {
-  const state = useGame(s => s);
   const toast = useToast();
   const promoteStaff = useGame(s => s.promoteStaff);
+  // Narrow selectors — this used to be `useGame(s => s)`, subscribing to the
+  // WHOLE store, so it re-rendered (and recomputed every stat below) on
+  // literally any state change anywhere in the app while this sheet was
+  // open. Only these specific slices are actually read below.
+  const company = useGame(s => s.company);
+  const trucks = useGame(s => s.trucks);
+  const staff = useGame(s => s.staff);
+  const stats = useGame(s => s.stats);
+  const credit = useGame(s => s.credit);
+  const hubs = useGame(s => s.hubs);
+  const campaigns = useGame(s => s.campaigns);
+  const weather = useGame(s => s.weather);
+  const history = useGame(s => s.history);
+  const mapEvents = useGame(s => s.mapEvents);
+  const unlockedCountries = useGame(s => s.unlockedCountries);
+  const gameDay = useGame(s => s.gameDay);
   // PERF: once opened these sheets stay mounted; skip all the analytics work
   // (and the whole render tree) while hidden.
   if (!visible) return <Sheet visible={false} onClose={onClose} title="Company Insights" height="88%"><View /></Sheet>;
-  const company = state.company;
+  const state = { company, trucks, staff, stats, credit, hubs, campaigns, weather, history, mapEvents, unlockedCountries, gameDay };
   const hq = company ? cityById(company.hqCityId) : null;
   if (!company) return <Sheet visible={visible} onClose={onClose} title="Company" height="40%"><View /></Sheet>;
   const xp = companyXP(state);
@@ -4844,7 +4879,19 @@ export function CompanyInsightsModal({ visible, onClose, onOpenSettings, onOpenP
 // live weather bulletins with the regions they cover, world events, and
 // concrete "dispatch here today" suggestions based on all of it.
 export function NewsModal({ visible, onClose }) {
-  const state = useGame(s => s);
+  // Narrow selectors — was `useGame(s => s)`, subscribing to the whole
+  // store and re-rendering on any state change anywhere while this sheet
+  // stayed mounted. Only these specific slices are actually read below.
+  const company = useGame(s => s.company);
+  const deliveries = useGame(s => s.deliveries);
+  const trucks = useGame(s => s.trucks);
+  const notifications = useGame(s => s.notifications);
+  const campaigns = useGame(s => s.campaigns);
+  const weather = useGame(s => s.weather);
+  const mapEventsState = useGame(s => s.mapEvents);
+  const unlockedCountries = useGame(s => s.unlockedCountries);
+  const gameDayFn = useGame(s => s.gameDay);
+  const state = { company, deliveries, trucks, notifications, campaigns, weather, mapEvents: mapEventsState, unlockedCountries, gameDay: gameDayFn };
   const day = state.gameDay().day;
   // Suggestions memo must run unconditionally (hooks), but the heavy city
   // scans inside it only execute while the sheet is visible.
@@ -5062,6 +5109,7 @@ export function CountriesModal({ visible, onClose }) {
     return m;
   }, []);
 
+  if (!visible) return <Sheet visible={false} onClose={onClose} title="World Expansion" height="88%"><View /></Sheet>;
   const doUnlock = (code) => {
     const r = unlockCountry(code);
     if (r.ok) { toast(`Unlocked! +${inr(r.bonusCash)} & ${r.bonusGold} Gold`, 'success'); setConfirm(null); }
@@ -5146,6 +5194,7 @@ export function FinaleModal({ visible, onClose }) {
   const company = useGame(s => s.company);
   const stats = useGame(s => s.stats);
   const trucks = useGame(s => s.trucks);
+  if (!visible) return <Sheet visible={false} onClose={onClose} title="Grand Finale" height="70%"><View /></Sheet>;
   return (
     <Sheet visible={visible} onClose={onClose} title="Grand Finale" height="70%">
       <ScrollView contentContainerStyle={{ paddingBottom: 24, alignItems: 'center' }}>

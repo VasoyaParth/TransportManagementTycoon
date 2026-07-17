@@ -224,12 +224,20 @@ export default function GameScreen() {
         </View>
         {/* Right-side action stack (garage / contracts / power-ups) */}
         <View style={st.actionStack}>
-          {/* Pinned: news + garages */}
+          {/* Pinned: always visible, never buried in the scrolling drawer
+              below — news, garages, and (since they were easy to miss
+              scrolled inside the drawer) insurance + auctions. */}
           <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'news' }); }}>
             <Icon name="newspaper-variant-outline" size={19} color="#C0161C" />
           </Pressable>
           <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'hubs' }); }}>
             <Icon name="garage" size={19} color={C.text} />
+          </Pressable>
+          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'insurance' }); }}>
+            <Icon name="shield-car" size={19} color={C.green} />
+          </Pressable>
+          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'auctions' }); }}>
+            <Icon name="gavel" size={19} color={C.text} />
           </Pressable>
           {/* Folding drawer: expands smoothly above the toggle. Capped at a
               fixed 3-button height (not 4) so it never grows again as more
@@ -256,12 +264,6 @@ export default function GameScreen() {
               </Pressable>
               <Pressable style={[st.actionBtn, { marginBottom: 8 }]} onPress={() => { haptic('light'); setModal({ kind: 'autopilot' }); }}>
                 <Icon name="steering" size={19} color={C.blue} />
-              </Pressable>
-              <Pressable style={[st.actionBtn, { marginBottom: 8 }]} onPress={() => { haptic('light'); setModal({ kind: 'auctions' }); }}>
-                <Icon name="gavel" size={19} color={C.text} />
-              </Pressable>
-              <Pressable style={[st.actionBtn, { marginBottom: 8 }]} onPress={() => { haptic('light'); setModal({ kind: 'insurance' }); }}>
-                <Icon name="shield-car" size={19} color={C.green} />
               </Pressable>
             </ScrollView>
           </Animated.View>
