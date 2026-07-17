@@ -431,15 +431,15 @@ export const driverXpForLevel = l => l * l * 250;
 export const driverPerkIds = m => { const l = driverLevel(m?.xp); return DRIVER_PERKS.filter(p => p.level <= l).map(p => p.id); };
 
 // ---------- Heavy Vehicle Licensing (v10.18.0) ----------
-// Real commercial licensing, mirrored: the bigger the truck, the more
-// experienced the driver behind the wheel has to be. Gated purely by cargo
-// tonnage against the driver's level (see driverLevel above), checked once
-// at startDelivery() — this is what actually stops a fresh hire from being
-// handed the keys to a 250-tonne mega-hauler on day one.
+// Real commercial licensing, mirrored, kept simple: a brand-new driver
+// (level 0-1) can only drive Standard trucks; reach level 2 and they're
+// Premium Heavy certified for everything, including the mega-haulers.
+// Gated purely by cargo tonnage against the driver's level (see driverLevel
+// above), checked once at startDelivery() — this is what actually stops a
+// fresh hire from being handed the keys to a 250-tonne mega-hauler on day one.
 export const LICENSE_TIERS = [
   { id: 'standard', name: 'Standard License', minCargo: 0, minDriverLevel: 0, icon: 'card-account-details-outline' },
-  { id: 'heavy', name: 'Heavy Vehicle License', minCargo: 20, minDriverLevel: 4, icon: 'card-account-details' },
-  { id: 'superheavy', name: 'Super-Heavy License', minCargo: 80, minDriverLevel: 7, icon: 'card-account-details-star' },
+  { id: 'heavy', name: 'Premium Heavy License', minCargo: 20, minDriverLevel: 2, icon: 'card-account-details-star' },
 ];
 export function licenseRequiredFor(cargo) {
   let req = LICENSE_TIERS[0];
@@ -740,7 +740,7 @@ export const EASTER_EGGS = [
   { id: 'branded', title: 'Branded', hint: 'Your logo is worth more than you think.', where: 'Tap your own company logo in Settings → Company 4 times fast.' },
   { id: 'midas_touch', title: 'Midas Touch', hint: 'Some numbers are luckier than others.', where: 'Tap your Gold total in the Mini-Games screen 7 times fast.' },
   { id: 'version_detective', title: 'Version Detective', hint: 'Read the fine print closely enough.', where: 'Tap the "Installed vX.X" pill in Settings → About 6 times fast.' },
-  { id: 'window_shopper', title: 'Window Shopper', hint: 'Looking at everything, buying nothing.', where: 'Tap the "All" filter in the Truck Showroom 8 times fast.' },
+  { id: 'window_shopper', title: 'Window Shopper', hint: 'Looking at everything, buying nothing.', where: 'Tap the search icon in the Truck Showroom 8 times fast.' },
   { id: 'curious_mind', title: 'Curious Mind', hint: 'Curiosity about yourself pays off.', where: 'Tap the "About" tab in Settings 5 times fast.' },
   { id: 'steady_hands', title: 'Steady Hands', hint: 'Balance in all things.', where: 'Tap "Normal" difficulty in Settings → Gameplay 4 times fast.' },
   { id: 'not_a_bug', title: 'Not a Bug, a Feature', hint: 'The mascot has a sense of humour.', where: 'Tap the truck logo on the splash screen 10 times fast.' },
@@ -2177,7 +2177,10 @@ export const useGame = create(
           staff: s.staff.map(m => m.id === (t && t.driverId) ? {
             ...m,
             // Driver XP: distance-weighted, powers levels & perks (v2.4.0).
-            xp: (m.xp || 0) + Math.round(d.route.roadKm / 8 + 20),
+            // Rate doubled in v10.19.0 — levels (and the license they unlock)
+            // used to take dozens of deliveries to reach; this gets a driver
+            // to Premium Heavy certified in well under ten trips.
+            xp: (m.xp || 0) + Math.round(d.route.roadKm / 4 + 40),
             hoursDriven: Math.round(((m.hoursDriven || 0) + drivingHours) * 10) / 10,
             sleepHours: Math.round(((m.sleepHours || 0) + sleepH) * 10) / 10,
             deliveries: (m.deliveries || 0) + 1,

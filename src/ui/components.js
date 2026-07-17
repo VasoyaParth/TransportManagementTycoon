@@ -205,11 +205,17 @@ export function useToast() { return useContext(ToastCtx); }
 
 const toastStore = { toasts: [], subs: new Set() };
 function toastNotify() { toastStore.subs.forEach(fn => fn(toastStore.toasts)); }
+// Manual early-dismiss (swipe) — same removal path the auto-timeout uses, so
+// a toast that's already gone (timed out or swiped) is a safe no-op either way.
+export function dismissToast(id) {
+  toastStore.toasts = toastStore.toasts.filter(x => x.id !== id);
+  toastNotify();
+}
 export function pushToast(msg, kind = 'info') {
   const id = Math.random().toString(36);
   toastStore.toasts = [...toastStore.toasts.slice(-3), { id, msg, kind }];
   toastNotify();
-  setTimeout(() => { toastStore.toasts = toastStore.toasts.filter(x => x.id !== id); toastNotify(); }, 3200);
+  setTimeout(() => dismissToast(id), 3200);
 }
 function useToastList() {
   const [list, setList] = useState(toastStore.toasts);
@@ -218,13 +224,14 @@ function useToastList() {
 }
 
 // AWS-console style stack: newest on top, colored status rail, pinned to the
-// very top of the window (above the floating header). pointerEvents="none"
-// keeps the whole screen touchable.
+// very top of the window (above the floating header). pointerEvents="box-none"
+// keeps the empty space around the pills touchable while still letting each
+// toast itself capture the swipe-to-dismiss gesture (see ToastItem).
 export function ToastStack() {
   const toasts = useToastList();
   if (!toasts.length) return null;
   return (
-    <View pointerEvents="none" style={st.toastWrap}>
+    <View pointerEvents="box-none" style={st.toastWrap}>
       {[...toasts].reverse().map(t => <ToastItem key={t.id} {...t} />)}
     </View>
   );
@@ -246,16 +253,33 @@ const TOAST_META = {
   warn: { icon: 'alert', color: C.amber, title: 'Warning' },
 };
 
-function ToastItem({ msg, kind }) {
+const TOAST_SWIPE_THRESHOLD = 70;
+function ToastItem({ id, msg, kind }) {
   const anim = useRef(new Animated.Value(0)).current;
+  const translateX = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     Animated.spring(anim, { toValue: 1, useNativeDriver: true, speed: 20, bounciness: 8 }).start();
     haptic(kind === 'error' ? 'error' : kind === 'warn' ? 'warn' : kind === 'success' ? 'success' : 'light');
   }, [anim, kind]);
+  // Swipe either direction to dismiss early, same affordance as the
+  // notification inbox rows — otherwise a toast just sits for its full
+  // 3.2s even once the player has already read it.
+  const panResponder = useRef(PanResponder.create({
+    onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
+    onPanResponderMove: (_, g) => translateX.setValue(g.dx),
+    onPanResponderRelease: (_, g) => {
+      if (Math.abs(g.dx) > TOAST_SWIPE_THRESHOLD) {
+        Animated.timing(translateX, { toValue: g.dx < 0 ? -400 : 400, duration: 160, useNativeDriver: true })
+          .start(() => dismissToast(id));
+      } else {
+        Animated.spring(translateX, { toValue: 0, useNativeDriver: true, bounciness: 6 }).start();
+      }
+    },
+  })).current;
   const meta = TOAST_META[kind] || TOAST_META.info;
   return (
-    <Animated.View style={[st.toast, SHADOW.pop, { borderLeftColor: meta.color, borderLeftWidth: 4 },
-      { opacity: anim, transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [-16, 0] }) }] }]}>
+    <Animated.View {...panResponder.panHandlers} style={[st.toast, SHADOW.pop, { borderLeftColor: meta.color, borderLeftWidth: 4 },
+      { opacity: anim, transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [-16, 0] }) }, { translateX }] }]}>
       <Icon name={meta.icon} size={18} color={meta.color} style={{ marginRight: 8 }} />
       <View style={{ flex: 1 }}>
         <Text style={[FONT.tiny, { fontWeight: '800', color: meta.color, textTransform: 'uppercase', letterSpacing: 0.4 }]}>{meta.title}</Text>
