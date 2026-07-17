@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, FlatList, Pressable, StyleSheet, TextInput } from 'react-native';
 import { C, FONT, RADIUS } from '../theme';
 import {
-  Card, Btn, IconBtn, Pill, statusMeta, Progress, Money, Stat, Row, Icon, useToast, relTime, GameSlider, Sheet, useEasterEggTap, smartSearch,
+  Card, Btn, IconBtn, Pill, statusMeta, Progress, Money, Stat, Row, Icon, useToast, relTime, GameSlider, Sheet, useEasterEggTap, smartSearch, DropdownPicker,
 } from '../components';
 import Svg from 'react-native-svg';
 import {
@@ -85,29 +85,6 @@ function SectionTitle({ icon, text, right }) {
       </Row>
       {right || null}
     </Row>
-  );
-}
-
-// Pill-shaped filter tabs (used by Fleet & Staff). options: [{key,label,count}]
-function FilterChips({ options, value, onChange }) {
-  return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 12 }}
-      contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', paddingRight: 8 }}>
-      {options.map(o => {
-        const on = value === o.key;
-        return (
-          <Pressable key={o.key} onPress={() => { haptic('light'); onChange(o.key); }}
-            style={[st.filterChip, on && { backgroundColor: C.blue, borderColor: C.blue }, { marginRight: 6 }]}>
-            <Text style={{ fontSize: 12.5, fontWeight: '700', color: on ? '#fff' : C.sub, flexShrink: 0 }} numberOfLines={1}>{o.label}</Text>
-            {o.count != null && (
-              <View style={[st.filterCount, { backgroundColor: on ? 'rgba(255,255,255,0.25)' : C.bgSoft }]}>
-                <Text style={{ fontSize: 10.5, fontWeight: '800', color: on ? '#fff' : C.sub, flexShrink: 0 }} numberOfLines={1}>{o.count}</Text>
-              </View>
-            )}
-          </Pressable>
-        );
-      })}
-    </ScrollView>
   );
 }
 
@@ -468,10 +445,11 @@ export function RoutesTab({ onTrack, onNewDelivery }) {
       </Card>
 
       {/* ---- View switch ---- */}
-      <FilterChips
+      <DropdownPicker
+        icon="view-list"
         options={[
-          { key: 'running', label: 'Running', count: deliveries.length },
-          { key: 'history', label: 'History', count: history.length },
+          { key: 'running', label: `Running (${deliveries.length})` },
+          { key: 'history', label: `History (${history.length})` },
           { key: 'insights', label: 'Insights' },
         ]}
         value={view} onChange={setView}
@@ -480,7 +458,7 @@ export function RoutesTab({ onTrack, onNewDelivery }) {
       {view === 'running' && (
         <>
           {deliveries.length > 1 && (
-            <FilterChips options={ROUTE_SORTS.map(o => ({ key: o.key, label: `Sort: ${o.label}` }))} value={sort} onChange={setSort} />
+            <DropdownPicker label="Sort" icon="sort" options={ROUTE_SORTS.map(o => ({ key: o.key, label: o.label }))} value={sort} onChange={setSort} />
           )}
           {deliveries.length === 0 ? (
             <EmptyState
@@ -529,11 +507,12 @@ export function RoutesTab({ onTrack, onNewDelivery }) {
       {view === 'history' && (
         <>
           {history.length > 1 && (
-            <FilterChips
+            <DropdownPicker
+              label="Sort" icon="sort"
               options={[
-                { key: 'recent', label: 'Sort: Recent' },
-                { key: 'profit', label: 'Sort: Profit' },
-                { key: 'distance', label: 'Sort: Distance' },
+                { key: 'recent', label: 'Recent' },
+                { key: 'profit', label: 'Profit' },
+                { key: 'distance', label: 'Distance' },
               ]}
               value={histSort} onChange={setHistSort}
             />
@@ -915,12 +894,13 @@ export function StaffTab({ onOpenDriver }) {
           <Pressable onPress={() => setHireQuery('')} hitSlop={6}><Icon name="close-circle" size={16} color={C.faint} /></Pressable>
         )}
       </Row>
-      <FilterChips
+      <DropdownPicker
+        label="Sort" icon="sort"
         options={[
-          { key: 'skill', label: 'Sort: Skill' },
-          { key: 'salary-asc', label: 'Sort: Salary Low-High' },
-          { key: 'salary-desc', label: 'Sort: Salary High-Low' },
-          { key: 'bonus', label: 'Sort: Signing Bonus' },
+          { key: 'skill', label: 'Skill' },
+          { key: 'salary-asc', label: 'Salary Low-High' },
+          { key: 'salary-desc', label: 'Salary High-Low' },
+          { key: 'bonus', label: 'Signing Bonus' },
         ]}
         value={hireSort} onChange={setHireSort}
       />

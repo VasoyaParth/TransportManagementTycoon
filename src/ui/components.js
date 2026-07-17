@@ -153,6 +153,55 @@ export function Pill({ text, color = C.blue, bg = C.blueSoft, icon }) {
   );
 }
 
+// ---------- Dropdown picker ----------
+// Replaces a row of filter/sort chips with ONE tappable control: a header
+// showing the current choice, which expands into a plain vertical option
+// list (checkmark on the active one) instead of a horizontal-scrolling row
+// of pills. Same job as a row of chips, scales cleanly to any option count,
+// and never has the "row too narrow, pills clipped" failure mode a chip row
+// does on a small screen.
+export function DropdownPicker({ label, icon, options, value, onChange, style, onHeaderPress }) {
+  const [open, setOpen] = useState(false);
+  const current = options.find(o => o.key === value);
+  return (
+    <View style={[{ marginBottom: 10 }, style]}>
+      <Pressable onPress={() => { haptic('light'); onHeaderPress && onHeaderPress(); setOpen(o => !o); }}
+        style={{
+          flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+          paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: C.border,
+          borderRadius: open ? 0 : RADIUS.md, borderTopLeftRadius: RADIUS.md, borderTopRightRadius: RADIUS.md,
+          backgroundColor: '#fff',
+        }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+          {icon ? <Icon name={icon} size={15} color={C.sub} style={{ marginRight: 6 }} /> : null}
+          <Text style={{ fontSize: 13, fontWeight: '700', color: C.text }} numberOfLines={1}>
+            {label ? `${label}: ` : ''}{current ? current.label : '—'}
+          </Text>
+        </View>
+        <Icon name={open ? 'chevron-up' : 'chevron-down'} size={16} color={C.faint} />
+      </Pressable>
+      {open && (
+        <View style={{ borderWidth: 1, borderTopWidth: 0, borderColor: C.border, borderBottomLeftRadius: RADIUS.md, borderBottomRightRadius: RADIUS.md, backgroundColor: '#fff', overflow: 'hidden' }}>
+          {options.map(o => {
+            const sel = o.key === value;
+            return (
+              <Pressable key={o.key} onPress={() => { haptic('light'); play('tap', 0.3); onChange(o.key); setOpen(false); }}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                  paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: C.border,
+                  backgroundColor: sel ? C.blueSoft : '#fff',
+                }}>
+                <Text style={{ fontSize: 13, fontWeight: sel ? '700' : '500', color: sel ? C.blue : C.text }}>{o.label}</Text>
+                {sel ? <Icon name="check" size={15} color={C.blue} /> : null}
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
+    </View>
+  );
+}
+
 export const statusMeta = {
   parked: { label: 'Parked', color: C.blue, bg: C.blueSoft, icon: 'parking' },
   delivering: { label: 'On Delivery', color: C.green, bg: C.greenSoft, icon: 'truck-fast' },

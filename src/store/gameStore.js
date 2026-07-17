@@ -741,7 +741,7 @@ export const EASTER_EGGS = [
   { id: 'midas_touch', title: 'Midas Touch', hint: 'Some numbers are luckier than others.', where: 'Tap your Gold total in the Mini-Games screen 7 times fast.' },
   { id: 'version_detective', title: 'Version Detective', hint: 'Read the fine print closely enough.', where: 'Tap the "Installed vX.X" pill in Settings → About 6 times fast.' },
   { id: 'window_shopper', title: 'Window Shopper', hint: 'Looking at everything, buying nothing.', where: 'Tap the search icon in the Truck Showroom 8 times fast.' },
-  { id: 'curious_mind', title: 'Curious Mind', hint: 'Curiosity about yourself pays off.', where: 'Tap the "About" tab in Settings 5 times fast.' },
+  { id: 'curious_mind', title: 'Curious Mind', hint: 'Curiosity about yourself pays off.', where: 'In Settings, open "About" then tap the dropdown header 5 times fast.' },
   { id: 'steady_hands', title: 'Steady Hands', hint: 'Balance in all things.', where: 'Tap "Normal" difficulty in Settings → Gameplay 4 times fast.' },
   { id: 'not_a_bug', title: 'Not a Bug, a Feature', hint: 'The mascot has a sense of humour.', where: 'Tap the truck logo on the splash screen 10 times fast.' },
   { id: 'nice_try', title: 'Nice Try', hint: 'Reading the warning label a little too closely.', where: 'Tap the Danger Zone warning text in Settings → Gameplay 6 times fast (doesn’t actually reset anything).' },
@@ -756,7 +756,7 @@ export const EASTER_EGGS = [
   // v2.3.0 — the tough five. High tap counts, obscure corners: these are meant
   // to survive weeks of hunting.
   { id: 'ghost_rider', title: 'Ghost Rider', hint: 'Only night owls notice the sky change.', where: 'Tap the day/night weather icon in the top header 9 times fast.' },
-  { id: 'gold_digger', title: 'Gold Digger', hint: 'Some wallets have false bottoms.', where: 'Tap the Gold Wallet chip in the Power-Ups store 10 times fast.' },
+  { id: 'gold_digger', title: 'Gold Digger', hint: 'Some wallets have false bottoms.', where: 'On the Gold Wallet page, tap the Gold balance number 10 times fast.' },
   { id: 'long_hauler', title: 'Long Hauler', hint: 'Obsessed with the odometer, ten times over.', where: 'Tap the Distance stat in the Economy tab 10 times fast.' },
   { id: 'ledger_lord', title: 'Ledger Lord', hint: 'A true auditor checks the books twelve times.', where: 'Tap the Company Ledger header icon 12 times fast.' },
   { id: 'streak_freak', title: 'Streak Freak', hint: 'Worship the daily flame, eleven-fold.', where: 'Tap the streak flame in the Rewards tab 11 times fast.' },

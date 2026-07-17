@@ -6,7 +6,7 @@ import ViewShot from 'react-native-view-shot';
 import RNShare from 'react-native-share';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
-import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider, smartSearch } from '../components';
+import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider, smartSearch, DropdownPicker } from '../components';
 import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST_MIN, LIVERY_COST_MAX, liveryCostFor, FLEET_LIVERY_DISCOUNT, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, CONVOY_SYMBOLS, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds, licenseRequiredFor } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
@@ -406,15 +406,6 @@ function SpecRow({ icon, label, value }) {
   );
 }
 
-function Chip({ label, active, onPress, icon, color = C.blue, style }) {
-  return (
-    <Pressable onPress={onPress} style={[cs.chip, active && { backgroundColor: color, borderColor: color }, style]}>
-      {icon ? <Icon name={icon} size={13} color={active ? '#fff' : C.sub} style={{ marginRight: 4, flexShrink: 0 }} /> : null}
-      <Text style={{ fontSize: 12.5, fontWeight: '700', color: active ? '#fff' : C.sub, flexShrink: 0 }} numberOfLines={1}>{label}</Text>
-    </Pressable>
-  );
-}
-
 // ============ New Delivery ============
 export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, contract, onPickOnMap }) {
   const toast = useToast();
@@ -552,11 +543,10 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
 
             {/* Cargo */}
             <Text style={cs.section}>Cargo type{locked ? ' · fixed by contract' : ''}</Text>
-            <Row style={{ flexWrap: 'wrap', gap: 6 }}>
-              {CARGO_TYPES.map(ct => (
-                <Chip key={ct.id} label={ct.name} icon={ct.icon} active={cargo === ct.id} onPress={() => { if (!locked) setCargo(ct.id); }} />
-              ))}
-            </Row>
+            <DropdownPicker
+              options={CARGO_TYPES.map(ct => ({ key: ct.id, label: ct.name }))}
+              value={cargo} onChange={locked ? () => {} : setCargo}
+            />
             {(() => {
               const ct = cargoById(cargo);
               if (!ct) return null;
@@ -1455,11 +1445,11 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
   useEffect(() => { if (!visible) setConfirmModel(null); }, [visible]);
   const tapWindowShopperEgg = useEasterEggTap('window_shopper', 8);
   const SORTS = [
-    ['default', 'Default'],
-    ['name-asc', 'Name A-Z'],
-    ['name-desc', 'Name Z-A'],
-    ['price-asc', 'Price Low-High'],
-    ['price-desc', 'Price High-Low'],
+    { key: 'default', label: 'Default' },
+    { key: 'name-asc', label: 'Name A-Z' },
+    { key: 'name-desc', label: 'Name Z-A' },
+    { key: 'price-asc', label: 'Price Low-High' },
+    { key: 'price-desc', label: 'Price High-Low' },
   ];
   const list = useMemo(() => {
     // Search everything about the truck, not just its name — brand, tier,
@@ -1506,13 +1496,7 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
           <Pressable onPress={() => setQuery('')} hitSlop={6}><Icon name="close-circle" size={16} color={C.faint} /></Pressable>
         )}
       </Row>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 10 }}
-        contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', paddingRight: 8 }}>
-        <Icon name="sort" size={14} color={C.sub} style={{ marginRight: 8, flexShrink: 0 }} />
-        {SORTS.map(([k, l]) => (
-          <Chip key={k} label={l} active={sort === k} onPress={() => setSort(k)} style={{ marginRight: 6 }} />
-        ))}
-      </ScrollView>
+      <DropdownPicker label="Sort" icon="sort" options={SORTS} value={sort} onChange={setSort} />
       <FlatList
         data={list.slice(0, page * 10)} keyExtractor={m => m.id} showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 30 }}
@@ -1790,17 +1774,17 @@ export function PowerupsModal({ visible, onClose, onOpenGames }) {
       {/* Two pages: the power-up store scrolls freely on its own, and the
           wallet (balance / earn / exchange) lives on its own page instead of
           pinned cards eating the store's scroll space. */}
-      <Row style={{ gap: 6, marginBottom: 12 }}>
-        <Chip label="Power-Ups" icon="star-four-points" active={page === 'store'} onPress={() => setPage('store')} />
-        <Chip label={`Gold Wallet · ${gold}`} icon="gold" color={C.gold} active={page === 'wallet'} onPress={() => { tapGoldDiggerEgg(); setPage('wallet'); }} />
-      </Row>
+      <DropdownPicker
+        options={[{ key: 'store', label: 'Power-Ups' }, { key: 'wallet', label: `Gold Wallet · ${gold}` }]}
+        value={page} onChange={setPage}
+      />
 
       {page === 'wallet' && (
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
         <Card style={{ marginBottom: 12, backgroundColor: C.bgSoft }}>
           <Row style={{ justifyContent: 'space-between' }}>
             <Row><Icon name="gold" size={20} color={C.gold} /><Text style={[FONT.h3, { marginLeft: 6 }]}>Your Gold</Text></Row>
-            <Text style={[FONT.h2, { color: C.gold }]}>{gold}</Text>
+            <Pressable onPress={tapGoldDiggerEgg}><Text style={[FONT.h2, { color: C.gold }]}>{gold}</Text></Pressable>
           </Row>
           {/* Earn free Gold by playing the daily mini-games (scratch + roulette). */}
           <Btn title="Play for free Gold" kind="green" icon="dice-multiple" small={false}
@@ -2398,16 +2382,19 @@ export function MiniGamesModal({ visible, onClose }) {
           <Pressable onPress={tapMidasEgg}><Text style={[FONT.h2, { color: C.gold }]}>{gold}</Text></Pressable>
         </Row>
       </Card>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 14 }}
-        contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', paddingRight: 8 }}>
-        <Chip label="Scratch Card" icon="ticket-confirmation" active={tab === 'scratch'} onPress={() => setTab('scratch')} style={{ marginRight: 6 }} />
-        <Chip label="Lucky Spin" icon="rotate-right" active={tab === 'spin'} onPress={() => setTab('spin')} style={{ marginRight: 6 }} />
-        <Chip label="Dice Roll" icon="dice-multiple" active={tab === 'dice'} onPress={() => setTab('dice')} style={{ marginRight: 6 }} />
-        <Chip label="Toll Gate" icon="highway" color={C.green} active={tab === 'toll'} onPress={() => setTab('toll')} style={{ marginRight: 6 }} />
-        <Chip label="High-Stakes" icon="slot-machine-outline" color={C.red} active={tab === 'bet'} onPress={() => setTab('bet')} style={{ marginRight: 6 }} />
-        <Chip label="Lucky Plate" icon="card-text" color={C.gold} active={tab === 'plate'} onPress={() => setTab('plate')} style={{ marginRight: 6 }} />
-        <Chip label="Golden Convoy" icon="truck-fast" color={C.amber} active={tab === 'convoy'} onPress={() => setTab('convoy')} style={{ marginRight: 6 }} />
-      </ScrollView>
+      <DropdownPicker
+        icon="gamepad-variant"
+        options={[
+          { key: 'scratch', label: 'Scratch Card' },
+          { key: 'spin', label: 'Lucky Spin' },
+          { key: 'dice', label: 'Dice Roll' },
+          { key: 'toll', label: 'Toll Gate' },
+          { key: 'bet', label: 'High-Stakes' },
+          { key: 'plate', label: 'Lucky Plate' },
+          { key: 'convoy', label: 'Golden Convoy' },
+        ]}
+        value={tab} onChange={setTab}
+      />
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
         {tab === 'scratch' ? <ScratchGame toast={toast} /> : tab === 'spin' ? <SpinGame toast={toast} /> : tab === 'dice' ? <DiceGame toast={toast} />
           : tab === 'toll' ? <TollGateGame toast={toast} /> : tab === 'bet' ? <BetSlotGame toast={toast} />
@@ -3078,13 +3065,12 @@ export function SettingsModal({ visible, onClose, initialTab }) {
 
   return (
     <Sheet visible={visible} onClose={onClose} title="Settings" height="88%">
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 12 }}
-        contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', paddingRight: 8 }}>
-        {TABS.map(([id, l, icon]) => (
-          <Chip key={id} label={l} icon={icon} active={tab === id}
-            onPress={() => { if (id === 'about' && tab === 'about') tapCuriousEgg(); setTab(id); }} style={{ marginRight: 6 }} />
-        ))}
-      </ScrollView>
+      <DropdownPicker
+        icon="cog"
+        options={TABS.map(([id, l, icon]) => ({ key: id, label: l }))}
+        value={tab} onChange={setTab}
+        onHeaderPress={() => { if (tab === 'about') tapCuriousEgg(); }}
+      />
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
         {tab === 'profile' && (editing !== 'profile' ? (
           <>
@@ -3165,20 +3151,23 @@ export function SettingsModal({ visible, onClose, initialTab }) {
             <SectionTitle icon="controller-classic" text="Simulation" />
             <Card>
               <Text style={[FONT.tiny, { marginBottom: 6 }]}>GAME SPEED</Text>
-              <Row style={{ gap: 6, flexWrap: 'wrap' }}>
-                {[[0.5, 'Slow'], [1, 'Normal'], [2, 'Fast'], [4, 'Very Fast']].map(([v, l]) => (
-                  <Chip key={v} label={l} active={settings.speed === v} onPress={() => { if (v === 4) tapSpeedEgg(); saveSettings({ speed: v }); }} />
-                ))}
-              </Row>
+              <DropdownPicker
+                options={[[0.5, 'Slow'], [1, 'Normal'], [2, 'Fast'], [4, 'Very Fast']].map(([v, l]) => ({ key: String(v), label: l }))}
+                value={String(settings.speed)}
+                onChange={k => { const v = Number(k); if (v === 4) tapSpeedEgg(); saveSettings({ speed: v }); }}
+              />
               <Text style={[FONT.tiny, { marginTop: 14, marginBottom: 6 }]}>DIFFICULTY</Text>
-              <Row style={{ gap: 6 }}>
-                {['easy', 'normal', 'hard'].map(d => <Chip key={d} label={d[0].toUpperCase() + d.slice(1)} active={settings.difficulty === d} onPress={() => { if (d === 'normal' && settings.difficulty === 'normal') tapSteadyEgg(); saveSettings({ difficulty: d }); }} />)}
-              </Row>
+              <DropdownPicker
+                options={['easy', 'normal', 'hard'].map(d => ({ key: d, label: d[0].toUpperCase() + d.slice(1) }))}
+                value={settings.difficulty}
+                onChange={d => { if (d === 'normal' && settings.difficulty === 'normal') tapSteadyEgg(); saveSettings({ difficulty: d }); }}
+              />
               <Text style={[FONT.tiny, { marginTop: 14, marginBottom: 6 }]}>RANDOM EVENTS (theft, accidents...)</Text>
-              <Row style={{ gap: 6 }}>
-                {[['off', 'Off'], ['rare', 'Rare'], ['sometimes', 'Sometimes']].map(([v, l]) =>
-                  <Chip key={v} label={l} active={(settings.events || 'rare') === v} onPress={() => saveSettings({ events: v })} />)}
-              </Row>
+              <DropdownPicker
+                options={[['off', 'Off'], ['rare', 'Rare'], ['sometimes', 'Sometimes']].map(([v, l]) => ({ key: v, label: l }))}
+                value={settings.events || 'rare'}
+                onChange={v => saveSettings({ events: v })}
+              />
             </Card>
             <SectionTitle icon="tune-variant" text="Preferences" />
             <Card>
@@ -3205,11 +3194,11 @@ export function SettingsModal({ visible, onClose, initialTab }) {
             <Card>
               <ToggleRow label="Vibration / haptics" value={settings.haptics !== false} onChange={v => saveSettings({ haptics: v })} />
               <Text style={[FONT.tiny, { marginTop: 12, marginBottom: 6 }]}>INTENSITY</Text>
-              <Row style={{ gap: 6 }}>
-                {[['short', 'Short'], ['medium', 'Medium'], ['long', 'Long']].map(([v, l]) => (
-                  <Chip key={v} label={l} active={(settings.hapticIntensity || 'medium') === v} onPress={() => saveSettings({ hapticIntensity: v })} />
-                ))}
-              </Row>
+              <DropdownPicker
+                options={[['short', 'Short'], ['medium', 'Medium'], ['long', 'Long']].map(([v, l]) => ({ key: v, label: l }))}
+                value={settings.hapticIntensity || 'medium'}
+                onChange={v => saveSettings({ hapticIntensity: v })}
+              />
             </Card>
             <SectionTitle icon="alert-octagon-outline" text="Danger Zone" />
             <Card style={{ borderColor: C.red }}>
@@ -3234,15 +3223,18 @@ export function SettingsModal({ visible, onClose, initialTab }) {
             </Text>
             <Card>
               <Text style={FONT.sub}>New notifications still land in your inbox (bell icon) — this only silences the pop-up toast while it's on.</Text>
-              <Row style={{ flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
-                {[[0, 'Off'], [60 * 60 * 1000, '1 hour'], [4 * 60 * 60 * 1000, '4 hours'], [8 * 60 * 60 * 1000, 'Rest of day']].map(([ms, l]) => {
-                  const active = ms === 0 ? !(settings.notifSnoozeUntil > Date.now()) : settings.notifSnoozeUntil > Date.now() && Math.abs((settings.notifSnoozeUntil - Date.now()) - ms) < 5 * 60 * 1000;
-                  return (
-                    <Chip key={l} label={l} active={active}
-                      onPress={() => saveSettings({ notifSnoozeUntil: ms === 0 ? 0 : Date.now() + ms })} />
-                  );
-                })}
-              </Row>
+              {(() => {
+                const opts = [[0, 'Off'], [60 * 60 * 1000, '1 hour'], [4 * 60 * 60 * 1000, '4 hours'], [8 * 60 * 60 * 1000, 'Rest of day']];
+                const cur = opts.find(([ms]) => ms === 0 ? !(settings.notifSnoozeUntil > Date.now()) : settings.notifSnoozeUntil > Date.now() && Math.abs((settings.notifSnoozeUntil - Date.now()) - ms) < 5 * 60 * 1000);
+                return (
+                  <DropdownPicker
+                    style={{ marginTop: 10 }}
+                    options={opts.map(([ms, l]) => ({ key: String(ms), label: l }))}
+                    value={String(cur ? cur[0] : 0)}
+                    onChange={k => { const ms = Number(k); saveSettings({ notifSnoozeUntil: ms === 0 ? 0 : Date.now() + ms }); }}
+                  />
+                );
+              })()}
             </Card>
           </>
         )}
@@ -4120,10 +4112,10 @@ export function PhotoModeModal({ visible, onClose }) {
     <Sheet visible={visible} onClose={onClose} title="Photo Mode" height="92%">
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
         {/* Light / dark card toggle */}
-        <Row style={{ gap: 6, marginBottom: 12 }}>
-          <Chip label="Dark Card" icon="weather-night" active={mode === 'dark'} onPress={() => setMode('dark')} />
-          <Chip label="Light Card" icon="white-balance-sunny" active={mode === 'light'} onPress={() => setMode('light')} />
-        </Row>
+        <DropdownPicker
+          options={[{ key: 'dark', label: 'Dark Card' }, { key: 'light', label: 'Light Card' }]}
+          value={mode} onChange={setMode}
+        />
 
         {/* Everything inside ViewShot is EXACTLY what gets captured as the PNG. */}
         <ViewShot ref={shotRef} options={{ format: 'png', quality: 1, result: 'tmpfile' }}>
