@@ -614,6 +614,25 @@ export function buildDaily(dayId, stats) {
   return { id: dayId, challenges, snapshot, claimed: [], jackpotPaid: false };
 }
 
+// ---------- Career quest chain (v10.14.0) ----------
+// A permanent, ordered questline — unlike weekly/daily challenges these never
+// reset and there's no snapshot: each target compares straight against the
+// player's LIFETIME stat, so a quest that's already halfway done the moment
+// this feature ships still counts. Always exactly one quest is "active" (the
+// first not yet claimed), giving new players a guided path through the game.
+export const QUEST_CHAIN = [
+  { id: 'first-mile', title: 'First Mile', flavor: 'Every empire starts with one truck and one delivery. Get rolling.', icon: 'flag-checkered', key: 'deliveries', target: 1, gold: 5, cash: 50000 },
+  { id: 'road-warrior', title: 'Road Warrior', flavor: 'Put real distance behind you — the highway is where the money is.', icon: 'road-variant', key: 'km', target: 1000, gold: 10, cash: 150000 },
+  { id: 'fleet-of-five', title: 'Fleet of Five', flavor: 'One truck is a hustle. Five trucks is a company.', icon: 'truck-fast', key: 'fleetSize', target: 5, gold: 15, cash: 250000 },
+  { id: 'border-runner', title: 'Border Runner', flavor: 'Take a shipment across a national border for the first time.', icon: 'passport', key: 'borders', target: 1, gold: 20, cash: 400000 },
+  { id: 'contract-closer', title: 'Contract Closer', flavor: 'The contract board rewards those who show up — close ten deals.', icon: 'file-sign', key: 'contracts', target: 10, gold: 25, cash: 600000 },
+  { id: 'century-club', title: 'Century Club', flavor: 'A hundred deliveries. Nobody said this would be easy.', icon: 'trophy-award', key: 'deliveries', target: 100, gold: 40, cash: 1500000 },
+  { id: 'silk-road', title: 'Silk Road', flavor: 'Ten thousand kilometres of hauling — you could circle the coastline twice.', icon: 'map-marker-distance', key: 'km', target: 10000, gold: 40, cash: 1500000 },
+  { id: 'empire-builder', title: 'Empire Builder', flavor: 'A real network, not just a garage — open your fifth hub.', icon: 'office-building-marker', key: 'hubCount', target: 5, gold: 50, cash: 2500000 },
+  { id: 'crorepati', title: 'Crorepati Carrier', flavor: 'Cross one crore in lifetime revenue. The bank notices now.', icon: 'cash-multiple', key: 'revenue', target: 10000000, gold: 60, cash: 3000000 },
+  { id: 'transport-emperor', title: 'Transport Emperor', flavor: 'Five hundred deliveries. The whole map answers to you now.', icon: 'crown', key: 'deliveries', target: 500, gold: 100, cash: 6000000 },
+];
+
 // ---------- 30-day login streak calendar (v3.0.0) ----------
 // Every day of the streak has its OWN reward — gold, cash, boosts, shields —
 // escalating to a day-30 mega chest. After day 30 the calendar repeats its
@@ -873,6 +892,7 @@ const initialState = {
   lastCompanyLevel: 0, // last company level a reward was paid for
   weekly: null, // this week's challenges {id, challenges, snapshot, claimed, jackpotPaid}
   daily: null, // today's challenges {id, challenges, snapshot, claimed, jackpotPaid}
+  questsClaimed: [], // permanent career-quest chain (see QUEST_CHAIN) — ids already claimed, in order
   updateGiftVersion: '', // last update-welcome-gift version already granted
   clockStart: 0, // real ms when day 1 hour 0 began
   lastSalaryDay: 0,
@@ -1646,7 +1666,7 @@ export const useGame = create(
         const s = get();
         const t = s.trucks.find(x => x.id === truckId);
         if (!t) return { ok: false, err: 'Truck not found' };
-        const changed = ['color', 'accentColor', 'logoIcon'].some(k => patch[k] !== undefined && patch[k] !== (t[k] ?? null));
+        const changed = ['color', 'accentColor', 'logoIcon', 'pattern', 'booster'].some(k => patch[k] !== undefined && patch[k] !== (t[k] ?? null));
         if (!changed) return { ok: false, err: 'Nothing to apply' };
         if (s.gold < LIVERY_COST) return { ok: false, err: `Need ${LIVERY_COST} Gold to repaint` };
         set({
@@ -2700,6 +2720,43 @@ export const useGame = create(
         }
         play('coin', 1);
         return { ok: true, sweep };
+      },
+
+      // Career quest chain: no snapshot, no reset — target compares straight
+      // against the lifetime value (deliveries/km/revenue/borders/contracts
+      // via _liveStat, fleetSize/hubCount read straight off the current
+      // fleet/network since they're not tracked in `stats`).
+      _questStatValue(key) {
+        const s = get();
+        if (key === 'fleetSize') return s.trucks.length;
+        if (key === 'hubCount') return s.hubs.length;
+        return get()._liveStat(key);
+      },
+      questProgress() {
+        const claimed = get().questsClaimed || [];
+        return QUEST_CHAIN.map((q, i) => ({
+          ...q,
+          progress: get()._questStatValue(q.key),
+          claimed: claimed.includes(q.id),
+          active: !claimed.includes(q.id) && QUEST_CHAIN.slice(0, i).every(p => claimed.includes(p.id)),
+        }));
+      },
+      claimQuest(id) {
+        const s = get();
+        const q = QUEST_CHAIN.find(x => x.id === id);
+        if (!q) return { ok: false, err: 'Unknown quest' };
+        const claimed = s.questsClaimed || [];
+        if (claimed.includes(id)) return { ok: false, err: 'Already claimed' };
+        if (get()._questStatValue(q.key) < q.target) return { ok: false, err: 'Not complete yet' };
+        const nextClaimed = [...claimed, id];
+        set({ gold: s.gold + q.gold, balance: s.balance + q.cash, questsClaimed: nextClaimed });
+        get().logLedger('bonus', q.icon, `Quest complete — ${q.title}`, q.cash);
+        const allDone = nextClaimed.length === QUEST_CHAIN.length;
+        get().notify('system', q.icon, allDone
+          ? `Quest complete: ${q.title}! +${q.gold} Gold + ${inr(q.cash)}. You've cleared the whole questline!`
+          : `Quest complete: ${q.title}! +${q.gold} Gold + ${inr(q.cash)}.`);
+        play('coin', 1);
+        return { ok: true, allDone };
       },
 
       // One-time thank-you gift for removing the Stock Market feature —

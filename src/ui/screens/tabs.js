@@ -12,7 +12,7 @@ import {
   ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, EASTER_EGGS,
   LOAN_PRODUCTS, creditScoreOf, DRIVER_PERKS, driverLevel, driverXpForLevel,
   CUSTOM_LOAN_MIN, customLoanMax, customLoanTerms,
-  companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, WEEKLY_JACKPOT, WEEKLY_CHALLENGE_COUNT,
+  companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, WEEKLY_JACKPOT, WEEKLY_CHALLENGE_COUNT, QUEST_CHAIN,
   DAILY_JACKPOT, DAILY_CHALLENGE_COUNT,
   STREAK_REWARDS, streakRewardFor,
   pledgedTruckIds, pledgedHubCityIds, collateralTotalValue, COLLATERAL_COVERAGE, MISSED_STREAK_FOR_REPO,
@@ -31,16 +31,16 @@ import { TruckTopShapes, truckShapes, bodyTypeFor, defaultBodyColor, sizeScaleFo
 // `accent`/`logoIcon` mirror a truck's Livery customization so a repaint
 // shows up here instantly, same as everywhere else that renders this art.
 const FLEET_ICON = 42;
-function FleetTruckArt({ model, color, accent, logoIcon }) {
+function FleetTruckArt({ model, color, accent, logoIcon, pattern, booster }) {
   const bt = bodyTypeFor(model);
   const body = color || defaultBodyColor(model);
   const trim = accent || '#9DB2D6';
-  const { w, h } = truckShapes(bt, body, trim);
+  const { w, h } = truckShapes(bt, body, trim, { pattern, booster });
   const scale = ((FLEET_ICON - 6) / h) * sizeScaleFor(model);
   return (
     <View style={{ width: FLEET_ICON, height: FLEET_ICON, alignItems: 'center', justifyContent: 'center' }}>
       <Svg width={w * scale} height={h * scale} viewBox={`0 0 ${w} ${h}`}>
-        <TruckTopShapes type={bt} body={body} accent={trim} />
+        <TruckTopShapes type={bt} body={body} accent={trim} pattern={pattern} booster={booster} />
       </Svg>
       {logoIcon ? (
         <View style={{
@@ -195,7 +195,7 @@ export function FleetTab({ onTruckPress, onBuyTruck }) {
           <Row style={{ flex: 1 }}>
             <View style={{ position: 'relative' }}>
               <View style={[st.iconCircle, { backgroundColor: meta.bg }]}>
-                <FleetTruckArt model={model} color={t.color} accent={t.accentColor} logoIcon={t.logoIcon} />
+                <FleetTruckArt model={model} color={t.color} accent={t.accentColor} logoIcon={t.logoIcon} pattern={t.pattern} booster={t.booster} />
               </View>
               {pledged.has(t.id) && (
                 <View style={st.badgeDot}>
@@ -1930,6 +1930,9 @@ export function RewardsTab({ onOpenGames }) {
   const dailyProgress = useGame(s => s.dailyProgress);
   const claimDaily = useGame(s => s.claimDaily);
   const daily = useGame(s => s.daily);
+  const questProgress = useGame(s => s.questProgress);
+  const claimQuest = useGame(s => s.claimQuest);
+  const [questsExpanded, setQuestsExpanded] = useState(false);
   const claimStockRemovalGift = useGame(s => s.claimStockRemovalGift);
   const giftClaimed = useGame(s => s.settings?.stockRemovalGiftClaimed);
   const toast = useToast();
@@ -1941,6 +1944,9 @@ export function RewardsTab({ onOpenGames }) {
   useNow(deliveriesActive > 0); // 1s re-render: weekly/daily km/₹ tick LIVE while trucks drive
   const weeklyList = weeklyProgress();
   const dailyList = dailyProgress();
+  const questList = questProgress();
+  const activeQuest = questList.find(q => q.active);
+  const questsDone = questList.filter(q => q.claimed).length;
   const sweepDone = weekly && weekly.claimed.length === (weekly.challenges || []).length && weekly.challenges.length > 0;
   const dailySweepDone = daily && daily.claimed.length === (daily.challenges || []).length && daily.challenges.length > 0;
 
@@ -2038,6 +2044,54 @@ export function RewardsTab({ onOpenGames }) {
         </Row>
         <Progress pct={((xp - curXp) / Math.max(1, nextXp - curXp)) * 100} color={C.blue} style={{ marginTop: 10 }} />
         <Text style={[FONT.tiny, { marginTop: 6 }]}>Everything earns XP — revenue, deliveries, km, garages, trucks. Each level pays a one-time gold reward.</Text>
+      </Card>
+
+      {/* ---- Career quests — permanent questline, one active step at a time ---- */}
+      <SectionTitle icon="map-marker-path" text={`Career Quests — ${questsDone}/${QUEST_CHAIN.length}`}
+        right={questsDone === QUEST_CHAIN.length ? <Pill text="ALL DONE!" icon="crown" color={C.gold} bg={C.amberSoft} /> : null} />
+      <Card style={{ marginBottom: 12 }}>
+        {activeQuest ? (
+          <>
+            <Row style={{ justifyContent: 'space-between' }}>
+              <Row style={{ flex: 1, marginRight: 8 }}>
+                <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: C.blueSoft, alignItems: 'center', justifyContent: 'center' }}>
+                  <Icon name={activeQuest.icon} size={20} color={C.blue} />
+                </View>
+                <View style={{ marginLeft: 10, flex: 1 }}>
+                  <Text style={[FONT.h3]} numberOfLines={1}>{activeQuest.title}</Text>
+                  <Text style={FONT.tiny} numberOfLines={2}>{activeQuest.flavor}</Text>
+                </View>
+              </Row>
+            </Row>
+            <Text style={[FONT.tiny, { marginTop: 8 }]}>
+              {Math.min(activeQuest.progress, activeQuest.target).toLocaleString('en-IN')} / {activeQuest.target.toLocaleString('en-IN')} · pays +{activeQuest.gold}G + {inrShort(activeQuest.cash)}
+            </Text>
+            <Progress pct={Math.min(100, (activeQuest.progress / activeQuest.target) * 100)} color={C.blue} style={{ marginTop: 8 }} height={4} />
+            <Btn title={activeQuest.progress >= activeQuest.target ? 'Claim reward!' : 'In progress…'} kind={activeQuest.progress >= activeQuest.target ? 'green' : 'soft'}
+              small disabled={activeQuest.progress < activeQuest.target} style={{ marginTop: 10, alignSelf: 'flex-start' }}
+              onPress={() => { const r = claimQuest(activeQuest.id); toast(r.ok ? (r.allDone ? 'Questline complete!' : 'Quest reward claimed!') : r.err, r.ok ? 'success' : 'error'); }} />
+          </>
+        ) : (
+          <Row><Icon name="crown" size={20} color={C.gold} /><Text style={[FONT.body, { marginLeft: 8, fontWeight: '700' }]}>Every career quest cleared — you've built a true transport empire!</Text></Row>
+        )}
+        <Pressable onPress={() => setQuestsExpanded(v => !v)} style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12 }}>
+          <Icon name={questsExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={C.sub} />
+          <Text style={[FONT.tiny, { marginLeft: 4, fontWeight: '700' }]}>{questsExpanded ? 'Hide' : 'Show'} full questline ({QUEST_CHAIN.length} steps)</Text>
+        </Pressable>
+        {questsExpanded && (
+          <View style={{ marginTop: 8 }}>
+            {questList.map((q, i) => (
+              <Row key={q.id} style={[{ paddingVertical: 6 }, i > 0 && st.divider]}>
+                <Icon name={q.claimed ? 'check-circle' : q.active ? q.icon : 'lock-outline'}
+                  size={16} color={q.claimed ? C.green : q.active ? C.blue : C.faint} />
+                <Text style={[FONT.tiny, { marginLeft: 8, flex: 1, fontWeight: q.active ? '700' : '400', color: q.claimed || q.active ? C.text : C.faint }]} numberOfLines={1}>
+                  {q.title} — {q.target.toLocaleString('en-IN')} {q.key === 'revenue' ? 'revenue' : q.key === 'km' ? 'km' : q.key === 'fleetSize' ? 'trucks' : q.key === 'hubCount' ? 'hubs' : q.key}
+                </Text>
+                <Text style={[FONT.tiny, { color: C.faint }]}>+{q.gold}G</Text>
+              </Row>
+            ))}
+          </View>
+        )}
       </Card>
 
       {/* ---- Daily challenges ---- */}

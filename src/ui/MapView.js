@@ -377,7 +377,7 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
               const lights = night && t.status === 'delivering' ? headlightFor(model) : null;
               // Marker footprint per silhouette; art canvas is 40 units wide.
               const sz = (bt === 'doubletrailer' ? 2.5 : bt === 'conventional' ? 2.3 : bt === 'semi' ? 2.1 : bt === 'rigid' ? 1.7 : bt === 'box' ? 1.45 : 1.2) * mk;
-              const { bodyH } = truckShapes(bt, body, accent, { lights });
+              const { bodyH } = truckShapes(bt, body, accent, { lights, pattern: t.pattern, booster: t.booster });
               const k = sz * 0.32; // art units -> map units
               // Damage/theft badge — small colored dot with a glyph, offset
               // above the truck, shown regardless of ferry state.
@@ -412,7 +412,7 @@ export default function IndiaMap({ onCityPick, pickingMode, onCancelPick, focus,
                     <Circle cx={q.x} cy={q.y} r={(7 + 4 * (0.5 + 0.5 * Math.sin(Date.now() / 300))) * sz} fill={C.amber} opacity={0.2} />
                   )}
                   <G transform={`translate(${q.x}, ${q.y}) rotate(${p.heading + 180}) scale(${k}) translate(-20, ${-bodyH / 2})`}>
-                    <TruckTopShapes type={bt} body={body} accent={accent} lights={lights} />
+                    <TruckTopShapes type={bt} body={body} accent={accent} lights={lights} pattern={t.pattern} booster={t.booster} />
                   </G>
                   {incidentBadge}
                 </G>
