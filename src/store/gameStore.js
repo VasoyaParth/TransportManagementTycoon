@@ -8,6 +8,7 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { TRUCK_MODELS, CARGO_TYPES, CAMPAIGNS, POWERUPS, CONTRACT_FLAVORS } from '../data/trucks';
 import { HQ_TIERS, GARAGE_TIERS } from '../data/buildings';
+import { RIVAL_COMPANIES, INDUSTRY_LEADER_REWARD } from '../data/rivals';
 import { COUNTRY_BY_CODE } from '../data/expansion';
 import { STAFF_NAMES, STAFF_LEVELS } from '../data/staffNames';
 import { CITIES } from '../data/cities';
@@ -551,6 +552,23 @@ export const companyLevelOf = xp => Math.floor(Math.sqrt(xp / 1000));
 export const companyXpForLevel = l => l * l * 1000;
 export const companyTitleOf = l => COMPANY_TITLES[Math.min(l, COMPANY_TITLES.length - 1)];
 
+// ---------- Industry Rankings (rival trucking companies) ----------
+// Each rival's score is a pure function of the game day — deterministic and
+// reproducible with no simulation tick and nothing extra to persist. A small
+// seeded jitter (same hashing style as the challenge picker below) keeps the
+// curve from looking like a flat ramp.
+function seededJitter01(seedStr, day) {
+  let h = 0;
+  for (let i = 0; i < seedStr.length; i++) h = (h * 31 + seedStr.charCodeAt(i)) >>> 0;
+  h = (h + day * 2654435761) >>> 0;
+  return ((h % 1000) / 1000 - 0.5) * 2; // -1..1
+}
+export function rivalScoreOf(rival, day) {
+  const linear = rival.baseScore + rival.growth * Math.max(0, day - 1);
+  const jitter = seededJitter01(rival.id, day) * linear * 0.06;
+  return Math.max(0, Math.round(linear + jitter));
+}
+
 // ---------- Weekly challenges ----------
 // 5 challenges per real ISO week, deterministic from the week id. Progress is
 // measured against a stats snapshot taken when the week starts, each claim
@@ -911,6 +929,7 @@ const initialState = {
     musicVolume: 0.4, sfxVolume: 1, hapticIntensity: 'medium',
     finaleSeen: false, finaleModalShown: false, // Grand Finale gift + celebration screen, each one-time-ever
     stockRemovalGiftClaimed: false, // one-time thank-you gift for the Stock Market's removal
+    industryLeaderClaimed: false, // one-time reward for first reaching #1 in Industry Rankings
     notif: { delivery: true, truck: true, fuel: true, daily: true },
     notifSnoozeUntil: 0, // real ms; while in the future, new notifications still land in the inbox but skip the pop-up toast
   },
@@ -2813,6 +2832,43 @@ export const useGame = create(
           : `Quest complete: ${q.title}! +${q.gold} Gold + ${inr(q.cash)}.`);
         play('coin', 1);
         return { ok: true, allDone };
+      },
+
+      // Industry Rankings — five AI rival companies plus the player, ranked by
+      // the same companyXP() metric used for the player's own level, so the
+      // leaderboard reads as a genuine comparison rather than two different
+      // scales bolted together.
+      industryRankings() {
+        const s = get();
+        const day = get().gameDay().day;
+        const rivals = RIVAL_COMPANIES.map(r => ({
+          id: r.id, name: r.name, logo: r.logo, color: r.color, isPlayer: false, score: rivalScoreOf(r, day),
+        }));
+        const player = {
+          id: 'player', name: s.company?.name || 'Your Company', logo: s.company?.logo || 'truck',
+          color: '#2563EB', isPlayer: true, score: companyXP(s),
+        };
+        return [...rivals, player]
+          .sort((a, b) => b.score - a.score)
+          .map((e, i) => ({ ...e, rank: i + 1 }));
+      },
+      // One-time reward the first time the player reaches #1 — checked on
+      // demand from the Industry Rankings screen, not auto-granted, so seeing
+      // the claim button land is part of the payoff.
+      claimIndustryLeaderBonus() {
+        const s = get();
+        if (s.settings?.industryLeaderClaimed) return { ok: false, err: 'Already claimed' };
+        const player = get().industryRankings().find(r => r.isPlayer);
+        if (!player || player.rank !== 1) return { ok: false, err: "You're not #1 yet — keep growing the company!" };
+        const { gold, cash } = INDUSTRY_LEADER_REWARD;
+        set({
+          gold: s.gold + gold, balance: s.balance + cash,
+          settings: { ...s.settings, industryLeaderClaimed: true },
+        });
+        get().logLedger('bonus', 'trophy-award', 'Industry Leader — reached #1!', cash);
+        get().notify('system', 'trophy-award', `You're #1 in the Industry Rankings! +${gold} Gold + ${inr(cash)}.`);
+        play('coin', 1);
+        return { ok: true };
       },
 
       // One-time thank-you gift for removing the Stock Market feature —

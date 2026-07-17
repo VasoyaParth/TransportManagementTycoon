@@ -14,6 +14,7 @@ import { cityById, suggestDestinations, routeCities } from '../../engine/routing
 import { CITIES } from '../../data/cities';
 import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
 import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, TRUCK_COLORS, TRUCK_ACCENTS, TRUCK_LOGOS, TRUCK_PATTERNS, TRUCK_BOOSTERS, TRUCK_RIMS, CAMPAIGNS } from '../../data/trucks';
+import { INDUSTRY_LEADER_REWARD } from '../../data/rivals';
 import { HQ_TIERS, GARAGE_TIERS } from '../../data/buildings';
 import { inr, inrShort } from '../../engine/economy';
 import { APP_VERSION, checkForUpdate, fmtMB, cmpVer } from '../../net/updates';
@@ -1318,6 +1319,80 @@ export function FleetLiveryModal({ visible, onClose }) {
             </Card>
           ))
         )}
+      </ScrollView>
+    </Sheet>
+  );
+}
+
+// ============ Industry Rankings (rival trucking companies) ============
+// A competitive leaderboard — five AI rival companies whose scores grow
+// deterministically with the game day (see rivalScoreOf in gameStore.js, no
+// simulation tick needed) ranked against the player's own companyXP(), same
+// metric that drives the player's level elsewhere. First time reaching #1
+// pays a one-time bonus.
+export function IndustryRankingsModal({ visible, onClose }) {
+  const toast = useToast();
+  const industryRankings = useGame(s => s.industryRankings);
+  const claimIndustryLeaderBonus = useGame(s => s.claimIndustryLeaderBonus);
+  const claimed = useGame(s => s.settings?.industryLeaderClaimed);
+  if (!visible) return <Sheet visible={false} onClose={onClose} title="Industry Rankings" height="80%"><View /></Sheet>;
+  const rankings = industryRankings();
+  const player = rankings.find(r => r.isPlayer);
+  const topScore = rankings[0]?.score || 1;
+  const claim = () => {
+    const r = claimIndustryLeaderBonus();
+    toast(r.ok ? `Industry Leader bonus claimed — +${INDUSTRY_LEADER_REWARD.gold} Gold + ${inr(INDUSTRY_LEADER_REWARD.cash)}!` : r.err, r.ok ? 'success' : 'error');
+  };
+  return (
+    <Sheet visible={visible} onClose={onClose} title="Industry Rankings" height="80%">
+      <Card style={{ marginBottom: 12, backgroundColor: C.bgSoft }}>
+        <Row>
+          <Icon name="podium-gold" size={18} color={C.gold} />
+          <Text style={[FONT.body, { marginLeft: 8, flex: 1, fontWeight: '700' }]}>
+            Five rival trucking companies compete for the same lanes you do — ranked by the same overall score that sets your company level.
+          </Text>
+        </Row>
+      </Card>
+      {player?.rank === 1 && (
+        <Card style={{ marginBottom: 12, borderColor: C.gold, backgroundColor: C.amberSoft }}>
+          <Row>
+            <Icon name="trophy-award" size={20} color={C.gold} />
+            <Text style={[FONT.body, { marginLeft: 8, flex: 1, fontWeight: '700' }]}>
+              {claimed ? "You're #1 — Industry Leader bonus already claimed." : "You're #1 in the industry!"}
+            </Text>
+          </Row>
+          {!claimed && (
+            <Btn title={`Claim Industry Leader bonus · +${INDUSTRY_LEADER_REWARD.gold} Gold + ${inrShort(INDUSTRY_LEADER_REWARD.cash)}`}
+              kind="green" icon="trophy-award" style={{ marginTop: 10 }} onPress={claim} />
+          )}
+        </Card>
+      )}
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+        {rankings.map(r => {
+          const medal = r.rank === 1 ? '#FFD700' : r.rank === 2 ? '#C0C0C0' : r.rank === 3 ? '#CD7F32' : null;
+          return (
+            <Card key={r.id} style={{ marginBottom: 8, borderColor: r.isPlayer ? C.blue : C.border, backgroundColor: r.isPlayer ? C.blueSoft : '#fff' }}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Row style={{ flex: 1 }}>
+                  <View style={{
+                    width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center',
+                    backgroundColor: medal || C.bgSoft, marginRight: 10,
+                  }}>
+                    <Text style={{ fontWeight: '900', fontSize: 13, color: medal ? '#3A2E00' : C.sub }}>{r.rank}</Text>
+                  </View>
+                  <Icon name={r.logo} size={18} color={r.color} style={{ marginRight: 8 }} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[FONT.body, { fontWeight: r.isPlayer ? '800' : '600' }]} numberOfLines={1}>
+                      {r.name}{r.isPlayer ? ' (You)' : ''}
+                    </Text>
+                    <Text style={FONT.tiny}>{r.score.toLocaleString('en-IN')} pts</Text>
+                  </View>
+                </Row>
+              </Row>
+              <Progress pct={Math.min(100, (r.score / topScore) * 100)} color={r.isPlayer ? C.blue : r.color} style={{ marginTop: 8 }} height={4} />
+            </Card>
+          );
+        })}
       </ScrollView>
     </Sheet>
   );
