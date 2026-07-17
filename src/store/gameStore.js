@@ -36,6 +36,9 @@ export const GOLD_TO_CASH = 50000;
 // Flat Gold cost to apply a new truck livery (colour/accent/emblem), charged
 // once per Apply — see paintTruck().
 export const LIVERY_COST = 20;
+// Fleet-wide preset apply is discounted per-truck vs. a one-off repaint —
+// see applyPresetToFleet().
+export const FLEET_LIVERY_DISCOUNT = 0.6;
 
 // ---- Free daily gold mini-games (replace watch-to-earn ads) ----
 export const DAILY_PLAYS = 10; // per game, per in-game day
@@ -912,6 +915,7 @@ const initialState = {
     notifSnoozeUntil: 0, // real ms; while in the future, new notifications still land in the inbox but skip the pop-up toast
   },
   easterEggs: { found: [] }, // ids of discovered hidden gems (persisted, one-time rewards)
+  liveryPresets: [], // [{id, name, color, accentColor, logoIcon, pattern, booster, rimColor}] — saved from Customize Truck, reusable and fleet-wide-applicable
   achievements: { unlocked: {} }, // {"road_warrior:2": ts} — track:tierIndex reached (persisted)
   lastBackupAt: 0, // real ms of the last rolling auto-backup
   login: { lastDay: '', streak: 0, bestStreak: 0 }, // daily login gold streak (real calendar days)
@@ -1667,7 +1671,7 @@ export const useGame = create(
         const s = get();
         const t = s.trucks.find(x => x.id === truckId);
         if (!t) return { ok: false, err: 'Truck not found' };
-        const changed = ['color', 'accentColor', 'logoIcon', 'pattern', 'booster'].some(k => patch[k] !== undefined && patch[k] !== (t[k] ?? null));
+        const changed = ['color', 'accentColor', 'logoIcon', 'pattern', 'booster', 'rimColor'].some(k => patch[k] !== undefined && patch[k] !== (t[k] ?? null));
         if (!changed) return { ok: false, err: 'Nothing to apply' };
         if (s.gold < LIVERY_COST) return { ok: false, err: `Need ${LIVERY_COST} Gold to repaint` };
         set({
@@ -1679,6 +1683,53 @@ export const useGame = create(
         get().notify('truck', 'palette', `${t.customName || modelById(t.modelId).name} got a fresh new look!`);
         play('coin', 0.6);
         return { ok: true };
+      },
+
+      // ---------- Livery presets ----------
+      // Save any combo (colour/accent/emblem/pattern/booster/rim) from Customize
+      // Truck as a reusable named preset. Free to save — Gold is only ever spent
+      // when a preset is actually APPLIED (single truck via paintTruck, or the
+      // whole fleet at once via applyPresetToFleet below).
+      saveLiveryPreset(name, combo) {
+        const s = get();
+        const presets = s.liveryPresets || [];
+        if (presets.length >= 12) return { ok: false, err: 'Preset limit reached (12) — delete one first' };
+        const preset = {
+          id: `preset_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          name: (name || 'My Livery').trim().slice(0, 24) || 'My Livery',
+          color: combo.color || null, accentColor: combo.accentColor || null, logoIcon: combo.logoIcon || null,
+          pattern: combo.pattern || 'none', booster: combo.booster || 'none', rimColor: combo.rimColor || null,
+        };
+        set({ liveryPresets: [...presets, preset] });
+        return { ok: true, preset };
+      },
+      deleteLiveryPreset(id) {
+        set({ liveryPresets: (get().liveryPresets || []).filter(p => p.id !== id) });
+      },
+      // Fleet-wide repaint costs less per truck than a one-off (bulk discount) —
+      // still real money, still instant, applies the exact same patch shape
+      // paintTruck uses so every render site picks it up with no extra work.
+      applyPresetToFleet(presetId) {
+        const s = get();
+        const preset = (s.liveryPresets || []).find(p => p.id === presetId);
+        if (!preset) return { ok: false, err: 'Preset not found' };
+        if (!s.trucks.length) return { ok: false, err: 'No trucks in your fleet yet' };
+        const perTruck = Math.max(1, Math.ceil(LIVERY_COST * FLEET_LIVERY_DISCOUNT));
+        const total = perTruck * s.trucks.length;
+        if (s.gold < total) return { ok: false, err: `Need ${total} Gold to repaint the whole fleet (${perTruck}/truck)` };
+        const patch = {
+          color: preset.color, accentColor: preset.accentColor, logoIcon: preset.logoIcon,
+          pattern: preset.pattern, booster: preset.booster, rimColor: preset.rimColor,
+        };
+        set({
+          gold: s.gold - total,
+          trucks: s.trucks.map(t => ({ ...t, ...patch })),
+          stats: { ...s.stats, repaints: (s.stats.repaints || 0) + s.trucks.length },
+        });
+        get().logLedger('truck', 'palette', `Fleet-wide repaint — "${preset.name}" (${s.trucks.length} trucks)`, 0);
+        get().notify('truck', 'palette', `Whole fleet repainted in "${preset.name}"!`);
+        play('coin', 0.9);
+        return { ok: true, count: s.trucks.length, cost: total };
       },
 
       // Buy a regional garage in a city — price & upkeep depend on the city tier.
@@ -1746,13 +1797,17 @@ export const useGame = create(
       },
       // Repaint a building's colour — same flat-Gold, apply-once model as
       // paintTruck() (see there for the free-preview rationale).
-      paintHub(cityId, color) {
+      paintHub(cityId, color, flagColor) {
         const s = get();
         const hub = s.hubs.find(h => h.cityId === cityId);
         if (!hub) return { ok: false, err: 'No building found here' };
-        if ((hub.color || null) === (color || null)) return { ok: false, err: 'Nothing to apply' };
+        const colorChanged = (hub.color || null) !== (color || null);
+        const flagChanged = flagColor !== undefined && (hub.flagColor || null) !== (flagColor || null);
+        if (!colorChanged && !flagChanged) return { ok: false, err: 'Nothing to apply' };
         if (s.gold < LIVERY_COST) return { ok: false, err: `Need ${LIVERY_COST} Gold to repaint` };
-        set({ gold: s.gold - LIVERY_COST, hubs: s.hubs.map(h => h.cityId === cityId ? { ...h, color } : h) });
+        const patch = { color };
+        if (flagChanged) patch.flagColor = flagColor;
+        set({ gold: s.gold - LIVERY_COST, hubs: s.hubs.map(h => h.cityId === cityId ? { ...h, ...patch } : h) });
         const label = hub.hq ? 'Headquarters' : hub.name;
         get().logLedger(hub.hq ? 'hq' : 'garage', 'palette', `${label} repainted`, 0);
         get().notify('system', 'palette', `${label} got a fresh new look!`);

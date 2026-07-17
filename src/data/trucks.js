@@ -491,6 +491,17 @@ export const TRUCK_BOOSTERS = [
   { id: 'bullbar', name: 'Bull Bar', icon: 'shield-outline' },
 ];
 
+// Wheel/rim (hub cap) colour — a fourth, small-but-visible livery axis. The
+// tyre itself always stays black; only the alloy/hub colour is customizable.
+export const TRUCK_RIMS = [
+  { id: 'steelgrey', name: 'Steel Grey', hex: '#3A4048' },
+  { id: 'chromeRim', name: 'Chrome', hex: '#C9CFD8' },
+  { id: 'blackout', name: 'Blackout', hex: '#0B0F14' },
+  { id: 'goldRim', name: 'Gold', hex: '#B7791F' },
+  { id: 'redRim', name: 'Red', hex: '#C0392B' },
+  { id: 'blueRim', name: 'Electric Blue', hex: '#2980B9' },
+];
+
 // Trim/accent colour — the roof deflector, mirrors and windshield-adjacent
 // panels on the truck art. Separate axis from the body colour so two players
 // with the same paint job can still tell their rigs apart at a glance.

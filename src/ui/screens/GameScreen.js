@@ -12,7 +12,7 @@ import { FleetTab, RoutesTab, StaffTab, EconomyTab, MarketingTab, RewardsTab } f
 import {
   NewDeliveryModal, TruckDetailModal, TruckCustomizeModal, BuyTruckModal, ContractsModal,
   PowerupsModal, NotificationsModal, SettingsModal, HubsModal, DriverDetailModal, CountriesModal, MiniGamesModal, HubInfoModal,
-  BuildingCustomizeModal, CompanyInsightsModal, NewsModal, PhotoModeModal, FinaleModal,
+  BuildingCustomizeModal, CompanyInsightsModal, NewsModal, PhotoModeModal, FinaleModal, FleetLiveryModal,
 } from './modals';
 import { haptic } from '../../engine/haptics';
 import Tutorial from './Tutorial';
@@ -309,7 +309,8 @@ export default function GameScreen() {
             );
           })}
         </ScrollView>
-        {tab === 'fleet' && <FleetTab onTruckPress={t => setModal({ kind: 'truck', truckId: t.id })} onBuyTruck={() => setModal({ kind: 'buy' })} />}
+        {tab === 'fleet' && <FleetTab onTruckPress={t => setModal({ kind: 'truck', truckId: t.id })} onBuyTruck={() => setModal({ kind: 'buy' })}
+          onOpenFleetLivery={() => setModal({ kind: 'fleetLivery' })} />}
         {tab === 'routes' && <RoutesTab
           onTrack={d => { setTab(null); const t = trucks.find(x => x.id === d.truckId); if (t) showOnMap(t); }}
           onNewDelivery={() => openNewDelivery()} />}
@@ -342,6 +343,7 @@ export default function GameScreen() {
         visible={modal?.kind === 'driver'} onClose={() => setModal(null)} staffId={modal?.staffId}
         onShowOnMap={(t) => { setModal(null); setTab(null); showOnMap(t); }}
       />}
+      {mounted('fleetLivery') && <FleetLiveryModal visible={modal?.kind === 'fleetLivery'} onClose={() => setModal(null)} />}
       {mounted('countries') && <CountriesModal visible={modal?.kind === 'countries'} onClose={() => setModal(null)} />}
       {mounted('games') && <MiniGamesModal visible={modal?.kind === 'games'} onClose={() => setModal(null)} />}
       {mounted('buy') && <BuyTruckModal visible={modal?.kind === 'buy'} onClose={() => setModal(null)}
