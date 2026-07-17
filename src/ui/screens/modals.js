@@ -7,13 +7,13 @@ import RNShare from 'react-native-share';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
 import { CITIES } from '../../data/cities';
 import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
-import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, TRUCK_COLORS, TRUCK_LOGOS, CAMPAIGNS } from '../../data/trucks';
+import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, TRUCK_COLORS, TRUCK_ACCENTS, TRUCK_LOGOS, CAMPAIGNS } from '../../data/trucks';
 import { inr, inrShort } from '../../engine/economy';
 import { APP_VERSION, checkForUpdate, fmtMB, cmpVer } from '../../net/updates';
 import { exportBackup, parseBackup, readAutoBackup, pickBackupFile } from '../../engine/backup';
@@ -22,17 +22,32 @@ import { TruckTopShapes, truckShapes, bodyTypeFor, defaultBodyColor } from '../t
 import { BrandEmblem } from '../BrandLogo';
 
 // Same top-down truck artwork as the map, framed for list/detail cards.
-function TruckArtBadge({ model, color, size = 56, bg }) {
+// `accent` is the trim/deflector colour and `logoIcon` an optional emblem
+// badge overlaid in the corner — both purely cosmetic, set via the Livery
+// modal, and rendered here so every place this badge appears (fleet list,
+// truck detail, livery preview) reflects a repaint instantly.
+function TruckArtBadge({ model, color, accent, logoIcon, size = 56, bg }) {
   const bt = bodyTypeFor(model);
   const body = color || defaultBodyColor(model);
-  const { w, h } = truckShapes(bt, body, '#9DB2D6');
+  const trim = accent || '#9DB2D6';
+  const { w, h } = truckShapes(bt, body, trim);
   const scale = (size - 8) / h;
+  const badge = Math.max(16, Math.round(size * 0.28));
   return (
     <View style={{ width: size, height: size, borderRadius: 14, backgroundColor: bg || C.bgSoft,
       alignItems: 'center', justifyContent: 'center' }}>
       <Svg width={w * scale} height={size - 8} viewBox={`0 0 ${w} ${h}`}>
-        <TruckTopShapes type={bt} body={body} accent="#9DB2D6" />
+        <TruckTopShapes type={bt} body={body} accent={trim} />
       </Svg>
+      {logoIcon ? (
+        <View style={{
+          position: 'absolute', top: 2, right: 2, width: badge, height: badge, borderRadius: badge / 2,
+          backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center',
+          borderWidth: 1.5, borderColor: trim,
+        }}>
+          <Icon name={logoIcon} size={badge * 0.6} color={trim} />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -880,12 +895,11 @@ function TruckHistorySheet({ visible, onClose, log }) {
   );
 }
 
-export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onShowOnMap }) {
+export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onShowOnMap, onCustomize }) {
   const toast = useToast();
   const trucks = useGame(s => s.trucks);
   const repairTruck = useGame(s => s.repairTruck);
   const serviceTruck = useGame(s => s.serviceTruck);
-  const customizeTruck = useGame(s => s.customizeTruck);
   const sellTruck = useGame(s => s.sellTruck);
   const truckResale = useGame(s => s.truckResale);
   const [confirmSell, setConfirmSell] = useState(false);
@@ -911,7 +925,9 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
     <Sheet visible={visible} onClose={onClose} title={truck.customName || m.name} height="86%">
       <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" removeClippedSubviews={false}>
         <Row style={{ marginBottom: 12 }}>
-          <TruckArtBadge model={m} color={truck.color} size={60} bg={meta.bg} />
+          <Pressable onPress={() => onCustomize && onCustomize(truck.id)}>
+            <TruckArtBadge model={m} color={truck.color} accent={truck.accentColor} logoIcon={truck.logoIcon} size={60} bg={meta.bg} />
+          </Pressable>
           <View style={{ marginLeft: 12, flex: 1 }}>
             <Text style={FONT.h2}>{truck.customName || m.name}</Text>
             <Text style={FONT.sub}>{m.brand}</Text>
@@ -973,40 +989,16 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
         )}
         {historyOpen && <TruckHistorySheet visible={historyOpen} onClose={() => setHistoryOpen(false)} log={truck.log || []} />}
 
-        <Card style={{ marginTop: 10 }}>
-          <Text style={[FONT.h3, { marginBottom: 8 }]}>Customize</Text>
-          <Text style={FONT.tiny}>NAME</Text>
-          <TextInput
-            defaultValue={truck.customName || m.name} maxLength={28}
-            placeholder={m.name} placeholderTextColor={C.faint}
-            onEndEditing={e => customizeTruck(truck.id, { customName: e.nativeEvent.text.trim() || null })}
-            style={cs.input}
-          />
-          <Text style={[FONT.tiny, { marginTop: 10 }]}>LIVERY COLOUR</Text>
-          <Row style={{ flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
-            {TRUCK_COLORS.map(c => {
-              const sel = (truck.color || TRUCK_COLORS[0].hex) === c.hex;
-              return (
-                <Pressable key={c.id} onPress={() => customizeTruck(truck.id, { color: c.hex })}
-                  style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: c.hex,
-                    borderWidth: sel ? 3 : 1, borderColor: sel ? C.text : C.border, alignItems: 'center', justifyContent: 'center' }}>
-                  {sel ? <Icon name="check" size={16} color="#fff" /> : null}
-                </Pressable>
-              );
-            })}
-          </Row>
-          <Text style={[FONT.tiny, { marginTop: 10 }]}>EMBLEM</Text>
-          <Row style={{ flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
-            {TRUCK_LOGOS.map(l => {
-              const sel = truck.logoIcon === l;
-              return (
-                <Pressable key={l} onPress={() => customizeTruck(truck.id, { logoIcon: sel ? null : l })}
-                  style={{ width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
-                    borderWidth: 1, borderColor: sel ? C.blue : C.border, backgroundColor: sel ? C.blueSoft : '#fff' }}>
-                  <Icon name={l} size={20} color={sel ? C.blue : C.sub} />
-                </Pressable>
-              );
-            })}
+        <Card style={{ marginTop: 10 }} onPress={() => onCustomize && onCustomize(truck.id)}>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <Row style={{ flex: 1 }}>
+              <TruckArtBadge model={m} color={truck.color} accent={truck.accentColor} logoIcon={truck.logoIcon} size={44} bg={C.bgSoft} />
+              <View style={{ marginLeft: 10, flex: 1 }}>
+                <Text style={[FONT.h3]}>Customize Truck</Text>
+                <Text style={FONT.tiny}>Name, paint job & emblem — {LIVERY_COST} Gold per repaint</Text>
+              </View>
+            </Row>
+            <Icon name="chevron-right" size={20} color={C.faint} />
           </Row>
         </Card>
 
@@ -1026,6 +1018,121 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
             }}
           />
         )}
+      </ScrollView>
+    </Sheet>
+  );
+}
+
+// ============ Truck Livery (customize) ============
+// Opened from the "Customize Truck" row in TruckDetailModal. Colour, accent
+// and emblem are staged in local draft state — free to browse, live preview
+// updates on every tap — and only touch the store (and cost Gold) once
+// "Apply" is pressed, so experimenting with combinations never drains Gold
+// by accident. The name field stays free & instant, same as before.
+export function TruckCustomizeModal({ visible, onClose, truckId, onBack }) {
+  const toast = useToast();
+  const trucks = useGame(s => s.trucks);
+  const gold = useGame(s => s.gold);
+  const customizeTruck = useGame(s => s.customizeTruck);
+  const paintTruck = useGame(s => s.paintTruck);
+  const truck = trucks.find(t => t.id === truckId);
+  const [draft, setDraft] = useState(null);
+
+  useEffect(() => {
+    if (visible && truck) setDraft({ color: truck.color || null, accentColor: truck.accentColor || null, logoIcon: truck.logoIcon || null });
+  }, [visible, truckId]);
+
+  if (!visible || !truck || !draft) return <Sheet visible={visible && !!truck} onClose={onClose} title="Customize Truck" height="50%"><View /></Sheet>;
+  const m = modelById(truck.modelId);
+  const accentNow = draft.accentColor || '#9DB2D6';
+  const dirty = draft.color !== (truck.color || null) || draft.accentColor !== (truck.accentColor || null) || draft.logoIcon !== (truck.logoIcon || null);
+
+  const randomize = () => {
+    haptic('light'); play('tap', 0.4);
+    const c = TRUCK_COLORS[Math.floor(Math.random() * TRUCK_COLORS.length)];
+    const a = TRUCK_ACCENTS[Math.floor(Math.random() * TRUCK_ACCENTS.length)];
+    const l = Math.random() < 0.8 ? TRUCK_LOGOS[Math.floor(Math.random() * TRUCK_LOGOS.length)] : null;
+    setDraft({ color: c.hex, accentColor: a.hex, logoIcon: l });
+  };
+
+  const apply = () => {
+    const r = paintTruck(truck.id, draft);
+    toast(r.ok ? 'New livery applied!' : r.err, r.ok ? 'success' : 'error');
+  };
+
+  return (
+    <Sheet visible={visible} onClose={onClose} title="Customize Truck" height="92%">
+      <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+        {onBack && (
+          <Pressable onPress={onBack} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }} hitSlop={6}>
+            <Icon name="chevron-left" size={18} color={C.sub} />
+            <Text style={[FONT.sub, { marginLeft: 2 }]}>Back to {truck.customName || m.name}</Text>
+          </Pressable>
+        )}
+
+        {/* Live preview — every tap below updates this instantly, for free */}
+        <Card style={{ alignItems: 'center', paddingVertical: 20, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
+          <TruckArtBadge model={m} color={draft.color} accent={accentNow} logoIcon={draft.logoIcon} size={140} bg="transparent" />
+          <Text style={[FONT.tiny, { color: '#94A3B8', marginTop: 10 }]}>Live preview — free to browse, {LIVERY_COST} Gold to apply</Text>
+        </Card>
+
+        <Text style={[FONT.tiny, { marginTop: 14 }]}>NAME</Text>
+        <TextInput
+          defaultValue={truck.customName || m.name} maxLength={28}
+          placeholder={m.name} placeholderTextColor={C.faint}
+          onEndEditing={e => customizeTruck(truck.id, { customName: e.nativeEvent.text.trim() || null })}
+          style={cs.input}
+        />
+
+        <Text style={[FONT.tiny, { marginTop: 14 }]}>BODY COLOUR</Text>
+        <Row style={{ flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+          {TRUCK_COLORS.map(c => {
+            const sel = (draft.color || defaultBodyColor(m)) === c.hex;
+            return (
+              <Pressable key={c.id} onPress={() => { haptic('light'); play('tap', 0.3); setDraft(d => ({ ...d, color: c.hex })); }}
+                style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: c.hex,
+                  borderWidth: sel ? 3 : 1, borderColor: sel ? C.text : C.border, alignItems: 'center', justifyContent: 'center' }}>
+                {sel ? <Icon name="check" size={16} color="#fff" /> : null}
+              </Pressable>
+            );
+          })}
+        </Row>
+
+        <Text style={[FONT.tiny, { marginTop: 14 }]}>TRIM / ACCENT</Text>
+        <Row style={{ flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+          {TRUCK_ACCENTS.map(a => {
+            const sel = accentNow === a.hex;
+            return (
+              <Pressable key={a.id} onPress={() => { haptic('light'); play('tap', 0.3); setDraft(d => ({ ...d, accentColor: a.hex })); }}
+                style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: a.hex,
+                  borderWidth: sel ? 3 : 1, borderColor: sel ? C.text : C.border, alignItems: 'center', justifyContent: 'center' }}>
+                {sel ? <Icon name="check" size={16} color={a.hex === '#1C1F26' ? '#fff' : '#111'} /> : null}
+              </Pressable>
+            );
+          })}
+        </Row>
+
+        <Text style={[FONT.tiny, { marginTop: 14 }]}>EMBLEM</Text>
+        <Row style={{ flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+          {TRUCK_LOGOS.map(l => {
+            const sel = draft.logoIcon === l;
+            return (
+              <Pressable key={l} onPress={() => { haptic('light'); play('tap', 0.3); setDraft(d => ({ ...d, logoIcon: sel ? null : l })); }}
+                style={{ width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+                  borderWidth: 1, borderColor: sel ? C.blue : C.border, backgroundColor: sel ? C.blueSoft : '#fff' }}>
+                <Icon name={l} size={20} color={sel ? C.blue : C.sub} />
+              </Pressable>
+            );
+          })}
+        </Row>
+
+        <Btn title="Randomize" kind="soft" icon="dice-multiple" style={{ marginTop: 16 }} onPress={randomize} />
+        <Btn
+          title={dirty ? `Apply Livery · ${LIVERY_COST} Gold` : 'No changes yet'}
+          kind={dirty ? 'green' : 'soft'} icon="palette" disabled={!dirty}
+          style={{ marginTop: 10, marginBottom: 30 }}
+          onPress={apply}
+        />
       </ScrollView>
     </Sheet>
   );

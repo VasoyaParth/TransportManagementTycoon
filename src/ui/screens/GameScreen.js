@@ -10,7 +10,7 @@ import { useGame, modelById, GAME_HOUR_MS } from '../../store/gameStore';
 import { cityById } from '../../engine/routing';
 import { FleetTab, RoutesTab, StaffTab, EconomyTab, MarketingTab, RewardsTab } from './tabs';
 import {
-  NewDeliveryModal, TruckDetailModal, BuyTruckModal, ContractsModal,
+  NewDeliveryModal, TruckDetailModal, TruckCustomizeModal, BuyTruckModal, ContractsModal,
   PowerupsModal, NotificationsModal, SettingsModal, HubsModal, DriverDetailModal, CountriesModal, MiniGamesModal, HubInfoModal,
   CompanyInsightsModal, NewsModal, PhotoModeModal, FinaleModal,
 } from './modals';
@@ -310,6 +310,11 @@ export default function GameScreen() {
         visible={modal?.kind === 'truck'} onClose={() => setModal(null)} truckId={modal?.truckId}
         onNewDelivery={(tid) => openNewDelivery(tid)}
         onShowOnMap={showOnMap}
+        onCustomize={(tid) => setModal({ kind: 'livery', truckId: tid })}
+      />}
+      {mounted('livery') && <TruckCustomizeModal
+        visible={modal?.kind === 'livery'} onClose={() => setModal(null)} truckId={modal?.truckId}
+        onBack={() => setModal({ kind: 'truck', truckId: modal?.truckId })}
       />}
       {mounted('driver') && <DriverDetailModal
         visible={modal?.kind === 'driver'} onClose={() => setModal(null)} staffId={modal?.staffId}

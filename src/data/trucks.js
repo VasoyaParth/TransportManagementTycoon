@@ -421,6 +421,20 @@ export const TRUCK_COLORS = [
 export const TRUCK_LOGOS = ['shield-star', 'crown', 'lightning-bolt', 'pine-tree', 'anchor',
   'diamond-stone', 'fire', 'leaf', 'star-circle', 'wave', 'mountain', 'flash'];
 
+// Trim/accent colour — the roof deflector, mirrors and windshield-adjacent
+// panels on the truck art. Separate axis from the body colour so two players
+// with the same paint job can still tell their rigs apart at a glance.
+export const TRUCK_ACCENTS = [
+  { id: 'chrome', name: 'Chrome Silver', hex: '#9DB2D6' },
+  { id: 'ivory', name: 'Ivory', hex: '#F4EDE4' },
+  { id: 'jet', name: 'Jet Black', hex: '#1C1F26' },
+  { id: 'flame', name: 'Flame Red', hex: '#E63946' },
+  { id: 'lime', name: 'Neon Lime', hex: '#9ACD32' },
+  { id: 'cyan', name: 'Cyan', hex: '#22D3EE' },
+  { id: 'amber', name: 'Amber', hex: '#F5A623' },
+  { id: 'goldTrim', name: 'Gold Trim', hex: '#D4AF37' },
+];
+
 // Cargo catalog. `rate` = ₹ per km per ton — this is the real driver of the
 // economy now (each cargo pays differently). `mult` kept for legacy references.
 // Cheap/bulk goods (cement, grain) pay low per-ton but move in huge volume;

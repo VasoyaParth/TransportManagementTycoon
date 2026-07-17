@@ -28,17 +28,29 @@ import { TruckTopShapes, truckShapes, bodyTypeFor, defaultBodyColor, sizeScaleFo
 // Real truck-model thumbnail for a fleet card — same renderer used on the map
 // and in the Showroom, so the fleet list shows the actual model, not a
 // generic glyph. Scaled per model so bigger rigs read bigger even here.
+// `accent`/`logoIcon` mirror a truck's Livery customization so a repaint
+// shows up here instantly, same as everywhere else that renders this art.
 const FLEET_ICON = 42;
-function FleetTruckArt({ model, color }) {
+function FleetTruckArt({ model, color, accent, logoIcon }) {
   const bt = bodyTypeFor(model);
   const body = color || defaultBodyColor(model);
-  const { w, h } = truckShapes(bt, body, '#9DB2D6');
+  const trim = accent || '#9DB2D6';
+  const { w, h } = truckShapes(bt, body, trim);
   const scale = ((FLEET_ICON - 6) / h) * sizeScaleFor(model);
   return (
     <View style={{ width: FLEET_ICON, height: FLEET_ICON, alignItems: 'center', justifyContent: 'center' }}>
       <Svg width={w * scale} height={h * scale} viewBox={`0 0 ${w} ${h}`}>
-        <TruckTopShapes type={bt} body={body} accent="#9DB2D6" />
+        <TruckTopShapes type={bt} body={body} accent={trim} />
       </Svg>
+      {logoIcon ? (
+        <View style={{
+          position: 'absolute', top: -2, right: -2, width: 14, height: 14, borderRadius: 7,
+          backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center',
+          borderWidth: 1.2, borderColor: trim,
+        }}>
+          <Icon name={logoIcon} size={9} color={trim} />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -181,7 +193,7 @@ export function FleetTab({ onTruckPress, onBuyTruck }) {
           <Row style={{ flex: 1 }}>
             <View style={{ position: 'relative' }}>
               <View style={[st.iconCircle, { backgroundColor: meta.bg }]}>
-                <FleetTruckArt model={model} color={t.color} />
+                <FleetTruckArt model={model} color={t.color} accent={t.accentColor} logoIcon={t.logoIcon} />
               </View>
               {pledged.has(t.id) && (
                 <View style={st.badgeDot}>

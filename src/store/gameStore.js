@@ -32,6 +32,10 @@ const nextRefreshDelay = () =>
 // Gold → cash exchange rate (₹ per Gold). Gold is premium, so it converts rich.
 export const GOLD_TO_CASH = 50000;
 
+// Flat Gold cost to apply a new truck livery (colour/accent/emblem), charged
+// once per Apply — see paintTruck().
+export const LIVERY_COST = 20;
+
 // ---- Free daily gold mini-games (replace watch-to-earn ads) ----
 export const DAILY_PLAYS = 10; // per game, per in-game day
 // Roulette wheel — fixed segment order (UI spins to the landed index). Weighted
@@ -748,6 +752,8 @@ export const ACHIEVEMENTS = [
     desc: 'Cash donated through the Charity Drive, lifetime.', levels: [100000, 1000000, 10000000, 50000000, 200000000] },
   { id: 'collateral_king', title: 'Collateral King', icon: 'bank', unit: 'loans',
     desc: 'Collateral-backed loans taken out, lifetime.', levels: [1, 3, 6, 12, 25] },
+  { id: 'trendsetter', title: 'Trendsetter', icon: 'palette', unit: 'repaints',
+    desc: 'Trucks repainted with a custom livery, lifetime.', levels: [1, 5, 15, 40, 100] },
 ];
 // Current metric value for a track, computed from live state.
 export function achievementValue(s, id) {
@@ -778,6 +784,7 @@ export function achievementValue(s, id) {
     case 'big_spender': return s.stats.goldSpent || 0;
     case 'philanthropist': return s.stats.donated || 0;
     case 'collateral_king': return s.stats.loansTaken || 0;
+    case 'trendsetter': return s.stats.repaints || 0;
     default: return 0;
   }
 }
@@ -854,6 +861,7 @@ const initialState = {
   stats: {
     revenue: 0, fuelSpend: 0, deliveries: 0, km: 0, incidents: 0, thefts: 0, ferries: 0, borders: 0,
     contracts: 0, campaigns: 0, promotions: 0, fastTravels: 0, gamesPlayed: 0, mechanicCalls: 0, goldSpent: 0,
+    repaints: 0,
   },
   ledger: [], // day-wise money book: {id, ts, day, kind, icon, label, amount} — newest first, capped
   loans: [], // active bank loans: {id, productId, name, principal, remaining, emi, months, paidMonths, lastEmiDay}
@@ -1601,9 +1609,34 @@ export const useGame = create(
         return { ok: true, value };
       },
 
-      // Customize a truck's livery: colour (hex), custom name, emblem icon.
+      // Customize a truck's custom name only — free, applied instantly (the
+      // paint job below is the paid part).
       customizeTruck(truckId, patch) {
         set({ trucks: get().trucks.map(t => t.id === truckId ? { ...t, ...patch } : t) });
+      },
+
+      // Repaint a truck's livery: body colour, trim/accent colour, emblem.
+      // Costs a flat LIVERY_COST Gold per apply (not per swatch tap) — the
+      // Livery modal lets the player freely preview combinations for free and
+      // only spends Gold once they commit. Applies instantly everywhere the
+      // truck is rendered (fleet list, truck detail, map body colour) since
+      // it's just a store patch, same as every other live-reflected field.
+      paintTruck(truckId, patch) {
+        const s = get();
+        const t = s.trucks.find(x => x.id === truckId);
+        if (!t) return { ok: false, err: 'Truck not found' };
+        const changed = ['color', 'accentColor', 'logoIcon'].some(k => patch[k] !== undefined && patch[k] !== (t[k] ?? null));
+        if (!changed) return { ok: false, err: 'Nothing to apply' };
+        if (s.gold < LIVERY_COST) return { ok: false, err: `Need ${LIVERY_COST} Gold to repaint` };
+        set({
+          gold: s.gold - LIVERY_COST,
+          trucks: s.trucks.map(x => x.id === truckId ? { ...x, ...patch } : x),
+          stats: { ...s.stats, repaints: (s.stats.repaints || 0) + 1 },
+        });
+        get().logLedger('truck', 'palette', `Repainted ${t.customName || modelById(t.modelId).name}`, 0);
+        get().notify('truck', 'palette', `${t.customName || modelById(t.modelId).name} got a fresh new look!`);
+        play('coin', 0.6);
+        return { ok: true };
       },
 
       // Buy a regional garage in a city — price & upkeep depend on the city tier.
