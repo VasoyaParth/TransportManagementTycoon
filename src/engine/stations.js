@@ -1,8 +1,8 @@
-// Fuel & charging stations — generated deterministically from the highway
-// graph (so they always sit ON highways, near real corridors) plus city
-// clusters. ~900+ stations (NFR-8) without shipping a giant data file.
+// Fuel & charging depots — generated deterministically around every airport
+// city (so refuelling is always available near where aircraft actually fly),
+// scaled by city tier. Airline edition: no highway network to string these
+// along, so depots cluster at airports instead.
 
-import { ROAD_NODES, ROAD_EDGES } from '../data/highways';
 import { CITIES } from '../data/cities';
 import { haversine } from './geo';
 
@@ -16,49 +16,15 @@ function mulberry32(seed) {
   };
 }
 
-const BRANDS_DIESEL = ['IndianOil', 'Bharat Petroleum', 'HP Fuel Stop', 'Nayara Energy', 'Reliance Petro'];
-const BRANDS_EV = ['Tata Power EZ', 'Statiq', 'ChargeZone', 'Ather Grid', 'Jio-bp Pulse'];
+const BRANDS_DIESEL = ['IndianOil Aviation', 'Bharat Petroleum ATF', 'HP SkyFuel', 'Nayara AeroFuel', 'Reliance AeroFuel'];
+const BRANDS_EV = ['Tata Power EZ', 'Statiq Air', 'ChargeZone', 'Ather Grid', 'Jio-bp Pulse'];
 
 function buildStations() {
   const rnd = mulberry32(20260707);
   const stations = [];
   let id = 0;
 
-  // Along every highway edge: a station every ~120km of edge length
-  for (const e of ROAD_EDGES) {
-    const a = ROAD_NODES[e.a], b = ROAD_NODES[e.b];
-    if (!a || !b) continue;
-    const pts = [{ ...a }, ...(e.via || []).map(([lat, lng]) => ({ lat, lng })), { ...b }];
-    let len = 0;
-    for (let i = 1; i < pts.length; i++) len += haversine(pts[i - 1].lat, pts[i - 1].lng, pts[i].lat, pts[i].lng);
-    const n = Math.max(1, Math.round(len / 120));
-    for (let k = 1; k <= n; k++) {
-      const t = k / (n + 1);
-      // interpolate along the shape
-      let target = t * len, acc = 0, lat = a.lat, lng = a.lng;
-      for (let i = 1; i < pts.length; i++) {
-        const seg = haversine(pts[i - 1].lat, pts[i - 1].lng, pts[i].lat, pts[i].lng);
-        if (acc + seg >= target) {
-          const f = (target - acc) / (seg || 1e-9);
-          lat = pts[i - 1].lat + (pts[i].lat - pts[i - 1].lat) * f;
-          lng = pts[i - 1].lng + (pts[i].lng - pts[i - 1].lng) * f;
-          break;
-        }
-        acc += seg;
-      }
-      const ev = rnd() < 0.22;
-      const brand = ev ? BRANDS_EV[(id + k) % BRANDS_EV.length] : BRANDS_DIESEL[(id + k) % BRANDS_DIESEL.length];
-      stations.push({
-        id: 's' + id++, name: `${brand} · ${e.nh || 'Highway'}`,
-        lat: +(lat + (rnd() - 0.5) * 0.03).toFixed(3),
-        lng: +(lng + (rnd() - 0.5) * 0.03).toFixed(3),
-        type: ev ? 'ev' : 'diesel',
-        price: ev ? +(8 + rnd() * 3).toFixed(1) : +(88 + rnd() * 9).toFixed(1),
-      });
-    }
-  }
-
-  // Around cities: count scales with tier
+  // Fuel depots around every airport city — count scales with tier.
   for (const c of CITIES) {
     const n = c.tier === 1 ? 4 : c.tier === 2 ? 2 : 1;
     for (let k = 0; k < n; k++) {

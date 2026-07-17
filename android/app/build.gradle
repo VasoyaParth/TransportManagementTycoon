@@ -77,13 +77,13 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace "com.truckempiretycoon"
+    namespace "com.airlineempiretycoon"
     defaultConfig {
-        applicationId "com.truckempiretycoon"
+        applicationId "com.airlineempiretycoon"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 101300
-        versionName "10.13.0"
+        versionCode 10000
+        versionName "1.0.0"
     }
     signingConfigs {
         debug {

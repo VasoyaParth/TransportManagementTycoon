@@ -1,190 +1,96 @@
-// Routing engine — real road routing over the National Highway graph.
-// Trucks NEVER travel in straight lines: every route is a Dijkstra shortest
-// path over ROAD_EDGES, expanded into the full highway polyline (with `via`
-// shape points), which the map animates along. Island cities connect only by
-// ferry edges; anything else across water is unroutable.
+// Routing engine — airline edition. Aircraft fly direct, point-to-point
+// between airports: no road graph, no ferries. Every route is a great-circle
+// arc (the real shortest path a plane actually flies) rendered as a smooth
+// curve of waypoints, which the map animates the aircraft along.
+//
+// Field names on the returned route object (points/cum/roadKm/usesFerry/
+// ferrySegments/bordersCrossed/...) intentionally match the old road-routing
+// engine's shape — gameStore.js and the UI already consume that exact shape,
+// so keeping it means the whole delivery/economy/achievement pipeline works
+// unchanged. `roadKm` is simply "route distance in km" here; `usesFerry` and
+// `ferrySegments` stay permanently empty (nothing to cross by air).
 
-import { ROAD_NODES, ROAD_EDGES, FERRY_EDGES } from '../data/highways';
 import { CITIES } from '../data/cities';
 import { haversine, polylineLengths } from './geo';
 
-const ROAD_FACTOR = 1.18; // road km vs geometric polyline km (curvature not in shape points)
-
-// ---- Build adjacency once ----------------------------------------------
-const adj = {}; // nodeId -> [{to, km, edge, reversed, ferry}]
-function addAdj(a, b, km, edge, reversed, ferry) {
-  (adj[a] = adj[a] || []).push({ to: b, km, edge, reversed, ferry });
-}
-
-function edgePoints(edge, reversed) {
-  const a = ROAD_NODES[edge.a], b = ROAD_NODES[edge.b];
-  const mid = (edge.via || []).map(([lat, lng]) => ({ lat, lng }));
-  const pts = [{ lat: a.lat, lng: a.lng }, ...mid, { lat: b.lat, lng: b.lng }];
-  return reversed ? [...pts].reverse() : pts;
-}
-
-function edgeKm(edge) {
-  const pts = edgePoints(edge, false);
-  let km = 0;
-  for (let i = 1; i < pts.length; i++) {
-    km += haversine(pts[i - 1].lat, pts[i - 1].lng, pts[i].lat, pts[i].lng);
-  }
-  return km * ROAD_FACTOR;
-}
-
-// Build (or rebuild, after cloud hydration) the adjacency graph from the
-// current ROAD_NODES / ROAD_EDGES / FERRY_EDGES contents.
-export function rebuildGraph() {
-  for (const k in adj) delete adj[k];
-  for (const k in nearestNodeCache) delete nearestNodeCache[k];
-  for (const e of ROAD_EDGES) {
-    if (!ROAD_NODES[e.a] || !ROAD_NODES[e.b]) continue;
-    const km = edgeKm(e);
-    addAdj(e.a, e.b, km, e, false, false);
-    addAdj(e.b, e.a, km, e, true, false);
-  }
-  for (const f of FERRY_EDGES) {
-    if (!ROAD_NODES[f.a] || !ROAD_NODES[f.b]) continue;
-    const km = edgeKm(f) * 1.05;
-    addAdj(f.a, f.b, km, f, false, true);
-    addAdj(f.b, f.a, km, f, true, true);
-  }
-}
-
-// ---- City -> nearest road node -----------------------------------------
-const nearestNodeCache = {};
-rebuildGraph(); // initial build from bundled data
-export function nearestRoadNode(lat, lng) {
-  const key = lat.toFixed(3) + ',' + lng.toFixed(3);
-  if (nearestNodeCache[key]) return nearestNodeCache[key];
-  let best = null, bestD = Infinity;
-  for (const id in ROAD_NODES) {
-    const n = ROAD_NODES[id];
-    const d = haversine(lat, lng, n.lat, n.lng);
-    if (d < bestD) { bestD = d; best = id; }
-  }
-  nearestNodeCache[key] = { id: best, km: bestD };
-  return nearestNodeCache[key];
-}
+const AIR_ROUTE_FACTOR = 1.03; // small buffer over pure great-circle for holding patterns / approach paths
 
 export function cityById(id) {
   return CITIES.find(c => c.id === id);
 }
 
-// Fixed sea ports — both endpoints of every ferry/sea edge in the network.
-// Trucks always route through these to cross water; the maps show them with
-// a dedicated port marker (toggleable) so crossings are legible.
-export function ferryPorts() {
-  const ids = new Set();
-  FERRY_EDGES.forEach(f => { ids.add(f.a); ids.add(f.b); });
-  ROAD_EDGES.forEach(e => { if (e.ferry) { ids.add(e.a); ids.add(e.b); } });
-  return [...ids].filter(id => ROAD_NODES[id]).map(id => ({
-    id,
-    name: id.replace(/^[a-z]{2}-/, '').split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') + ' Port',
-    lat: ROAD_NODES[id].lat, lng: ROAD_NODES[id].lng,
-  }));
+// Sea ports made no sense once routing went point-to-point by air — kept as
+// a no-op so any leftover caller (map "ports" toggle, etc.) degrades to an
+// empty list instead of crashing.
+export function ferryPorts() { return []; }
+
+const nearestCityCache = {};
+function nearestCity(lat, lng) {
+  const key = lat.toFixed(2) + ',' + lng.toFixed(2);
+  const hit = nearestCityCache[key];
+  if (hit) return hit;
+  let best = null, bestD = Infinity;
+  for (const c of CITIES) {
+    const d = haversine(lat, lng, c.lat, c.lng);
+    if (d < bestD) { bestD = d; best = c; }
+  }
+  nearestCityCache[key] = best;
+  return best;
 }
 
-// ---- Dijkstra ------------------------------------------------------------
-function dijkstra(startId, endId) {
-  const dist = { [startId]: 0 };
-  const prev = {};
-  const visited = new Set();
-  // simple binary-less PQ: fine for a ~250-node graph
-  const queue = [[0, startId]];
-  while (queue.length) {
-    let bi = 0;
-    for (let i = 1; i < queue.length; i++) if (queue[i][0] < queue[bi][0]) bi = i;
-    const [d, u] = queue.splice(bi, 1)[0];
-    if (visited.has(u)) continue;
-    visited.add(u);
-    if (u === endId) break;
-    for (const nb of adj[u] || []) {
-      const nd = d + nb.km;
-      if (nd < (dist[nb.to] ?? Infinity)) {
-        dist[nb.to] = nd;
-        prev[nb.to] = { from: u, hop: nb };
-        queue.push([nd, nb.to]);
-      }
-    }
+// Great-circle interpolation (spherical slerp) between two lat/lng points —
+// the actual shortest path over a sphere, which is what a real flight plan
+// follows. Produces `steps` waypoints so the path reads as a gentle curve on
+// the map instead of a single straight (and geographically wrong) line.
+function greatCircleSteps(lat1, lng1, lat2, lng2, steps = 24) {
+  const toRad = d => (d * Math.PI) / 180, toDeg = r => (r * 180) / Math.PI;
+  const phi1 = toRad(lat1), lam1 = toRad(lng1), phi2 = toRad(lat2), lam2 = toRad(lng2);
+  const d = 2 * Math.asin(Math.sqrt(
+    Math.sin((phi2 - phi1) / 2) ** 2 + Math.cos(phi1) * Math.cos(phi2) * Math.sin((lam2 - lam1) / 2) ** 2
+  ));
+  if (d < 1e-9) return [{ lat: lat1, lng: lng1 }, { lat: lat2, lng: lng2 }];
+  const pts = [];
+  for (let i = 0; i <= steps; i++) {
+    const f = i / steps;
+    const a = Math.sin((1 - f) * d) / Math.sin(d);
+    const b = Math.sin(f * d) / Math.sin(d);
+    const x = a * Math.cos(phi1) * Math.cos(lam1) + b * Math.cos(phi2) * Math.cos(lam2);
+    const y = a * Math.cos(phi1) * Math.sin(lam1) + b * Math.cos(phi2) * Math.sin(lam2);
+    const z = a * Math.sin(phi1) + b * Math.sin(phi2);
+    const phi = Math.atan2(z, Math.sqrt(x * x + y * y));
+    const lam = Math.atan2(y, x);
+    pts.push({ lat: toDeg(phi), lng: toDeg(lam) });
   }
-  if (dist[endId] === undefined) return null;
-  const hops = [];
-  let cur = endId;
-  while (cur !== startId) {
-    hops.unshift(prev[cur]);
-    cur = prev[cur].from;
-  }
-  return { km: dist[endId], hops };
+  return pts;
 }
 
 // ---- Public API -----------------------------------------------------------
-// Returns null if unroutable (e.g. mainland -> island with no ferry chain).
-// Route: { points:[{lat,lng}], cum:[km], roadKm, usesFerry, nodeIds }
+// Route: { points:[{lat,lng}], cum:[km], roadKm, usesFerry:false,
+//          bordersCrossed, borderNames, ferrySegment:null, ferrySegments:[] }
 export function computeRoute(fromLat, fromLng, toLat, toLng) {
-  const s = nearestRoadNode(fromLat, fromLng);
-  const e = nearestRoadNode(toLat, toLng);
-  if (!s.id || !e.id) return null;
-
-  let points = [{ lat: fromLat, lng: fromLng }];
-  // ferryFlags[i] === true means the segment ARRIVING at points[i] is a sea
-  // hop. Kept per-point (not one global span) so a route with several ferry
-  // hops separated by land renders truck-on-land / ferry-on-water correctly
-  // for every stretch, instead of one giant span swallowing the land between.
-  let ferryFlags = [false];
-  let usesFerry = false;
-  let bordersCrossed = 0;
-  const borderNames = [];
-  const nodeIds = [s.id];
-
-  if (s.id !== e.id) {
-    const path = dijkstra(s.id, e.id);
-    if (!path) return null;
-    const sn = ROAD_NODES[s.id];
-    points.push({ lat: sn.lat, lng: sn.lng }); ferryFlags.push(false);
-    for (const { hop } of path.hops) {
-      const isFerry = hop.ferry || (hop.edge && hop.edge.ferry);
-      const pts = edgePoints(hop.edge, hop.reversed);
-      const add = pts.slice(1); // skip duplicated start point
-      points.push(...add);
-      for (let i = 0; i < add.length; i++) ferryFlags.push(!!isFerry);
-      if (isFerry) usesFerry = true;
-      if (hop.edge && hop.edge.border) { bordersCrossed++; if (hop.edge.nh) borderNames.push(hop.edge.nh); }
-      nodeIds.push(hop.to);
-    }
-  } else {
-    const sn = ROAD_NODES[s.id];
-    points.push({ lat: sn.lat, lng: sn.lng }); ferryFlags.push(false);
-  }
-  points.push({ lat: toLat, lng: toLng }); ferryFlags.push(false);
-
-  // dedupe consecutive identical points (flags filtered in lockstep)
-  const keep = points.map((p, i) => i === 0 ||
-    Math.abs(p.lat - points[i - 1].lat) > 1e-6 || Math.abs(p.lng - points[i - 1].lng) > 1e-6);
-  points = points.filter((_, i) => keep[i]);
-  ferryFlags = ferryFlags.filter((_, i) => keep[i]);
-
+  if (fromLat === toLat && fromLng === toLng) return null;
+  const points = greatCircleSteps(fromLat, fromLng, toLat, toLng, 24);
   const cum = polylineLengths(points);
-  const roadKm = Math.round(cum[cum.length - 1] * ROAD_FACTOR);
-  // Every contiguous ferry stretch becomes its own {startFrac,endFrac} range
-  // on the same 0..1 scale as pointAlong's `prog`, so map layers can check
-  // "am I on a sea hop right now" exactly, hop by hop.
-  const total = cum[cum.length - 1] || 1;
-  const ferrySegments = [];
-  for (let i = 1; i < points.length; i++) {
-    if (!ferryFlags[i]) continue;
-    const startFrac = cum[i - 1] / total;
-    let j = i;
-    while (j + 1 < points.length && ferryFlags[j + 1]) j++;
-    ferrySegments.push({ startFrac, endFrac: cum[j] / total });
-    i = j;
-  }
-  const ferrySegment = ferrySegments[0] || null; // back-compat: old saves/readers
-  return { points, cum, roadKm, usesFerry, nodeIds, bordersCrossed, borderNames, ferrySegment, ferrySegments };
+  const roadKm = Math.round((cum[cum.length - 1] || 0) * AIR_ROUTE_FACTOR);
+
+  // International flight? Compare the country of the nearest known city at
+  // each end — still routes through customs time/fees the same way a road
+  // border crossing used to.
+  const fromCity = nearestCity(fromLat, fromLng);
+  const toCity = nearestCity(toLat, toLng);
+  const fromCountry = fromCity?.country || 'IN', toCountry = toCity?.country || 'IN';
+  const bordersCrossed = fromCountry !== toCountry ? 1 : 0;
+
+  return {
+    points, cum, roadKm, usesFerry: false, nodeIds: [],
+    bordersCrossed, borderNames: bordersCrossed ? [`${fromCountry}–${toCountry}`] : [],
+    ferrySegment: null, ferrySegments: [],
+  };
 }
 
-// Insert fuel/charging stops: stations are placed along the route whenever the
-// remaining range dips. Returns [{lat,lng,atKm,station}] (station from stations engine).
+// Insert refuelling/technical stops: on routes longer than the aircraft's
+// range, a stop is placed at the nearest fuel depot to each waypoint where
+// remaining range would run out. Returns [{lat,lng,atKm,station}].
 import { findStationNear } from './stations';
 export function planFuelStops(route, model) {
   const range = model.range * 0.9; // keep a 10% reserve
@@ -203,11 +109,11 @@ export function planFuelStops(route, model) {
   return stops;
 }
 
-// Cities the route physically passes through/near — e.g. a Jaipur → Ahmedabad
-// haul really rolls past Ajmer, Udaipur, Himatnagar… Each city is projected
-// onto the polyline and returned with its distance-along-route (atKm, on the
-// road-adjusted scale), ordered origin→destination, endpoints excluded.
-export function routeCities(route, corridorKm = 45, max = 8) {
+// Cities the great-circle path flies near — e.g. a Delhi -> Chennai cargo run
+// really does pass over Nagpur, Hyderabad… Each city is projected onto the
+// flight path and returned with its distance-along-route (atKm), ordered
+// origin->destination, endpoints excluded.
+export function routeCities(route, corridorKm = 80, max = 8) {
   if (!route || !route.points || route.points.length < 2) return [];
   const pts = route.points, cum = route.cum;
   const total = route.roadKm;
@@ -219,7 +125,7 @@ export function routeCities(route, corridorKm = 45, max = 8) {
       if (d < bestD) { bestD = d; bestIdx = i; }
     }
     if (bestD > corridorKm) continue;
-    const atKm = Math.round(cum[bestIdx] * ROAD_FACTOR);
+    const atKm = Math.round(cum[bestIdx]);
     if (atKm < total * 0.06 || atKm > total * 0.94) continue; // skip endpoints
     out.push({ city: c, atKm, offsetKm: Math.round(bestD) });
   }
@@ -231,7 +137,7 @@ export function routeCities(route, corridorKm = 45, max = 8) {
     .slice(0, max);
 }
 
-// Suggested destinations for a truck: nearby, reachable, profitable (FR-6.4).
+// Suggested destinations for an aircraft: nearby, reachable, profitable.
 export function suggestDestinations(fromLat, fromLng, count = 5, allowedCountries = null) {
   const scored = CITIES
     .filter(c => !allowedCountries || allowedCountries.includes(c.country || 'IN'))
@@ -241,7 +147,7 @@ export function suggestDestinations(fromLat, fromLng, count = 5, allowedCountrie
   const picks = [];
   for (const { c } of scored) {
     const r = computeRoute(fromLat, fromLng, c.lat, c.lng);
-    if (r && !r.usesFerry) picks.push({ city: c, route: r });
+    if (r) picks.push({ city: c, route: r });
     if (picks.length >= count) break;
   }
   return picks;

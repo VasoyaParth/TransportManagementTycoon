@@ -41,22 +41,21 @@ else { boot(); }
 function shade(hex,pct){var h=(hex||'#3A5A8C').replace('#','');var n=parseInt(h,16);var f=pct<0?0:255,p=Math.abs(pct);
   var r=(n>>16)&255,g=(n>>8)&255,b=n&255;function t(v){return Math.round((f-v)*p+v);}
   return '#'+((1<<24)+(t(r)<<16)+(t(g)<<8)+t(b)).toString(16).slice(1);}
-// Same pseudo-3D truck as the offline map: shadow + extruded body + cab +
-// wheels, with a three-tone shade (roof lighter, side/body mid, shadow
-// darker) and a slight skew on the top faces for an isometric 2.5D read.
-function truck3d(color,accent,heading){
-  var dark=shade(color,-0.28), roof=shade(color,0.18);
+// Fallback top-down aircraft silhouette — used only for the first instant
+// before RN sends the per-model art (see planeArt.js), a simple twin-engine
+// jet: fuselage, swept wings, tail fin, nose taper.
+function plane3d(color,accent,heading){
+  var dark=shade(color,-0.25), light=shade(color,0.2);
   return '<div class="truck3d" style="transform:rotate('+((heading||0)+180)+'deg);width:40px;height:48px">'
    +'<svg width="40" height="48" viewBox="0 0 40 48">'
-   +'<ellipse cx="22" cy="42" rx="10" ry="3" fill="rgba(0,0,0,0.12)"/>'
-   +'<rect x="9" y="5" width="24" height="30" rx="5" fill="'+dark+'"/>'
-   +'<rect x="8" y="3" width="24" height="26" rx="5" fill="'+color+'" stroke="#fff" stroke-width="2"/>'
-   +'<rect x="12" y="6" width="16" height="7" rx="2" fill="'+roof+'" transform="skewX(-6)"/>'
-   +'<rect x="12" y="6" width="16" height="7" rx="2" fill="'+accent+'" opacity="0.55"/>'
-   +'<rect x="10" y="29" width="20" height="14" rx="4" fill="'+color+'" stroke="#fff" stroke-width="2"/>'
-   +'<rect x="13" y="32" width="14" height="7" rx="2" fill="#DCE7FA"/>'
-   +'<rect x="4" y="13" width="4" height="9" rx="2" fill="#181B20"/><rect x="32" y="13" width="4" height="9" rx="2" fill="#181B20"/>'
-   +'<rect x="4" y="29" width="4" height="8" rx="2" fill="#181B20"/><rect x="32" y="29" width="4" height="8" rx="2" fill="#181B20"/>'
+   +'<rect x="10" y="3" width="20" height="3" rx="1" fill="'+dark+'"/>'
+   +'<rect x="17" y="1" width="5" height="7" rx="1" fill="'+accent+'"/>'
+   +'<rect x="15" y="5" width="10" height="36" rx="4" fill="'+color+'" stroke="#fff" stroke-width="1.2"/>'
+   +'<path d="M0 24 L40 24 L31 33 L9 33 Z" fill="'+light+'"/>'
+   +'<path d="M0 24 L40 24 L34 19 L6 19 Z" fill="'+dark+'"/>'
+   +'<circle cx="9" cy="27" r="2.4" fill="#3A4048"/><circle cx="31" cy="27" r="2.4" fill="#3A4048"/>'
+   +'<rect x="16" y="36" width="8" height="5" rx="1.4" fill="#AECBF5"/>'
+   +'<path d="M15 40 L20 48 L25 40 Z" fill="'+dark+'"/>'
    +'</svg></div>';
 }
 // Big HQ office tower (same visual language as the offline map: coloured
@@ -143,7 +142,7 @@ function boot(){
     if(hqMarker){ hqMarker.setIcon(icon); }
     else {
       hqMarker=L.marker([DATA.hq.lat,DATA.hq.lng],{icon:icon,zIndexOffset:1000}).addTo(map)
-        .bindTooltip('<b>'+DATA.companyName+'</b><br><small>HQ — tap for details</small>',{direction:'top'});
+        .bindTooltip('<b>'+DATA.companyName+'</b><br><small>Home Hub — tap for details</small>',{direction:'top'});
       hqMarker.on('click',function(){ post({type:'hqTap'}); });
     }
   }
@@ -165,7 +164,7 @@ function boot(){
       var hm=L.marker([h.lat,h.lng],{icon:L.divIcon({className:'',
         html:'<div class="hub-marker" style="transform:scale('+k+');transform-origin:'+(W/2)+'px '+(H-2)+'px">'+svg+'</div>',
         iconSize:[W,H],iconAnchor:[W/2,H-2]}),zIndexOffset:900})
-        .bindTooltip('<b>'+h.name+'</b><br><small>Garage — tap for details</small>',{direction:'top'});
+        .bindTooltip('<b>'+h.name+'</b><br><small>Airport — tap for details</small>',{direction:'top'});
       hm.on('click',function(){ post({type:'hubTap',cityId:h.cityId}); });
       hubLayer.addLayer(hm);
     });
@@ -260,19 +259,8 @@ function boot(){
     var accent = t.status==='delivering'?'#0E9F5B':t.status==='building'?'#D97706':t.status==='broken'?'#DC3D43':'#9DB2D6';
     var color = t.color || '#3A5A8C';
     var html, w=40, h=48, anchorY=24;
-    if((t.ferryOn || t.ferryLoading) && DATA.ferryArt){
-      // On (or boarding/leaving) the ferry: always the big RO-RO steamer with
-      // the truck on deck — never a truck on water, never a blurred truck.
-      // While docked (paperwork + roll-on/off) a pulsing ring marks the port.
-      w=48; h=72; anchorY=36;
-      html='<div class="truck3d" style="transform:rotate('+((t.heading||0)+180)+'deg);width:'+w+'px;height:'+h+'px;transform-origin:'+(w/2)+'px '+anchorY+'px">'
-        +DATA.ferryArt+'</div>';
-      if(t.ferryLoading){
-        html='<div style="position:relative">'+html
-          +'<div style="position:absolute;left:50%;top:50%;width:30px;height:30px;margin:-15px;border-radius:50%;background:rgba(37,99,235,.45);animation:pulseDot 1s ease-in-out infinite alternate"></div></div>';
-      }
-    } else if(tArt){
-      // Detailed per-model artwork pre-rendered on the RN side (truckArt.js).
+    if(tArt){
+      // Detailed per-model artwork pre-rendered on the RN side (planeArt.js).
       w=t.artW||40; h=t.artH||48; anchorY=(t.bodyH||h)/2;
       html='<div class="truck3d" style="transform:rotate('+((t.heading||0)+180)+'deg);width:'+w+'px;height:'+h+'px;transform-origin:'+(w/2)+'px '+anchorY+'px">'
         +tArt+'</div>';
@@ -281,14 +269,14 @@ function boot(){
           +'<div style="position:absolute;left:50%;top:50%;width:26px;height:26px;margin:-13px;border-radius:50%;background:rgba(217,119,6,.4);animation:pulseDot 1s ease-in-out infinite alternate"></div></div>';
       }
     } else {
-      html=truck3d(color,accent,t.heading);
+      html=plane3d(color,accent,t.heading);
     }
     if(t.incidentType){
       // Incident badge — every scenario gets its own colour + glyph so the
       // player can read the problem at a glance: accident !, tyre burst !,
       // theft/checkpost ₹ (money hit), heavy weather/rain/snow ☂.
-      var badgeColor = {accident:'#DC3D43',flat:'#D97706',theft:'#7D3C98',checkpost:'#2563EB',weather:'#0E7C86'}[t.incidentType]||'#DC3D43';
-      var badgeGlyph = {accident:'!',flat:'!',theft:'\\u20B9',checkpost:'\\u20B9',weather:'\\u2602'}[t.incidentType]||'!';
+      var badgeColor = {mechanical:'#DC3D43',birdstrike:'#D97706',pilferage:'#7D3C98',customs:'#2563EB',weather:'#0E7C86'}[t.incidentType]||'#DC3D43';
+      var badgeGlyph = {mechanical:'!',birdstrike:'!',pilferage:'\\u20B9',customs:'\\u20B9',weather:'\\u2602'}[t.incidentType]||'!';
       html='<div style="position:relative">'+html
         +'<div style="position:absolute;right:2px;top:0;width:16px;height:16px;border-radius:50%;'
         +'background:'+badgeColor+';border:1.5px solid #fff;color:#fff;font-size:10px;font-weight:700;'
@@ -320,14 +308,7 @@ function boot(){
     var shadow=L.polyline(coords,{color:'rgba(0,0,0,.25)',weight:6,opacity:.4}).addTo(map);
     var line=L.polyline(coords,{color:'#2563EB',weight:3,opacity:.9,dashArray:'10 6',className:'animated-route'}).addTo(map);
     var arr=[shadow,line];
-    // Sea legs re-drawn on top as ship lanes (teal, wave-dashed) between the
-    // two dock anchors — makes every ferry crossing read as sea, not road.
-    (r.seaLegs||[]).forEach(function(leg){
-      var sc=leg.map(function(p){return [p.lat,p.lng];});
-      arr.push(L.polyline(sc,{color:'#0E4C7A',weight:4,opacity:.9,dashArray:'2 8',lineCap:'round'}).addTo(map)
-        .bindTooltip('Sea route — truck crosses aboard the ferry',{sticky:true}));
-    });
-    // Highlight fuel/charge stops along the active road.
+    // Highlight fuel/charge stops along the flight path.
     (r.stops||[]).forEach(function(st){
       arr.push(L.circleMarker([st.lat,st.lng],{radius:5,color:'#fff',weight:2,
         fillColor:(st.station&&st.station.type==='ev')?'#0E9F5B':'#D97706',fillOpacity:1}).addTo(map)

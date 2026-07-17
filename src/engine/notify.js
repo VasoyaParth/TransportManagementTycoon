@@ -72,7 +72,7 @@ export function flavor(kind, vars = {}) {
   return pool ? pick(pool)(vars) : { title: '', body: '' };
 }
 
-const CHANNEL_ID = 'truck-empire';
+const CHANNEL_ID = 'airline-empire';
 let inited = false;
 let enabled = true;
 
@@ -85,7 +85,7 @@ export async function initNotifications() {
     inited = true;
     await notifee.requestPermission();
     await notifee.createChannel({
-      id: CHANNEL_ID, name: 'Truck Empire', importance: AndroidImportance ? AndroidImportance.HIGH : 4,
+      id: CHANNEL_ID, name: 'Airline Empire', importance: AndroidImportance ? AndroidImportance.HIGH : 4,
     });
   } catch (e) { /* notifications unavailable — ignore */ }
 }

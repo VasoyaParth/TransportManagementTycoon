@@ -7,13 +7,13 @@ import { C, FONT, SHADOW } from '../theme';
 import { haptic } from '../../engine/haptics';
 
 const STEPS = [
-  { icon: 'hand-wave', title: 'Welcome, CEO!', body: "I'm Ravi, your logistics advisor. Let me show you the ropes of running your trucking empire across India." },
-  { icon: 'map-marker-radius', title: 'The Live Map', body: 'This is India. Your trucks, HQ and hubs live here. Pinch to zoom, drag to pan. Tap a truck to see its details.' },
-  { icon: 'truck-plus', title: 'Start a Delivery', body: 'Tap the "Deliver" button, pick a parked truck and a destination city. You earn profit based on real road distance and cargo.' },
-  { icon: 'clock-outline', title: 'Real Time', body: 'The game runs in real time — long hauls take real hours. Start a delivery, close the app, and come back to collect your earnings.' },
-  { icon: 'gas-station', title: 'Fuel & Refuelling', body: 'Trucks burn fuel over distance. On long trips they auto-stop at petrol pumps. Low on fuel? Use an Instant Refuel from the Power-Ups store.' },
-  { icon: 'garage', title: 'Grow Your Network', body: 'Buy hubs in new cities, hire drivers and mechanics, run marketing campaigns and complete contracts to expand your empire.' },
-  { icon: 'gesture-tap-button', title: "You're Ready!", body: 'Use the bottom pill menu for Fleet, Routes, Staff and more. You can replay this tour anytime from Settings → About. Happy hauling!' },
+  { icon: 'hand-wave', title: 'Welcome, CEO!', body: "I'm Ravi, your operations advisor. Let me show you the ropes of running your cargo airline empire across India." },
+  { icon: 'map-marker-radius', title: 'The Live Map', body: 'This is India. Your aircraft, home hub and airports live here. Pinch to zoom, drag to pan. Tap an aircraft to see its details.' },
+  { icon: 'airplane-takeoff', title: 'Start a Flight', body: 'Tap the "Deliver" button, pick a parked aircraft and a destination airport. You earn profit based on real flight distance and cargo.' },
+  { icon: 'clock-outline', title: 'Real Time', body: 'The game runs in real time — long hauls take real hours. Start a flight, close the app, and come back to collect your earnings.' },
+  { icon: 'gas-station', title: 'Fuel & Refuelling', body: 'Aircraft burn fuel over distance. On long routes they auto-stop at fuel depots. Low on fuel? Use an Instant Refuel from the Power-Ups store.' },
+  { icon: 'office-building-marker', title: 'Grow Your Network', body: 'Buy airports in new cities, hire crew and ground engineers, run marketing campaigns and complete contracts to expand your empire.' },
+  { icon: 'gesture-tap-button', title: "You're Ready!", body: 'Use the bottom pill menu for Fleet, Flights, Crew and more. You can replay this tour anytime from Settings → About. Happy flying!' },
 ];
 
 export default function Tutorial({ onDone }) {

@@ -6,7 +6,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { TRUCK_MODELS, CARGO_TYPES, CAMPAIGNS, POWERUPS, CONTRACT_FLAVORS } from '../data/trucks';
+import { AIRCRAFT_MODELS, CARGO_TYPES, CAMPAIGNS, POWERUPS, CONTRACT_FLAVORS } from '../data/aircraft';
 import { HQ_TIERS, GARAGE_TIERS } from '../data/buildings';
 import { COUNTRY_BY_CODE } from '../data/expansion';
 import { STAFF_NAMES, STAFF_LEVELS } from '../data/staffNames';
@@ -120,34 +120,34 @@ const INCIDENT_INTERVAL_MS = { rare: 22 * 60 * 1000, sometimes: 10 * 60 * 1000 }
 const INCIDENT_CHANCE = { rare: 0.16, sometimes: 0.3 };
 const MECHANIC_DELAY_CUT = 0.6; // mechanic call-out shaves this fraction off the remaining delay
 
-// On-road incident catalog. `mechanic: true` = a mechanic call-out can cut the
-// delay (physical breakdowns only — you can't "repair" a theft or a police
-// checkpost, those you just accept and ride out). Weights sum to 1.
+// In-flight/ground delay catalog. `mechanic: true` = a ground-crew call-out
+// can cut the delay (physical faults only — you can't "repair" pilferage or
+// a customs hold, those you just accept and ride out). Weights sum to 1.
 export const INCIDENT_TYPES = [
   {
-    id: 'accident', weight: 0.28, title: 'Accident on the road!', icon: 'car-brake-alert', color: '#DC3D43',
+    id: 'mechanical', weight: 0.28, title: 'Mechanical fault in flight!', icon: 'wrench-clock', color: '#DC3D43',
     mechanic: true, conditionHit: [8, 18], delayMin: 600, delayMax: 2400, penaltyMin: 0.04, penaltyMax: 0.12,
-    notify: (name, p) => `${name} was clipped on the highway — ${inr(p)} in damage. A mechanic can get it moving faster.`
+    notify: (name, p) => `${name} flagged a mechanical fault en route — ${inr(p)} in repairs. A ground crew call-out can get it moving faster.`
   },
   {
-    id: 'flat', weight: 0.24, title: 'Tyre burst!', icon: 'car-tire-alert', color: '#D97706',
+    id: 'birdstrike', weight: 0.24, title: 'Bird strike on approach!', icon: 'bird', color: '#D97706',
     mechanic: true, conditionHit: [3, 8], delayMin: 300, delayMax: 1200, penaltyMin: 0.01, penaltyMax: 0.04,
-    notify: (name, p) => `${name} blew a tyre — ${inr(p)} for a roadside replacement. A mechanic can speed it up.`
+    notify: (name, p) => `${name} took a bird strike on approach — ${inr(p)} for inspection & repair. A ground crew can speed it up.`
   },
   {
-    id: 'theft', weight: 0.2, title: 'Cargo theft in transit!', icon: 'shield-alert', color: '#7D3C98',
+    id: 'pilferage', weight: 0.2, title: 'Cargo pilferage at the ramp!', icon: 'shield-alert', color: '#7D3C98',
     mechanic: false, conditionHit: null, delayMin: 600, delayMax: 1800, penaltyMin: 0.05, penaltyMax: 0.12,
-    notify: (name, p) => `Bandits grabbed part of ${name}'s cargo — lost ${inr(p)}. Nothing to fix; the driver carries on.`
+    notify: (name, p) => `Ramp handlers reported pilferage from ${name}'s cargo hold — lost ${inr(p)}. Nothing to fix; the crew carries on.`
   },
   {
-    id: 'checkpost', weight: 0.16, title: 'Police checkpost', icon: 'police-badge', color: '#2563EB',
+    id: 'customs', weight: 0.16, title: 'Customs & security hold', icon: 'passport', color: '#2563EB',
     mechanic: false, conditionHit: null, delayMin: 240, delayMax: 900, penaltyMin: 0.01, penaltyMax: 0.03,
-    notify: (name, p) => `${name} pulled over for papers — ${inr(p)} in fines/chai-pani and a short wait.`
+    notify: (name, p) => `${name} held for a customs & security check — ${inr(p)} in fees and a short wait.`
   },
   {
-    id: 'weather', weight: 0.12, title: 'Heavy weather ahead', icon: 'weather-pouring', color: '#0E7C86',
+    id: 'weather', weight: 0.12, title: 'Weather hold', icon: 'weather-pouring', color: '#0E7C86',
     mechanic: false, conditionHit: null, delayMin: 480, delayMax: 1500, penaltyMin: 0, penaltyMax: 0.01,
-    notify: (name) => `${name} slowed to a crawl in a downpour — waiting it out safely.`
+    notify: (name) => `${name} is grounded on a weather hold — waiting it out safely.`
   },
 ];
 export const incidentMeta = id => INCIDENT_TYPES.find(x => x.id === id) || INCIDENT_TYPES[0];
@@ -250,7 +250,7 @@ function rescaleDeliveriesFaster(deliveries, now, factor = 2) {
   });
 }
 
-export const modelById = id => TRUCK_MODELS.find(m => m.id === id);
+export const modelById = id => AIRCRAFT_MODELS.find(m => m.id === id);
 export const cargoById = id => CARGO_TYPES.find(c => c.id === id);
 
 // ---------- Garage / hub economics (price & upkeep vary by city) ----------
@@ -1461,7 +1461,7 @@ export const useGame = create(
           stats: {
             ...s.stats,
             incidents: (s.stats.incidents || 0) + 1,
-            thefts: (s.stats.thefts || 0) + (type === 'theft' ? 1 : 0),
+            thefts: (s.stats.thefts || 0) + (type === 'pilferage' ? 1 : 0),
           },
           balance: s.balance - penalty,
           deliveries: s.deliveries.map(x => x.id === d.id ? { ...x, incident, endsAt: x.endsAt + delaySec * 1000 } : x),

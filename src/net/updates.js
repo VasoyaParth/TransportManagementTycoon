@@ -1,18 +1,23 @@
 // GitHub-release based auto-updater for the sideloaded Android APK.
 // The game itself is 100% offline; this module is the ONLY thing that touches
 // the network, and only when the player taps "Check for Update". It reads the
-// public Releases API (no auth) produced by .github/workflows/release.yml.
-
+// public Releases API (no auth) produced by .github/workflows/release-airline.yml.
+//
+// This repo also ships the (unrelated) Truck Empire Tycoon game from `main`,
+// whose releases are tagged plain vX.Y.Z and land in the SAME repo-wide
+// releases feed. TAG_PREFIX filters those out — without it this app could
+// see a truck-game release as "newer" and offer to install the wrong APK.
 export const REPO = 'VasoyaParth/TransportManagementTycoon';
+const TAG_PREFIX = 'airline-v';
 // The version baked into THIS build. Bump together with android versionName and
 // the release tag. Compared against the latest GitHub release to detect updates.
-export const APP_VERSION = 'v10.13.0';
+export const APP_VERSION = 'airline-v1.0.0';
 
 const RELEASES_URL = `https://api.github.com/repos/${REPO}/releases`;
 
-// "v1.3.6" / "1.3.6" -> [1,3,6]
+// "airline-v1.3.6" -> [1,3,6]
 export function parseVer(tag) {
-  const m = String(tag || '').trim().replace(/^v/i, '').match(/\d+/g) || [];
+  const m = String(tag || '').trim().replace(new RegExp(`^${TAG_PREFIX}`, 'i'), '').match(/\d+/g) || [];
   return [0, 1, 2].map(i => parseInt(m[i], 10) || 0);
 }
 
@@ -48,7 +53,8 @@ function shapeRelease(r) {
   };
 }
 
-// Full release history (newest first), APK assets resolved.
+// Full release history (newest first), APK assets resolved. Only this app's
+// own airline-v* tags — see the TAG_PREFIX note above.
 export async function fetchReleases(limit = 15) {
   const res = await fetch(`${RELEASES_URL}?per_page=${limit}`, {
     headers: { Accept: 'application/vnd.github+json' },
@@ -56,7 +62,7 @@ export async function fetchReleases(limit = 15) {
   if (!res.ok) throw new Error(`GitHub responded ${res.status}`);
   const data = await res.json();
   return (Array.isArray(data) ? data : [])
-    .filter(r => !r.draft)
+    .filter(r => !r.draft && String(r.tag_name || '').startsWith(TAG_PREFIX))
     .map(shapeRelease);
 }
 

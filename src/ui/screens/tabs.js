@@ -19,11 +19,11 @@ import {
   LOAN_EMI_INTERVAL_DAYS,
 } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
-import { CAMPAIGNS, CARGO_TYPES } from '../../data/trucks';
+import { CAMPAIGNS, CARGO_TYPES } from '../../data/aircraft';
 import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
 import { inr, inrShort } from '../../engine/economy';
 import { cityById } from '../../engine/routing';
-import { TruckTopShapes, truckShapes, bodyTypeFor, defaultBodyColor, sizeScaleFor } from '../truckArt';
+import { PlaneTopShapes, planeShapes, bodyTypeFor, defaultBodyColor, sizeScaleFor } from '../planeArt';
 
 // Real truck-model thumbnail for a fleet card — same renderer used on the map
 // and in the Showroom, so the fleet list shows the actual model, not a
@@ -31,16 +31,16 @@ import { TruckTopShapes, truckShapes, bodyTypeFor, defaultBodyColor, sizeScaleFo
 // `accent`/`logoIcon` mirror a truck's Livery customization so a repaint
 // shows up here instantly, same as everywhere else that renders this art.
 const FLEET_ICON = 42;
-function FleetTruckArt({ model, color, accent, logoIcon }) {
+function FleetPlaneArt({ model, color, accent, logoIcon }) {
   const bt = bodyTypeFor(model);
   const body = color || defaultBodyColor(model);
   const trim = accent || '#9DB2D6';
-  const { w, h } = truckShapes(bt, body, trim);
+  const { w, h } = planeShapes(bt, body, trim);
   const scale = ((FLEET_ICON - 6) / h) * sizeScaleFor(model);
   return (
     <View style={{ width: FLEET_ICON, height: FLEET_ICON, alignItems: 'center', justifyContent: 'center' }}>
       <Svg width={w * scale} height={h * scale} viewBox={`0 0 ${w} ${h}`}>
-        <TruckTopShapes type={bt} body={body} accent={trim} />
+        <PlaneTopShapes type={bt} body={body} accent={trim} />
       </Svg>
       {logoIcon ? (
         <View style={{
@@ -195,7 +195,7 @@ export function FleetTab({ onTruckPress, onBuyTruck }) {
           <Row style={{ flex: 1 }}>
             <View style={{ position: 'relative' }}>
               <View style={[st.iconCircle, { backgroundColor: meta.bg }]}>
-                <FleetTruckArt model={model} color={t.color} accent={t.accentColor} logoIcon={t.logoIcon} />
+                <FleetPlaneArt model={model} color={t.color} accent={t.accentColor} logoIcon={t.logoIcon} />
               </View>
               {pledged.has(t.id) && (
                 <View style={st.badgeDot}>
@@ -284,7 +284,7 @@ export function FleetTab({ onTruckPress, onBuyTruck }) {
                 <Text style={[FONT.tiny, { color: '#64748B' }]}>broken</Text>
               </View>
             </Row>
-            <Btn title="Buy Truck — showroom" icon="plus" kind="blue" small style={{ marginTop: 10 }} onPress={() => onBuyTruck && onBuyTruck()} />
+            <Btn title="Buy Aircraft — hangar" icon="plus" kind="blue" small style={{ marginTop: 10 }} onPress={() => onBuyTruck && onBuyTruck()} />
           </Card>
           <FilterChips options={filterOpts} value={filter} onChange={setFilter} />
         </View>
@@ -294,9 +294,9 @@ export function FleetTab({ onTruckPress, onBuyTruck }) {
         trucks.length === 0 ? (
           <EmptyState
             icon="truck-outline"
-            title="No trucks yet"
-            sub="Buy your first truck to start hauling cargo across India."
-            action={<Btn title="Buy Truck" icon="plus" small onPress={() => onBuyTruck && onBuyTruck()} />}
+            title="No aircraft yet"
+            sub="Buy your first aircraft to start hauling cargo across India."
+            action={<Btn title="Buy Aircraft" icon="plus" small onPress={() => onBuyTruck && onBuyTruck()} />}
           />
         ) : (
           <EmptyState icon="truck-outline" title="None in this filter" sub="Try a different status filter above." />
@@ -475,7 +475,7 @@ export function RoutesTab({ onTrack, onNewDelivery }) {
             <EmptyState
               icon="truck-outline"
               title="No active deliveries"
-              sub="Dispatch a parked truck to start earning."
+              sub="Dispatch a parked aircraft to start earning."
               action={<Btn title="New Delivery" icon="plus" small onPress={() => onNewDelivery && onNewDelivery()} />}
             />
           ) : sortedDeliveries.map(d => {
@@ -1191,7 +1191,7 @@ function BankSheet({ visible, onClose }) {
   const resetPicker = () => { setSelTrucks([]); setSelHubs([]); setConfirm(null); };
 
   return (
-    <Sheet visible={visible} onClose={onClose} title="Truck Empire Bank" height="88%">
+    <Sheet visible={visible} onClose={onClose} title="Airline Empire Bank" height="88%">
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
         {/* Credit score */}
         <Card style={{ marginBottom: 12, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
@@ -1275,7 +1275,7 @@ function BankSheet({ visible, onClose }) {
             })}
 
             {loans.length === 0 ? (
-              <EmptyState icon="bank-outline" title="No active loans" sub="Borrow against your trucks or garages when you need a cash injection." />
+              <EmptyState icon="bank-outline" title="No active loans" sub="Borrow against your aircraft or airports when you need a cash injection." />
             ) : null}
 
             <Card style={{ backgroundColor: C.amberSoft, marginTop: 4, marginBottom: 12 }}>
@@ -1569,7 +1569,7 @@ export function EconomyTab() {
           value={inrShort(avgProfit)} color={avgProfit >= 0 ? C.green : C.red} />
         <InsightRow divider icon="gas-station-outline" label="Fuel cost per km" sub="lifetime fuel ÷ km driven"
           value={`₹${costPerKm.toFixed(1)}`} color={costPerKm > 30 ? C.red : C.text} />
-        <InsightRow divider icon="truck-fast" label="Fleet utilisation" sub={`${running} of ${trucks.length} trucks on the road`}
+        <InsightRow divider icon="airplane-takeoff" label="Fleet utilisation" sub={`${running} of ${trucks.length} aircraft on the road`}
           value={`${utilisation}%`} color={utilisation >= 50 ? C.green : C.amber} />
         <InsightRow divider icon="cash-clock" label="Monthly fixed costs" sub={`${inrShort(salaryBurden)} salaries + ${inrShort(upkeepBurden)} upkeep`}
           value={inrShort(salaryBurden + upkeepBurden)} color={C.amber} />

@@ -7,7 +7,7 @@ import {
 import { C, FONT, SHADOW, RADIUS } from '../theme';
 import { Btn, Card, Icon, Pill, Progress, Row } from '../components';
 import { useGame } from '../../store/gameStore';
-import { TRUCK_MODELS, LOGOS, AVATARS, COMPANY_NAME_IDEAS } from '../../data/trucks';
+import { AIRCRAFT_MODELS, LOGOS, AVATARS, COMPANY_NAME_IDEAS } from '../../data/aircraft';
 import { CITIES, STATES } from '../../data/cities';
 import { inr, inrShort } from '../../engine/economy';
 
@@ -19,10 +19,10 @@ const STEPS = [
   { key: 'state', title: 'Choose Your State', tip: 'Pick a state you know — home advantage matters when routes get tough.' },
   { key: 'city', title: 'Choose Your HQ City', tip: 'Tier-1 metros offer more contracts, but smaller cities have cheaper competition.' },
   { key: 'name', title: 'Name Your Company', tip: 'A memorable name builds brand value. You can always hit Random for inspiration.' },
-  { key: 'logo', title: 'Pick Your Logo', tip: 'Your logo rides on every truck. Choose one that says "empire".' },
+  { key: 'logo', title: 'Pick Your Logo', tip: 'Your logo rides on every aircraft tail. Choose one that says "empire".' },
   { key: 'avatar', title: 'Pick Your CEO Avatar', tip: 'This is you in the boardroom. Look sharp.' },
-  { key: 'truck', title: 'Buy Your First Truck', tip: 'Electric trucks cost more upfront but are dirt-cheap per kilometre.' },
-  { key: 'summary', title: 'Review & Launch', tip: 'Everything checks out? Sign the papers and hit the highway.' },
+  { key: 'aircraft', title: 'Buy Your First Aircraft', tip: 'Electric aircraft cost more upfront but are dirt-cheap per kilometre.' },
+  { key: 'summary', title: 'Review & Launch', tip: 'Everything checks out? Sign the papers and clear for takeoff.' },
 ];
 
 const CONTINENTS = [
@@ -32,7 +32,7 @@ const CONTINENTS = [
   { name: 'Africa', icon: 'earth', enabled: false },
 ];
 
-const STARTER_TRUCKS = TRUCK_MODELS.filter(m => m.tier <= 1 || m.price <= 1500000);
+const STARTER_AIRCRAFT = AIRCRAFT_MODELS.filter(m => m.tier <= 1 || m.price <= 1500000);
 
 function Stars({ rating }) {
   return (
@@ -81,7 +81,7 @@ export default function Onboarding({ onDone }) {
   const [ceo, setCeo] = useState('');
   const [logo, setLogo] = useState(LOGOS[0]);
   const [avatar, setAvatar] = useState(AVATARS[0]);
-  const [truckId, setTruckId] = useState(null);
+  const [aircraftId, setAircraftId] = useState(null);
   const [search, setSearch] = useState('');
 
   const anim = useRef(new Animated.Value(1)).current;
@@ -109,8 +109,8 @@ export default function Onboarding({ onDone }) {
 
   const stateCities = useMemo(() => CITIES.filter(c => c.state === state), [state]);
   const city = CITIES.find(c => c.id === cityId);
-  const truck = TRUCK_MODELS.find(m => m.id === truckId);
-  const remaining = truck ? STARTING_CAPITAL - truck.price : STARTING_CAPITAL;
+  const aircraft = AIRCRAFT_MODELS.find(m => m.id === aircraftId);
+  const remaining = aircraft ? STARTING_CAPITAL - aircraft.price : STARTING_CAPITAL;
 
   const valid = [
     continent === 'Asia',
@@ -120,13 +120,13 @@ export default function Onboarding({ onDone }) {
     name.trim().length >= 2 && ceo.trim().length >= 2,
     !!logo,
     !!avatar,
-    !!truckId,
+    !!aircraftId,
     true,
   ][step];
 
   const launch = () => {
     useGame.getState().createCompany({
-      name: name.trim(), ceo: ceo.trim(), logo, avatar, hqCityId: cityId, truckModelId: truckId,
+      name: name.trim(), ceo: ceo.trim(), logo, avatar, hqCityId: cityId, truckModelId: aircraftId,
     });
     onDone();
   };
@@ -169,7 +169,7 @@ export default function Onboarding({ onDone }) {
               <Icon name="flag" size={40} color={country === 'India' ? C.blue : C.sub} />
               <Text style={[FONT.h2, { marginTop: 8 }]}>India</Text>
               <Text style={[FONT.sub, { textAlign: 'center', marginTop: 4 }]}>
-                36 states & territories · 100+ cities · endless highways
+                36 states & territories · 100+ cities · countless flight routes
               </Text>
               <View style={{ marginTop: 10 }}>
                 <Pill text="Launch Market" icon="rocket-launch-outline" color={C.green} bg={C.greenSoft} />
@@ -306,7 +306,7 @@ export default function Onboarding({ onDone }) {
           </ScrollView>
         );
 
-      case 'truck':
+      case 'aircraft':
         return (
           <View style={{ flex: 1 }}>
             <Card style={{ padding: 12, marginBottom: 12 }}>
@@ -322,19 +322,19 @@ export default function Onboarding({ onDone }) {
                   <Icon name="cash-check" size={16} color={remaining >= 0 ? C.green : C.red} />
                   <Text style={[FONT.sub, { marginLeft: 6 }]}>After purchase</Text>
                 </Row>
-                <Text style={[FONT.mono, { fontWeight: '700', color: truck ? C.green : C.text }]}>
+                <Text style={[FONT.mono, { fontWeight: '700', color: aircraft ? C.green : C.text }]}>
                   {inr(remaining)}
                 </Text>
               </Row>
             </Card>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 8 }}>
-              {STARTER_TRUCKS.map(m => {
-                const sel = truckId === m.id;
+              {STARTER_AIRCRAFT.map(m => {
+                const sel = aircraftId === m.id;
                 return (
-                  <Pressable key={m.id} onPress={() => setTruckId(m.id)}>
-                    <Card style={[st.truckCard, sel && { borderColor: C.blue, borderWidth: 2 }]}>
+                  <Pressable key={m.id} onPress={() => setAircraftId(m.id)}>
+                    <Card style={[st.aircraftCard, sel && { borderColor: C.blue, borderWidth: 2 }]}>
                       <Row style={{ justifyContent: 'space-between' }}>
-                        <View style={st.truckIconWrap}>
+                        <View style={st.aircraftIconWrap}>
                           <Icon name={m.icon} size={30} color={sel ? C.blue : C.text} />
                         </View>
                         {sel ? <Icon name="check-circle" size={22} color={C.blue} /> : null}
@@ -381,8 +381,8 @@ export default function Onboarding({ onDone }) {
               </Row>
               <View style={st.divider} />
               <Spec icon="office-building-marker-outline" label="Headquarters" value={city ? `${city.name}, ${city.state}` : '-'} />
-              <Spec icon={truck ? truck.icon : 'truck'} label="First truck" value={truck ? truck.name : '-'} />
-              <Spec icon="tag-outline" label="Truck price" value={truck ? inr(truck.price) : '-'} />
+              <Spec icon={aircraft ? aircraft.icon : 'airplane'} label="First aircraft" value={aircraft ? aircraft.name : "-"} />
+              <Spec icon="tag-outline" label="Aircraft price" value={aircraft ? inr(aircraft.price) : "-"} />
               <View style={st.divider} />
               <Row style={{ justifyContent: 'space-between' }}>
                 <Text style={[FONT.body, { fontWeight: '700' }]}>Starting balance</Text>
@@ -472,8 +472,8 @@ const st = StyleSheet.create({
     borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center', marginBottom: 12,
   },
   iconCellSel: { borderColor: C.blue, borderWidth: 2, backgroundColor: C.blueSoft },
-  truckCard: { width: 240, marginRight: 12, padding: 16 },
-  truckIconWrap: {
+  aircraftCard: { width: 240, marginRight: 12, padding: 16 },
+  aircraftIconWrap: {
     width: 52, height: 52, borderRadius: RADIUS.md, backgroundColor: C.bgSoft,
     alignItems: 'center', justifyContent: 'center',
   },
