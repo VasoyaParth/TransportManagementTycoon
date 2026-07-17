@@ -448,7 +448,29 @@ export const TRUCK_MODELS = [
     id: 'volvo-vh20-maxtrain', name: 'Voltra VH20 MaxTrain', brand: 'Voltra',
     tier: 3, propulsion: 'diesel', rating: 5.0, icon: 'truck-trailer', shape: 'doubletrailer',
     desc: 'The ultimate B-double — bigger engine, bigger tanks, bigger everything.',
-    speed: 87, cargo: 46, tank: 650, eff: 2.4, range: 1600, maint: 15, price: 18500000, build: 4200,
+    speed: 87, cargo: 46, tank: 650, eff: 2.4, range: 1600, maint: 15, build: 4200, price: 18500000,
+  },
+  // ---- v10.17.0 mega-hauler tier — beyond anything else in the catalog,
+  // priced (and taxed by maintenance/build time) to match: these are
+  // aspirational trophy purchases for a company that's already an empire,
+  // not a practical early buy. ----
+  {
+    id: 'bharatbenz-titan-8500', name: 'BharatDrive Titan 8500', brand: 'BharatDrive',
+    tier: 3, propulsion: 'diesel', rating: 4.9, icon: 'truck-trailer', shape: 'conventional',
+    desc: 'A quad-axle long-nose monster built for mining-grade tonnage on real highways.',
+    speed: 76, cargo: 85, tank: 850, eff: 2.0, range: 1700, maint: 18, build: 6000, price: 32000000,
+  },
+  {
+    id: 'scania-colossus-x', name: 'Scanix Colossus X', brand: 'Scanix',
+    tier: 3, propulsion: 'diesel', rating: 5.0, icon: 'truck-trailer', shape: 'doubletrailer',
+    desc: 'Triple-trailer imported giant — the heaviest thing legally allowed on the network.',
+    speed: 72, cargo: 140, tank: 1100, eff: 1.6, range: 1750, maint: 24, build: 9000, price: 58000000,
+  },
+  {
+    id: 'volvo-mh250-apex', name: 'Voltra Apex Mega-Hauler MH-250', brand: 'Voltra',
+    tier: 3, propulsion: 'diesel', rating: 5.0, icon: 'truck-trailer', shape: 'doubletrailer',
+    desc: 'The biggest thing that will ever touch these highways — a mining-class ultra-hauler, road-registered on a dare. One of these outmoves a small fleet.',
+    speed: 64, cargo: 250, tank: 1600, eff: 1.1, range: 1850, maint: 35, build: 14000, price: 120000000,
   },
 ];
 
@@ -535,6 +557,12 @@ export const CARGO_TYPES = [
   { id: 'electronics', name: 'Electronics', rate: 8.0, mult: 2.0, icon: 'television', desc: 'High-value gadgets and appliances. Lucrative.' },
   { id: 'hazmat', name: 'Hazmat / Fuel', rate: 8.5, mult: 2.1, icon: 'radioactive', desc: 'Fuel, chemicals and explosives. Dangerous, top pay.' },
   { id: 'pharma', name: 'Pharma', rate: 9.0, mult: 2.25, icon: 'pill', desc: 'Temperature-controlled medicines. The highest per-ton rate.' },
+  // ---- v10.17.0 additions ----
+  { id: 'mining', name: 'Mining Ore & Coal', rate: 3.2, mult: 0.8, icon: 'terrain', desc: 'Raw ore straight off the pit. The cheapest freight there is, but there’s always a mountain of it.' },
+  { id: 'furniture', name: 'Furniture & Home Goods', rate: 4.6, mult: 1.15, icon: 'sofa', desc: 'Bulky wooden and upholstered goods — awkward to load, easy to move.' },
+  { id: 'ecommerce', name: 'E-Commerce Parcels', rate: 5.6, mult: 1.4, icon: 'package-variant', desc: 'Mixed online-order boxes for the last-mile boom. Steady demand, decent pay.' },
+  { id: 'defense', name: 'Defense Logistics', rate: 8.8, mult: 2.2, icon: 'shield-star', desc: 'Government contract freight — vetted drivers only, and it pays like it.' },
+  { id: 'bullion', name: 'Gold & Bullion', rate: 9.6, mult: 2.4, icon: 'treasure-chest', desc: 'Armoured-transit precious metals. The single highest per-ton rate in the business.' },
 ];
 
 export const CAMPAIGNS = [

@@ -7,7 +7,7 @@ import RNShare from 'react-native-share';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST, FLEET_LIVERY_DISCOUNT, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, CONVOY_SYMBOLS, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST_MIN, LIVERY_COST_MAX, liveryCostFor, FLEET_LIVERY_DISCOUNT, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, CONVOY_SYMBOLS, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
@@ -1017,7 +1017,7 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
               <TruckArtBadge model={m} color={truck.color} accent={truck.accentColor} logoIcon={truck.logoIcon} pattern={truck.pattern} booster={truck.booster} rimColor={truck.rimColor} size={44} bg={C.bgSoft} />
               <View style={{ marginLeft: 10, flex: 1 }}>
                 <Text style={[FONT.h3]}>Customize Truck</Text>
-                <Text style={FONT.tiny}>Name, paint job & emblem — {LIVERY_COST} Gold per repaint</Text>
+                <Text style={FONT.tiny}>Name, paint job & emblem — {inrShort(LIVERY_COST_MIN)}–{inrShort(LIVERY_COST_MAX)} per repaint</Text>
               </View>
             </Row>
             <Icon name="chevron-right" size={20} color={C.faint} />
@@ -1054,7 +1054,7 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
 export function TruckCustomizeModal({ visible, onClose, truckId, onBack }) {
   const toast = useToast();
   const trucks = useGame(s => s.trucks);
-  const gold = useGame(s => s.gold);
+  const balance = useGame(s => s.balance);
   const customizeTruck = useGame(s => s.customizeTruck);
   const paintTruck = useGame(s => s.paintTruck);
   const liveryPresets = useGame(s => s.liveryPresets || []);
@@ -1079,6 +1079,9 @@ export function TruckCustomizeModal({ visible, onClose, truckId, onBack }) {
   const rimNow = draft.rimColor || '#3A4048';
   const dirty = draft.color !== (truck.color || null) || draft.accentColor !== (truck.accentColor || null) || draft.logoIcon !== (truck.logoIcon || null)
     || draft.pattern !== (truck.pattern || 'none') || draft.booster !== (truck.booster || 'none') || draft.rimColor !== (truck.rimColor || null);
+  const changedKeys = ['color', 'accentColor', 'logoIcon', 'pattern', 'booster', 'rimColor']
+    .filter(k => draft[k] !== undefined && draft[k] !== (truck[k] ?? (k === 'pattern' || k === 'booster' ? 'none' : null)));
+  const cost = liveryCostFor(changedKeys.length ? changedKeys : ['color']);
 
   const randomize = () => {
     haptic('light'); play('tap', 0.4);
@@ -1109,7 +1112,7 @@ export function TruckCustomizeModal({ visible, onClose, truckId, onBack }) {
         {/* Live preview — every tap below updates this instantly, for free */}
         <Card style={{ alignItems: 'center', paddingVertical: 20, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
           <TruckArtBadge model={m} color={draft.color} accent={accentNow} logoIcon={draft.logoIcon} pattern={draft.pattern} booster={draft.booster} rimColor={rimNow} size={140} bg="transparent" />
-          <Text style={[FONT.tiny, { color: '#94A3B8', marginTop: 10 }]}>Live preview — free to browse, {LIVERY_COST} Gold to apply</Text>
+          <Text style={[FONT.tiny, { color: '#94A3B8', marginTop: 10 }]}>Live preview — free to browse, {inr(cost)} to apply</Text>
         </Card>
 
         <Text style={[FONT.tiny, { marginTop: 14 }]}>NAME</Text>
@@ -1242,8 +1245,8 @@ export function TruckCustomizeModal({ visible, onClose, truckId, onBack }) {
 
         <Btn title="Randomize" kind="soft" icon="dice-multiple" style={{ marginTop: 16 }} onPress={randomize} />
         <Btn
-          title={dirty ? `Apply Livery · ${LIVERY_COST} Gold` : 'No changes yet'}
-          kind={dirty ? 'green' : 'soft'} icon="palette" disabled={!dirty}
+          title={dirty ? `Apply Livery · ${inr(cost)}` : 'No changes yet'}
+          kind={dirty ? 'green' : 'soft'} icon="palette" disabled={!dirty || balance < cost}
           style={{ marginTop: 10, marginBottom: 30 }}
           onPress={apply}
         />
@@ -1256,12 +1259,14 @@ export function TruckCustomizeModal({ visible, onClose, truckId, onBack }) {
 export function FleetLiveryModal({ visible, onClose }) {
   const toast = useToast();
   const trucks = useGame(s => s.trucks);
-  const gold = useGame(s => s.gold);
+  const balance = useGame(s => s.balance);
   const liveryPresets = useGame(s => s.liveryPresets || []);
   const applyPresetToFleet = useGame(s => s.applyPresetToFleet);
   const deleteLiveryPreset = useGame(s => s.deleteLiveryPreset);
-  const perTruck = Math.max(1, Math.ceil(LIVERY_COST * FLEET_LIVERY_DISCOUNT));
-  const total = perTruck * trucks.length;
+  // Matches applyPresetToFleet()'s own key-detection so the price shown here
+  // is exactly what gets charged.
+  const presetKeys = p => ['color', 'accentColor', 'logoIcon', 'pattern', 'booster', 'rimColor'].filter(k => p[k] != null && p[k] !== 'none');
+  const perTruckFor = p => Math.max(1, Math.round(liveryCostFor(presetKeys(p)) * FLEET_LIVERY_DISCOUNT));
 
   const apply = (preset) => {
     const r = applyPresetToFleet(preset.id);
@@ -1289,7 +1294,7 @@ export function FleetLiveryModal({ visible, onClose }) {
           <Row>
             <Icon name="truck-fast" size={18} color={C.blue} />
             <Text style={[FONT.body, { marginLeft: 8, flex: 1, fontWeight: '700' }]}>
-              Apply a saved preset to all {trucks.length} truck{trucks.length === 1 ? '' : 's'} at once — {perTruck} Gold/truck ({Math.round((1 - FLEET_LIVERY_DISCOUNT) * 100)}% off the normal {LIVERY_COST}), {total} Gold total.
+              Apply a saved preset to all {trucks.length} truck{trucks.length === 1 ? '' : 's'} at once, for {Math.round((1 - FLEET_LIVERY_DISCOUNT) * 100)}% off the usual per-truck price — priced per preset below.
             </Text>
           </Row>
         </Card>
@@ -1299,25 +1304,29 @@ export function FleetLiveryModal({ visible, onClose }) {
             <Text style={[FONT.sub, { marginTop: 8, textAlign: 'center' }]}>No presets saved yet. Open Customize Truck on any truck, build a look, then "Save current look as preset" — it'll show up here.</Text>
           </View>
         ) : (
-          liveryPresets.map(p => (
-            <Card key={p.id} style={{ marginBottom: 10 }}>
-              <Row style={{ justifyContent: 'space-between' }}>
-                <Row style={{ flex: 1 }}>
-                  <View style={{ width: 30, height: 30, borderRadius: 8, backgroundColor: p.color || C.blue, marginRight: 10, borderWidth: 1, borderColor: C.border }} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={[FONT.body, { fontWeight: '700' }]} numberOfLines={1}>{p.name}</Text>
-                    <Text style={FONT.tiny}>
-                      {p.pattern && p.pattern !== 'none' ? `${p.pattern} · ` : ''}{p.booster && p.booster !== 'none' ? `${p.booster} · ` : ''}emblem {p.logoIcon ? 'set' : 'none'}
-                    </Text>
-                  </View>
+          liveryPresets.map(p => {
+            const perTruck = perTruckFor(p);
+            const total = perTruck * trucks.length;
+            return (
+              <Card key={p.id} style={{ marginBottom: 10 }}>
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <Row style={{ flex: 1 }}>
+                    <View style={{ width: 30, height: 30, borderRadius: 8, backgroundColor: p.color || C.blue, marginRight: 10, borderWidth: 1, borderColor: C.border }} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={[FONT.body, { fontWeight: '700' }]} numberOfLines={1}>{p.name}</Text>
+                      <Text style={FONT.tiny}>
+                        {p.pattern && p.pattern !== 'none' ? `${p.pattern} · ` : ''}{p.booster && p.booster !== 'none' ? `${p.booster} · ` : ''}emblem {p.logoIcon ? 'set' : 'none'} · {inr(perTruck)}/truck
+                      </Text>
+                    </View>
+                  </Row>
+                  <IconBtn name="trash-can-outline" size={17} color={C.faint}
+                    onPress={() => { deleteLiveryPreset(p.id); toast(`Deleted "${p.name}"`, 'info'); }} />
                 </Row>
-                <IconBtn name="trash-can-outline" size={17} color={C.faint}
-                  onPress={() => { deleteLiveryPreset(p.id); toast(`Deleted "${p.name}"`, 'info'); }} />
-              </Row>
-              <Btn title={`Apply to fleet · ${total} Gold`} kind="green" small icon="truck-fast" style={{ marginTop: 10 }}
-                disabled={!trucks.length || gold < total} onPress={() => apply(p)} />
-            </Card>
-          ))
+                <Btn title={`Apply to fleet · ${inr(total)}`} kind="green" small icon="truck-fast" style={{ marginTop: 10 }}
+                  disabled={!trucks.length || balance < total} onPress={() => apply(p)} />
+              </Card>
+            );
+          })
         )}
       </ScrollView>
     </Sheet>
@@ -3854,7 +3863,6 @@ export function BuildingCustomizeModal({ visible, onClose, cityId, onBack }) {
   const toast = useToast();
   const hubs = useGame(s => s.hubs || []);
   const balance = useGame(s => s.balance);
-  const gold = useGame(s => s.gold);
   const upgradeHub = useGame(s => s.upgradeHub);
   const paintHub = useGame(s => s.paintHub);
   const hub = hubs.find(h => h.cityId === cityId);
@@ -3877,6 +3885,11 @@ export function BuildingCustomizeModal({ visible, onClose, cityId, onBack }) {
   const dirty = draftColor !== (hub.color || null) || (isHQ && draftFlagColor !== (hub.flagColor || null));
   const label = isHQ ? 'Headquarters' : hub.name;
   const defaultColor = isHQ ? DEFAULT_HQ_COLOR : DEFAULT_GARAGE_COLOR;
+  const changedKeys = [
+    draftColor !== (hub.color || null) && 'color',
+    isHQ && draftFlagColor !== (hub.flagColor || null) && 'flagColor',
+  ].filter(Boolean);
+  const cost = liveryCostFor(changedKeys.length ? changedKeys : ['color']);
 
   const apply = () => {
     const r = paintHub(cityId, draftColor, isHQ ? draftFlagColor : undefined);
@@ -3901,7 +3914,7 @@ export function BuildingCustomizeModal({ visible, onClose, cityId, onBack }) {
             actual current tier is always shown (tier upgrades commit right away) */}
         <Card style={{ alignItems: 'center', paddingVertical: 20, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
           <BuildingArtBadge kind={kind} color={draftColor} flagColor={draftFlagColor} tier={curTier} size={140} bg="transparent" />
-          <Text style={[FONT.tiny, { color: '#94A3B8', marginTop: 10 }]}>{curTier.name} — live preview, {LIVERY_COST} Gold to apply a new colour</Text>
+          <Text style={[FONT.tiny, { color: '#94A3B8', marginTop: 10 }]}>{curTier.name} — live preview, {inr(cost)} to apply a new colour</Text>
         </Card>
 
         <Text style={[FONT.tiny, { marginTop: 14 }]}>PAINT COLOUR</Text>
@@ -3935,8 +3948,8 @@ export function BuildingCustomizeModal({ visible, onClose, cityId, onBack }) {
           </>
         )}
         <Btn
-          title={dirty ? `Apply Paint · ${LIVERY_COST} Gold` : 'No changes yet'}
-          kind={dirty ? 'green' : 'soft'} icon="palette" disabled={!dirty}
+          title={dirty ? `Apply Paint · ${inr(cost)}` : 'No changes yet'}
+          kind={dirty ? 'green' : 'soft'} icon="palette" disabled={!dirty || balance < cost}
           style={{ marginTop: 12 }}
           onPress={apply}
         />
