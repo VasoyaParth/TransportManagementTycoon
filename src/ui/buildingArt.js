@@ -12,7 +12,9 @@ export const DEFAULT_GARAGE_COLOR = '#5C6470';
 
 // kind: 'hq' | 'garage'. `tier` is the catalog entry from data/buildings.js
 // (HQ_TIERS[n] / GARAGE_TIERS[n]) — floors/bays drive the silhouette size.
-export function buildingShapes(kind, color, tier) {
+export const DEFAULT_FLAG_COLOR = '#D97706';
+
+export function buildingShapes(kind, color, tier, opts = {}) {
   const s = [];
   const R = (x, y, w, h, rx, fill) => s.push({ k: 'rect', x, y, w, h, rx, fill });
   const P = (d, fill) => s.push({ k: 'path', d, fill });
@@ -26,7 +28,7 @@ export function buildingShapes(kind, color, tier) {
     const faceH = floors * floorH + 4;
     const H = y0 + faceH + 4;
     R(21, 2, 2, y0 - 2, 0, '#0B0F14');
-    P(`M23 2 L33 5.5 L23 9 Z`, '#D97706');
+    P(`M23 2 L33 5.5 L23 9 Z`, opts.flagColor || DEFAULT_FLAG_COLOR);
     P(`M30 ${H} L30 ${y0} L38 ${y0 - 5} L38 ${H - 5} Z`, dark);
     P(`M6 ${y0} L30 ${y0} L38 ${y0 - 5} L14 ${y0 - 5} Z`, light);
     R(6, y0, 24, faceH, 0, body);
@@ -56,8 +58,8 @@ export function buildingShapes(kind, color, tier) {
   return { w: W, h: H, shapes: s };
 }
 
-export const BuildingTopShapes = React.memo(function BuildingTopShapes({ kind, color, tier }) {
-  const { shapes } = buildingShapes(kind, color, tier);
+export const BuildingTopShapes = React.memo(function BuildingTopShapes({ kind, color, tier, flagColor }) {
+  const { shapes } = buildingShapes(kind, color, tier, { flagColor });
   return (
     <G>
       {shapes.map((p, i) => p.k === 'rect'

@@ -49,7 +49,7 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
     cities: CITY_DATA,
     stations: STATION_DATA,
     hubs: hubData(),
-    hqStyle: { color: hqHub?.color || null, tier: hqHub?.tier || 0 },
+    hqStyle: { color: hqHub?.color || null, tier: hqHub?.tier || 0, flagColor: hqHub?.flagColor || null },
     ports: PORT_DATA,
     ferryArt: ferrySvgString(), // constant RO-RO ship art — sent once, not per truck per tick
     // Persisted port visibility — "off" stays off across restarts.
@@ -93,13 +93,14 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
       // Headlights on for trucks driving at night (real local clock, 6pm–6am).
       const night = isNightHour(new Date().getHours());
       const lights = night && t.status === 'delivering' ? headlightFor(model) : null;
-      const dims = truckShapes(bt, color, accent, { lights });
-      const artKey = `${bt}|${color}|${accent}|${lights ? 1 : 0}`;
+      const pattern = t.pattern, booster = t.booster, rimColor = t.rimColor;
+      const dims = truckShapes(bt, color, accent, { lights, pattern, booster, rimColor });
+      const artKey = `${bt}|${color}|${accent}|${lights ? 1 : 0}|${pattern || ''}|${booster || ''}|${rimColor || ''}`;
       const artChanged = artKeys.current[t.id] !== artKey;
       if (artChanged) artKeys.current[t.id] = artKey;
       return { id: t.id, lat, lng, heading, status: t.status, statusLabel: meta.label, color,
         // art omitted when unchanged — the WebView reuses its cached copy.
-        art: artChanged ? truckSvgString(bt, color, accent, { lights }) : undefined,
+        art: artChanged ? truckSvgString(bt, color, accent, { lights, pattern, booster, rimColor }) : undefined,
         artW: dims.w, artH: dims.h, bodyH: dims.bodyH,
         ferryOn, ferryLoading, phase, incidentType: (d && d.incident && d.incident.type) || null,
         fuelPct: Math.round(t.fuelPct), name: t.customName || model.name };
@@ -151,8 +152,8 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
   // Keep the HQ marker in sync with its Customize HQ colour/tier.
   useEffect(() => {
     if (!ready) return;
-    inject(`window.setHQ(${JSON.stringify({ color: hqHub?.color || null, tier: hqHub?.tier || 0 })})`);
-  }, [ready, hqHub?.color, hqHub?.tier]);
+    inject(`window.setHQ(${JSON.stringify({ color: hqHub?.color || null, tier: hqHub?.tier || 0, flagColor: hqHub?.flagColor || null })})`);
+  }, [ready, hqHub?.color, hqHub?.tier, hqHub?.flagColor]);
 
   // Live regional weather (v2.4.0) — overlays drawn ONLY where a zone is
   // actually active today: radius circle + kind badge, slowing trucks inside.

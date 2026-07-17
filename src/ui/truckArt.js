@@ -66,7 +66,7 @@ export function isNightHour(hour) { return hour >= 18 || hour < 6; }
 // frame. Key space is tiny (few silhouettes × few liveries), bounded anyway.
 const shapeCache = new Map();
 export function truckShapes(type, body, accent, opts = {}) {
-  const key = `${type}|${body}|${accent}|${opts.lights ? opts.lights.bulb : ''}|${opts.pattern || ''}|${opts.booster || ''}`;
+  const key = `${type}|${body}|${accent}|${opts.lights ? opts.lights.bulb : ''}|${opts.pattern || ''}|${opts.booster || ''}|${opts.rimColor || ''}`;
   const hit = shapeCache.get(key);
   if (hit) return hit;
   const out = buildTruckShapes(type, body, accent, opts);
@@ -81,7 +81,7 @@ function buildTruckShapes(type, body, accent, opts = {}) {
   const roof = shade(body, 0.16);
   const glass = '#AECBF5';
   const tyre = '#14171C';
-  const hub = '#3A4048';
+  const hub = opts.rimColor || '#3A4048'; // alloy/rim colour — customizable, tyre itself always stays black
   const chrome = '#C9CFD8';
   const lamp = '#FFE9A8';
   const s = [];
@@ -360,8 +360,8 @@ function buildTruckShapes(type, body, accent, opts = {}) {
 // art's top-left; centre it yourself with translate(-20, -h/2).
 // React.memo + the shape cache above means a moving truck re-renders only its
 // parent transform per frame — the SVG subtree itself is completely stable.
-export const TruckTopShapes = React.memo(function TruckTopShapes({ type, body, accent, lights, pattern, booster }) {
-  const { shapes } = truckShapes(type, body, accent, { lights, pattern, booster });
+export const TruckTopShapes = React.memo(function TruckTopShapes({ type, body, accent, lights, pattern, booster, rimColor }) {
+  const { shapes } = truckShapes(type, body, accent, { lights, pattern, booster, rimColor });
   return (
     <G>
       {shapes.map((p, i) => p.k === 'rect'

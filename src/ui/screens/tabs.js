@@ -31,16 +31,16 @@ import { TruckTopShapes, truckShapes, bodyTypeFor, defaultBodyColor, sizeScaleFo
 // `accent`/`logoIcon` mirror a truck's Livery customization so a repaint
 // shows up here instantly, same as everywhere else that renders this art.
 const FLEET_ICON = 42;
-function FleetTruckArt({ model, color, accent, logoIcon, pattern, booster }) {
+function FleetTruckArt({ model, color, accent, logoIcon, pattern, booster, rimColor }) {
   const bt = bodyTypeFor(model);
   const body = color || defaultBodyColor(model);
   const trim = accent || '#9DB2D6';
-  const { w, h } = truckShapes(bt, body, trim, { pattern, booster });
+  const { w, h } = truckShapes(bt, body, trim, { pattern, booster, rimColor });
   const scale = ((FLEET_ICON - 6) / h) * sizeScaleFor(model);
   return (
     <View style={{ width: FLEET_ICON, height: FLEET_ICON, alignItems: 'center', justifyContent: 'center' }}>
       <Svg width={w * scale} height={h * scale} viewBox={`0 0 ${w} ${h}`}>
-        <TruckTopShapes type={bt} body={body} accent={trim} pattern={pattern} booster={booster} />
+        <TruckTopShapes type={bt} body={body} accent={trim} pattern={pattern} booster={booster} rimColor={rimColor} />
       </Svg>
       {logoIcon ? (
         <View style={{
@@ -135,7 +135,7 @@ function EmptyState({ icon, title, sub, action }) {
 
 // ============================== 1. FLEET ==============================
 const FLEET_PAGE = 8;
-export function FleetTab({ onTruckPress, onBuyTruck }) {
+export function FleetTab({ onTruckPress, onBuyTruck, onOpenFleetLivery }) {
   const trucks = useGame(s => s.trucks);
   const deliveries = useGame(s => s.deliveries);
   const fleetCapacity = useGame(s => s.fleetCapacity);
@@ -194,7 +194,7 @@ export function FleetTab({ onTruckPress, onBuyTruck }) {
           <Row style={{ flex: 1 }}>
             <View style={{ position: 'relative' }}>
               <View style={[st.iconCircle, { backgroundColor: meta.bg }]}>
-                <FleetTruckArt model={model} color={t.color} accent={t.accentColor} logoIcon={t.logoIcon} pattern={t.pattern} booster={t.booster} />
+                <FleetTruckArt model={model} color={t.color} accent={t.accentColor} logoIcon={t.logoIcon} pattern={t.pattern} booster={t.booster} rimColor={t.rimColor} />
               </View>
               {pledged.has(t.id) && (
                 <View style={st.badgeDot}>
@@ -283,7 +283,12 @@ export function FleetTab({ onTruckPress, onBuyTruck }) {
                 <Text style={[FONT.tiny, { color: '#64748B' }]}>broken</Text>
               </View>
             </Row>
-            <Btn title="Buy Truck — showroom" icon="plus" kind="blue" small style={{ marginTop: 10 }} onPress={() => onBuyTruck && onBuyTruck()} />
+            <Row style={{ gap: 8, marginTop: 10 }}>
+              <View style={{ flex: 1 }}><Btn title="Buy Truck" icon="plus" kind="blue" small onPress={() => onBuyTruck && onBuyTruck()} /></View>
+              {trucks.length > 0 && (
+                <View style={{ flex: 1 }}><Btn title="Fleet Livery" icon="palette" kind="soft" small onPress={() => onOpenFleetLivery && onOpenFleetLivery()} /></View>
+              )}
+            </Row>
           </Card>
           <FilterChips options={filterOpts} value={filter} onChange={setFilter} />
         </View>

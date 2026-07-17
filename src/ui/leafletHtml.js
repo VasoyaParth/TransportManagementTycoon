@@ -66,13 +66,13 @@ function truck3d(color,accent,heading){
 // bigger, not just a number on a screen. Mirrors buildingArt.js on the RN
 // side — kept hand-in-sync since a WebView string can't import RN modules,
 // same split the truck art already lives with (see truck3d() above).
-function hqSvg(color,floors){
-  color=color||'#2563EB'; floors=floors||3;
+function hqSvg(color,floors,flagColor){
+  color=color||'#2563EB'; floors=floors||3; flagColor=flagColor||'#D97706';
   var dark=shade(color,-0.3), light=shade(color,0.25), glass='#DCE7FA';
   var W=44, floorH=8, y0=14, faceH=floors*floorH+4, H=y0+faceH+4;
   var s='<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">'
     +'<rect x="21" y="2" width="2" height="'+(y0-2)+'" fill="#0B0F14"/>'
-    +'<path d="M23 2 L33 5.5 L23 9 Z" fill="#D97706"/>'
+    +'<path d="M23 2 L33 5.5 L23 9 Z" fill="'+flagColor+'"/>'
     +'<path d="M30 '+H+' L30 '+y0+' L38 '+(y0-5)+' L38 '+(H-5)+' Z" fill="'+dark+'"/>'
     +'<path d="M6 '+y0+' L30 '+y0+' L38 '+(y0-5)+' L14 '+(y0-5)+' Z" fill="'+light+'"/>'
     +'<rect x="6" y="'+y0+'" width="24" height="'+faceH+'" fill="'+color+'"/>';
@@ -131,11 +131,11 @@ function boot(){
   // HQ — big building tower icon, anchored at its base, scaled with zoom.
   // Colour/tier are customizable in-game (Customize HQ) and pushed live via
   // window.setHQ, same live-update pattern as trucks/hubs.
-  var hqStyle=DATA.hqStyle||{color:null,tier:0};
+  var hqStyle=DATA.hqStyle||{color:null,tier:0,flagColor:null};
   function plotHQ(){
     var k=zf();
     var floors=HQ_TIER_FLOORS[hqStyle.tier||0]||3;
-    var svg=hqSvg(hqStyle.color,floors);
+    var svg=hqSvg(hqStyle.color,floors,hqStyle.flagColor);
     var faceH=floors*8+4, H=14+faceH+4, W=44;
     var icon=L.divIcon({className:'',
       html:'<div class="hq-marker" style="transform:scale('+k+');transform-origin:'+(W/2)+'px '+H+'px">'+svg+'</div>',
