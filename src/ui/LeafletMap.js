@@ -190,6 +190,15 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
     inject(`window.setDiscovered(${JSON.stringify([...d])})`);
   }, [ready, hubs.length, trucks.length, deliveries.length, history?.length, corridors.length]);
 
+  // Saved Autopilot custom routes — a fixed overlay, redrawn whenever the
+  // saved set changes (not per-tick like live delivery routes).
+  const customRoutes = useGame(s => s.customRoutes || []);
+  useEffect(() => {
+    if (!ready) return;
+    const routes = customRoutes.map(r => ({ id: r.id, points: r.points, color: r.color }));
+    inject(`window.setCustomRoutes(${JSON.stringify(routes)})`);
+  }, [ready, customRoutes]);
+
   useEffect(() => { if (ready) inject(`window.setPickMode(${!!pickingMode})`); }, [pickingMode, ready]);
   useEffect(() => { if (ready && focus) inject(`window.focusOn(${focus.lat},${focus.lng},${focus.scale ? 9 : 7})`); }, [focus, ready]);
 

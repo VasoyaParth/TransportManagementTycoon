@@ -454,6 +454,7 @@ export function RoutesTab({ onTrack, onNewDelivery }) {
           { key: 'insights', label: 'Insights' },
         ]}
         value={view} onChange={setView}
+        hint="Tap to switch between running trips, trip history and insights."
       />
 
       {view === 'running' && (

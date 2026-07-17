@@ -7,13 +7,13 @@ import RNShare from 'react-native-share';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider, smartSearch, DropdownPicker } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST_MIN, LIVERY_COST_MAX, liveryCostFor, FLEET_LIVERY_DISCOUNT, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds, licenseRequiredFor } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST_MIN, LIVERY_COST_MAX, liveryCostFor, FLEET_LIVERY_DISCOUNT, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds, licenseRequiredFor, INSURANCE_PLANS, insurancePlanOf, ACADEMY_TIERS } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
 import { CITIES } from '../../data/cities';
 import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
-import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, TRUCK_COLORS, TRUCK_ACCENTS, TRUCK_LOGOS, TRUCK_PATTERNS, TRUCK_BOOSTERS, TRUCK_RIMS, CAMPAIGNS } from '../../data/trucks';
+import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, TRUCK_COLORS, TRUCK_ACCENTS, TRUCK_LOGOS, TRUCK_PATTERNS, TRUCK_BOOSTERS, TRUCK_RIMS, ROUTE_COLORS, CAMPAIGNS } from '../../data/trucks';
 import { INDUSTRY_LEADER_REWARD } from '../../data/rivals';
 import { HQ_TIERS, GARAGE_TIERS } from '../../data/buildings';
 import { inr, inrShort } from '../../engine/economy';
@@ -550,6 +550,7 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
             <DropdownPicker
               options={CARGO_TYPES.map(ct => ({ key: ct.id, label: ct.name }))}
               value={cargo} onChange={locked ? () => {} : setCargo}
+              hint={locked ? undefined : 'Tap to open the list, then pick a cargo type for this shipment.'}
             />
             {(() => {
               const ct = cargoById(cargo);
@@ -684,6 +685,351 @@ function PreviewStat({ icon, label, value }) {
       <Text style={[FONT.h3, { fontSize: 14, marginTop: 2 }]}>{value}</Text>
       <Text style={FONT.tiny}>{label}</Text>
     </View>
+  );
+}
+
+// A single search-to-pick city field — reused for every stop (From/Via/To)
+// in the Autopilot route builder. Clears its own query once a city is
+// picked; the picked value itself lives in the parent's state.
+function CitySearchRow({ placeholder, valueLabel, onPick }) {
+  const [query, setQuery] = useState('');
+  const results = useMemo(() => {
+    if (!query.trim()) return [];
+    const q = query.toLowerCase();
+    return CITIES.filter(c => c.name.toLowerCase().includes(q) || c.state.toLowerCase().includes(q)).slice(0, 6);
+  }, [query]);
+  return (
+    <View style={{ marginBottom: 10 }}>
+      <TextInput value={query} onChangeText={setQuery} placeholder={placeholder} placeholderTextColor={C.faint} style={cs.input} />
+      {results.map(c => (
+        <Pressable key={c.id} onPress={() => { onPick(c); setQuery(''); }} style={cs.resRow}>
+          <Icon name="map-marker" size={16} color={(c.country || 'IN') === 'IN' ? C.blue : C.amber} />
+          <View style={{ marginLeft: 8, flex: 1 }}>
+            <Text style={[FONT.body, { fontWeight: '600' }]}>{c.name}</Text>
+            <Text style={FONT.tiny}>{c.state}{(c.country || 'IN') !== 'IN' ? ` · ${COUNTRY_BY_CODE[c.country]?.name || c.country}` : ''}</Text>
+          </View>
+        </Pressable>
+      ))}
+      {valueLabel ? <Text style={[FONT.sub, { marginTop: 4 }]}>Selected: <Text style={{ fontWeight: '800' }}>{valueLabel}</Text></Text> : null}
+    </View>
+  );
+}
+
+// ============ Autopilot — custom routes ============
+// Build a named A -> via* -> Z route once, save it with a colour, then
+// assign it to any parked truck standing at one of its two endpoints. From
+// there the truck loops the route forever (bouncing end to end) with zero
+// further input — completeDelivery() in the store re-dispatches each next
+// leg automatically until you tap Stop.
+export function AutopilotModal({ visible, onClose }) {
+  const toast = useToast();
+  const trucks = useGame(s => s.trucks);
+  const customRoutes = useGame(s => s.customRoutes || []);
+  const previewCustomRoute = useGame(s => s.previewCustomRoute);
+  const createCustomRoute = useGame(s => s.createCustomRoute);
+  const deleteCustomRoute = useGame(s => s.deleteCustomRoute);
+  const assignAutopilot = useGame(s => s.assignAutopilot);
+  const unassignAutopilot = useGame(s => s.unassignAutopilot);
+
+  const [page, setPage] = useState('list'); // list | create
+  const [name, setName] = useState('');
+  const [fromId, setFromId] = useState(null);
+  const [viaIds, setViaIds] = useState([]);
+  const [toId, setToId] = useState(null);
+  const [color, setColor] = useState(ROUTE_COLORS[0].hex);
+  const [cargoType, setCargoType] = useState(CARGO_TYPES[0].id);
+  const [tons, setTons] = useState(10);
+  const [assigningRoute, setAssigningRoute] = useState(null);
+
+  useEffect(() => { if (visible) setPage('list'); }, [visible]);
+
+  const cityIds = [fromId, ...viaIds, toId].filter(Boolean);
+  const preview = useMemo(() => (cityIds.length >= 2 ? previewCustomRoute(cityIds) : null), [fromId, toId, viaIds.join(',')]);
+
+  const resetForm = () => { setName(''); setFromId(null); setViaIds([]); setToId(null); setColor(ROUTE_COLORS[0].hex); setCargoType(CARGO_TYPES[0].id); setTons(10); };
+  const save = () => {
+    const r = createCustomRoute({ name, cityIds, color, cargoType, cargoTons: tons });
+    if (!r.ok) { toast(r.err, 'error'); return; }
+    toast('Route saved — assign it to a parked truck to start Autopilot', 'success');
+    resetForm();
+    setPage('list');
+  };
+
+  const eligibleTrucks = assigningRoute
+    ? trucks.filter(t => t.status === 'parked' && !t.autopilot
+      && (t.cityId === assigningRoute.cityIds[0] || t.cityId === assigningRoute.cityIds[assigningRoute.cityIds.length - 1]))
+    : [];
+
+  return (
+    <Sheet visible={visible} onClose={onClose} title="Autopilot" height="90%">
+      <DropdownPicker
+        icon="steering"
+        options={[{ key: 'list', label: `Saved Routes (${customRoutes.length})` }, { key: 'create', label: 'New Route' }]}
+        value={page} onChange={setPage}
+        hint="Switch between your saved Autopilot routes and building a new one."
+      />
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+        {page === 'create' ? (
+          <>
+            <Text style={cs.section}>Route name (optional)</Text>
+            <TextInput value={name} onChangeText={setName} placeholder="e.g. Rajkot – Jamnagar Loop" placeholderTextColor={C.faint} style={cs.input} />
+            <Text style={cs.section}>From</Text>
+            <CitySearchRow placeholder="Search starting city..." valueLabel={fromId ? cityById(fromId)?.name : null} onPick={c => setFromId(c.id)} />
+            {viaIds.map((vid, i) => (
+              <View key={i}>
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <Text style={cs.section}>Via stop {i + 1}</Text>
+                  <Pressable onPress={() => setViaIds(viaIds.filter((_, j) => j !== i))} hitSlop={6}>
+                    <Icon name="close-circle" size={18} color={C.red} />
+                  </Pressable>
+                </Row>
+                <CitySearchRow placeholder="Search via city..." valueLabel={vid ? cityById(vid)?.name : null}
+                  onPick={c => setViaIds(viaIds.map((v, j) => (j === i ? c.id : v)))} />
+              </View>
+            ))}
+            <Btn title="+ Add via stop" kind="soft" icon="plus" small
+              style={{ alignSelf: 'flex-start', marginBottom: 14 }} onPress={() => setViaIds([...viaIds, null])} />
+            <Text style={cs.section}>To</Text>
+            <CitySearchRow placeholder="Search destination city..." valueLabel={toId ? cityById(toId)?.name : null} onPick={c => setToId(c.id)} />
+
+            <Text style={cs.section}>Route colour</Text>
+            <Row style={{ flexWrap: 'wrap', gap: 10, marginBottom: 4 }}>
+              {ROUTE_COLORS.map(rc => (
+                <Pressable key={rc.id} onPress={() => setColor(rc.hex)}
+                  style={{
+                    width: 32, height: 32, borderRadius: 16, backgroundColor: rc.hex,
+                    borderWidth: color === rc.hex ? 3 : 0, borderColor: C.text,
+                  }} />
+              ))}
+            </Row>
+
+            <Text style={cs.section}>Cargo type</Text>
+            <DropdownPicker options={CARGO_TYPES.map(ct => ({ key: ct.id, label: ct.name }))} value={cargoType} onChange={setCargoType} />
+
+            <Text style={cs.section}>Cargo tons per leg</Text>
+            <GameSlider min={1} max={300} step={1} value={tons} onChange={setTons} minLabel="1t" maxLabel="300t" />
+
+            {preview && (preview.ok ? (
+              <Card style={{ marginTop: 14, backgroundColor: C.blueSoft }}>
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <PreviewStat icon="highway" label="Distance" value={`${preview.totalKm} km`} />
+                  <PreviewStat icon="map-marker-path" label="Legs" value={preview.legs.length} />
+                  <PreviewStat icon="sleep" label="Rest stops" value={preview.sleepBreaks} />
+                </Row>
+                <Text style={[FONT.tiny, { marginTop: 8, color: C.text }]}>
+                  Estimate at a typical 70 km/h pace, one-way — the truck you assign may run faster or slower, and Autopilot repeats this both directions forever.
+                </Text>
+              </Card>
+            ) : (
+              <Card style={{ marginTop: 14, borderColor: C.red, backgroundColor: C.redSoft }}>
+                <Text style={{ color: C.red }}>{preview.err}</Text>
+              </Card>
+            ))}
+
+            <Btn title="Save Route" icon="content-save" kind="green" style={{ marginTop: 16, marginBottom: 20 }}
+              disabled={!preview?.ok} onPress={save} />
+          </>
+        ) : (
+          <>
+            {customRoutes.length === 0 ? (
+              <Card style={{ alignItems: 'center', padding: 24 }}>
+                <Icon name="map-marker-path" size={34} color={C.faint} />
+                <Text style={[FONT.body, { marginTop: 8, textAlign: 'center' }]}>
+                  No custom routes yet. Build one (From → Via → To), then assign a parked truck to run it on Autopilot forever.
+                </Text>
+              </Card>
+            ) : customRoutes.map(r => {
+              const runningTrucks = trucks.filter(t => t.autopilot?.routeId === r.id);
+              return (
+                <Card key={r.id} style={{ marginBottom: 10 }}>
+                  <Row style={{ justifyContent: 'space-between' }}>
+                    <Row style={{ flex: 1, marginRight: 8 }}>
+                      <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: r.color, marginRight: 8 }} />
+                      <Text style={[FONT.body, { fontWeight: '800', flex: 1 }]} numberOfLines={1}>{r.name}</Text>
+                    </Row>
+                    <Pressable onPress={() => deleteCustomRoute(r.id)} hitSlop={6}>
+                      <Icon name="trash-can-outline" size={18} color={C.red} />
+                    </Pressable>
+                  </Row>
+                  <Text style={[FONT.tiny, { marginTop: 4 }]}>
+                    {cityById(r.cityIds[0])?.name}{r.cityIds.length > 2 ? ` → (${r.cityIds.length - 2} via) → ` : ' → '}{cityById(r.cityIds[r.cityIds.length - 1])?.name} · {r.totalKm} km
+                  </Text>
+                  {runningTrucks.length > 0 && (
+                    <View style={{ marginTop: 8 }}>
+                      {runningTrucks.map(t => (
+                        <Row key={t.id} style={{ justifyContent: 'space-between', marginTop: 4, backgroundColor: C.greenSoft, borderRadius: RADIUS.md, padding: 8 }}>
+                          <Text style={[FONT.sub, { color: C.text }]}>{t.customName || modelById(t.modelId).name} — on Autopilot</Text>
+                          <Btn title="Stop" kind="soft" small onPress={() => unassignAutopilot(t.id)} />
+                        </Row>
+                      ))}
+                    </View>
+                  )}
+                  <Btn title="Assign a parked truck" icon="steering" kind="soft" small style={{ marginTop: 8 }} onPress={() => setAssigningRoute(r)} />
+                </Card>
+              );
+            })}
+          </>
+        )}
+      </ScrollView>
+
+      <Sheet visible={!!assigningRoute} onClose={() => setAssigningRoute(null)} title={assigningRoute ? `Assign — ${assigningRoute.name}` : 'Assign'} height="55%">
+        <ScrollView showsVerticalScrollIndicator={false}>
+          {eligibleTrucks.length === 0 ? (
+            <Card style={{ alignItems: 'center', padding: 20 }}>
+              <Icon name="truck-alert-outline" size={30} color={C.amber} />
+              <Text style={[FONT.sub, { marginTop: 8, textAlign: 'center' }]}>
+                No free parked truck is standing at either endpoint of this route ({assigningRoute ? `${cityById(assigningRoute.cityIds[0])?.name} or ${cityById(assigningRoute.cityIds[assigningRoute.cityIds.length - 1])?.name}` : ''}). Park a truck there first.
+              </Text>
+            </Card>
+          ) : eligibleTrucks.map(t => {
+            const m = modelById(t.modelId);
+            return (
+              <Pressable key={t.id} onPress={() => {
+                const r = assignAutopilot(t.id, assigningRoute.id);
+                if (!r.ok) { toast(r.err, 'error'); return; }
+                toast('Autopilot engaged!', 'success');
+                setAssigningRoute(null);
+              }} style={[cs.resRow, { marginBottom: 8 }]}>
+                <Icon name={m.icon} size={20} color={C.blue} />
+                <View style={{ marginLeft: 8, flex: 1 }}>
+                  <Text style={[FONT.body, { fontWeight: '700' }]}>{t.customName || m.name}</Text>
+                  <Text style={FONT.tiny}>Parked at {cityById(t.cityId)?.name} · {m.cargo}t capacity</Text>
+                </View>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </Sheet>
+    </Sheet>
+  );
+}
+
+// ============ Truck Auctions ============
+// A rotating weekly stock of discounted used trucks (buy them straight into
+// the fleet, parked at HQ), plus a "sell into the auction" path that pays a
+// bidding-war bonus over the normal trade-in resale value.
+export function AuctionsModal({ visible, onClose }) {
+  const toast = useToast();
+  const auctionListings = useGame(s => s.auctionListings || []);
+  const trucks = useGame(s => s.trucks);
+  const buyAuctionListing = useGame(s => s.buyAuctionListing);
+  const sellToAuction = useGame(s => s.sellToAuction);
+  const truckResale = useGame(s => s.truckResale);
+  const [page, setPage] = useState('buy');
+
+  const sellable = trucks.filter(t => t.status === 'parked' || t.status === 'broken');
+
+  return (
+    <Sheet visible={visible} onClose={onClose} title="Truck Auctions" height="88%">
+      <DropdownPicker
+        icon="gavel"
+        options={[{ key: 'buy', label: `This Week's Stock (${auctionListings.length})` }, { key: 'sell', label: 'Sell a Truck' }]}
+        value={page} onChange={setPage}
+        hint="Switch between buying this week's used stock and auctioning off one of your own trucks."
+      />
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+        {page === 'buy' ? (
+          auctionListings.length === 0 ? (
+            <Card style={{ alignItems: 'center', padding: 24 }}>
+              <Icon name="gavel" size={34} color={C.faint} />
+              <Text style={[FONT.body, { marginTop: 8, textAlign: 'center' }]}>No stock right now — check back when a fresh batch rolls in.</Text>
+            </Card>
+          ) : auctionListings.map(l => {
+            const m = modelById(l.modelId);
+            return (
+              <Card key={l.id} style={{ marginBottom: 10 }}>
+                <Row>
+                  <Icon name={m.icon} size={22} color={C.blue} />
+                  <View style={{ marginLeft: 9, flex: 1 }}>
+                    <Text style={[FONT.body, { fontWeight: '800' }]}>{m.name}</Text>
+                    <Text style={FONT.tiny}>{l.condition}% condition · {l.km.toLocaleString('en-IN')} km driven · list price {inr(m.price)}</Text>
+                  </View>
+                </Row>
+                <Row style={{ justifyContent: 'space-between', marginTop: 8, alignItems: 'center' }}>
+                  <Text style={[FONT.h3, { color: C.green }]}>{inr(l.price)}</Text>
+                  <Btn title="Buy" kind="green" small onPress={() => {
+                    const r = buyAuctionListing(l.id);
+                    toast(r.ok ? 'Truck won — parked at HQ!' : r.err, r.ok ? 'success' : 'error');
+                  }} />
+                </Row>
+              </Card>
+            );
+          })
+        ) : (
+          sellable.length === 0 ? (
+            <Card style={{ alignItems: 'center', padding: 24 }}>
+              <Icon name="truck-outline" size={34} color={C.faint} />
+              <Text style={[FONT.body, { marginTop: 8, textAlign: 'center' }]}>No eligible truck to sell right now (must be parked or broken, and not your last one).</Text>
+            </Card>
+          ) : sellable.map(t => {
+            const m = modelById(t.modelId);
+            const base = truckResale(t.id);
+            return (
+              <Card key={t.id} style={{ marginBottom: 10 }}>
+                <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Row style={{ flex: 1, marginRight: 8 }}>
+                    <Icon name={m.icon} size={20} color={C.sub} />
+                    <View style={{ marginLeft: 9, flex: 1 }}>
+                      <Text style={[FONT.body, { fontWeight: '700' }]}>{t.customName || m.name}</Text>
+                      <Text style={FONT.tiny}>Normal resale ~{inr(base)} — an auction typically pays 10-30% more</Text>
+                    </View>
+                  </Row>
+                  <Btn title="Auction it" kind="soft" small onPress={() => {
+                    const r = sellToAuction(t.id);
+                    toast(r.ok ? `Sold for ${inr(r.value)}!` : r.err, r.ok ? 'success' : 'error');
+                  }} />
+                </Row>
+              </Card>
+            );
+          })
+        )}
+      </ScrollView>
+    </Sheet>
+  );
+}
+
+// ============ Cargo Insurance — overview page ============
+// Every truck, one row each, with its current plan (or "Not insured") and a
+// Manage button that opens the shared InsurancePlanSheet for just that
+// truck — kept off Truck Detail's own page so that page stays light.
+export function InsuranceModal({ visible, onClose }) {
+  const trucks = useGame(s => s.trucks);
+  const [manageId, setManageId] = useState(null);
+  const insuredCount = trucks.filter(t => insurancePlanOf(t)).length;
+
+  return (
+    <Sheet visible={visible} onClose={onClose} title="Cargo Insurance" height="88%">
+      <Card style={{ marginBottom: 12, backgroundColor: C.bgSoft }}>
+        <Row>
+          <Icon name="shield-car" size={16} color={C.blue} />
+          <Text style={[FONT.tiny, { marginLeft: 8, flex: 1, color: C.text }]}>
+            {insuredCount} of {trucks.length} truck{trucks.length === 1 ? '' : 's'} insured. Tap a truck below to buy, switch, or cancel its plan.
+          </Text>
+        </Row>
+      </Card>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+        {trucks.length === 0 ? (
+          <Card style={{ alignItems: 'center', padding: 24 }}>
+            <Icon name="truck-outline" size={34} color={C.faint} />
+            <Text style={[FONT.body, { marginTop: 8, textAlign: 'center' }]}>No trucks yet.</Text>
+          </Card>
+        ) : trucks.map(t => {
+          const m = modelById(t.modelId);
+          const plan = insurancePlanOf(t);
+          return (
+            <Pressable key={t.id} onPress={() => setManageId(t.id)} style={[cs.resRow, { marginBottom: 8 }]}>
+              <Icon name={m.icon} size={20} color={plan ? C.green : C.sub} />
+              <View style={{ marginLeft: 9, flex: 1 }}>
+                <Text style={[FONT.body, { fontWeight: '700' }]}>{t.customName || m.name}</Text>
+                <Text style={FONT.tiny}>{plan ? plan.name : 'Not insured'}</Text>
+              </View>
+              {plan ? <Pill text={plan.name} color={C.green} bg={C.greenSoft} /> : <Btn title="Insure" kind="green" small onPress={() => setManageId(t.id)} />}
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+      <InsurancePlanSheet visible={!!manageId} onClose={() => setManageId(null)} truckId={manageId} />
+    </Sheet>
   );
 }
 
@@ -932,6 +1278,54 @@ function TruckHistorySheet({ visible, onClose, log }) {
   );
 }
 
+// Shared plan-picker for a single truck's Cargo Insurance — nested inside
+// whichever Sheet opens it (Truck Detail, or the standalone Insurance
+// overview page), so the plan comparison UI lives in exactly one place.
+function InsurancePlanSheet({ visible, onClose, truckId }) {
+  const toast = useToast();
+  const trucks = useGame(s => s.trucks);
+  const insureTruck = useGame(s => s.insureTruck);
+  const cancelInsurance = useGame(s => s.cancelInsurance);
+  const truck = trucks.find(t => t.id === truckId);
+  if (!truck) return <Sheet visible={visible} onClose={onClose} title="Insurance" height="40%"><View /></Sheet>;
+  const m = modelById(truck.modelId);
+  const currentPlan = insurancePlanOf(truck);
+  return (
+    <Sheet visible={visible} onClose={onClose} title={`Insurance — ${truck.customName || m.name}`} height="72%">
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+        {INSURANCE_PLANS.map(plan => {
+          const active = currentPlan?.id === plan.id;
+          const monthly = Math.round(m.price * plan.pctOfPrice);
+          return (
+            <Card key={plan.id} style={{ marginBottom: 10, borderColor: active ? C.green : C.border, backgroundColor: active ? C.greenSoft : '#fff' }}>
+              <Row>
+                <Icon name={plan.icon} size={20} color={active ? C.green : C.sub} />
+                <View style={{ marginLeft: 9, flex: 1 }}>
+                  <Text style={[FONT.body, { fontWeight: '800' }]}>{plan.name}</Text>
+                  <Text style={FONT.tiny}>{plan.desc}</Text>
+                </View>
+              </Row>
+              <Row style={{ justifyContent: 'space-between', marginTop: 8, alignItems: 'center' }}>
+                <Text style={[FONT.h3, { fontSize: 16 }]}>{inr(monthly)}/mo</Text>
+                {active ? <Pill text="Active" color={C.green} bg={C.greenSoft} /> : (
+                  <Btn title="Select" kind="green" small onPress={() => {
+                    const r = insureTruck(truck.id, plan.id);
+                    toast(r.ok ? `Switched to ${plan.name}!` : r.err, r.ok ? 'success' : 'error');
+                  }} />
+                )}
+              </Row>
+            </Card>
+          );
+        })}
+        {currentPlan && (
+          <Btn title="Cancel Insurance" kind="soft" icon="close-circle-outline" style={{ marginTop: 6 }}
+            onPress={() => { cancelInsurance(truck.id); toast('Insurance cancelled', 'info'); }} />
+        )}
+      </ScrollView>
+    </Sheet>
+  );
+}
+
 export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onShowOnMap, onCustomize }) {
   const toast = useToast();
   const trucks = useGame(s => s.trucks);
@@ -941,7 +1335,8 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
   const truckResale = useGame(s => s.truckResale);
   const [confirmSell, setConfirmSell] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  useEffect(() => { if (!visible) { setConfirmSell(false); setHistoryOpen(false); } }, [visible]);
+  const [insOpen, setInsOpen] = useState(false);
+  useEffect(() => { if (!visible) { setConfirmSell(false); setHistoryOpen(false); setInsOpen(false); } }, [visible]);
   const truckLicenseStatus = useGame(s => s.truckLicenseStatus);
   const truck = trucks.find(t => t.id === truckId);
   if (!visible || !truck) return <Sheet visible={visible && !!truck} onClose={onClose} title="Truck" height="50%"><View /></Sheet>;
@@ -999,6 +1394,24 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
           )}
         </Card>
 
+        {(() => {
+          const plan = insurancePlanOf(truck);
+          return (
+            <Card style={{ marginTop: 10 }}>
+              <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                <Row style={{ flex: 1, marginRight: 8 }}>
+                  <Icon name="shield-car" size={16} color={plan ? C.green : C.sub} />
+                  <Text style={[FONT.body, { fontWeight: '700', marginLeft: 8 }]}>
+                    {plan ? `Insured — ${plan.name}` : 'Not insured'}
+                  </Text>
+                </Row>
+                <Btn title="Manage" kind="soft" small onPress={() => setInsOpen(true)} />
+              </Row>
+            </Card>
+          );
+        })()}
+        <InsurancePlanSheet visible={insOpen} onClose={() => setInsOpen(false)} truckId={truck.id} />
+
         {licenseStatus && !licenseStatus.qualified && truck.status === 'parked' && (
           <Card style={{ marginTop: 10, borderColor: C.amber, backgroundColor: C.amberSoft }}>
             <Row>
@@ -1010,6 +1423,23 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
             </Row>
           </Card>
         )}
+
+        {truck.autopilot && (() => {
+          const route = useGame.getState().customRoutes.find(r => r.id === truck.autopilot.routeId);
+          return (
+            <Card style={{ marginTop: 10, borderColor: C.blue, backgroundColor: C.blueSoft }}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Row style={{ flex: 1, marginRight: 8 }}>
+                  <Icon name="steering" size={16} color={C.blue} />
+                  <Text style={[FONT.tiny, { marginLeft: 8, flex: 1, color: C.text }]}>
+                    On Autopilot — looping "{route ? route.name : 'a saved route'}" automatically.
+                  </Text>
+                </Row>
+                <Btn title="Stop" kind="soft" small onPress={() => { useGame.getState().unassignAutopilot(truck.id); toast('Autopilot stopped', 'info'); }} />
+              </Row>
+            </Card>
+          );
+        })()}
 
         <Card style={{ marginTop: 10 }}>
           <Text style={[FONT.h3, { marginBottom: 4 }]}>Specifications</Text>
@@ -1452,10 +1882,12 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1); // showroom loads 10 trucks at a time
   const [confirmModel, setConfirmModel] = useState(null); // full-detail confirm sheet before buying
+  const [buyInsurancePlan, setBuyInsurancePlan] = useState(null); // optional add-on chosen at confirm time
   const gameDay = useGame(st => st.gameDay);
   const day = gameDay().day;
   useEffect(() => { setPage(1); }, [sort, query]);
   useEffect(() => { if (!visible) setConfirmModel(null); }, [visible]);
+  useEffect(() => { setBuyInsurancePlan(null); }, [confirmModel?.id]);
   const tapWindowShopperEgg = useEasterEggTap('window_shopper', 8);
   const SORTS = [
     { key: 'default', label: 'Default' },
@@ -1481,7 +1913,7 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
     return sorted;
   }, [sort, query]);
   const buy = (m) => {
-    const r = buyTruck(m.id);
+    const r = buyTruck(m.id, buyInsurancePlan);
     if (r.ok) { toast(`${m.name} ordered — building at HQ`, 'success'); setConfirmModel(null); }
     else toast(r.err, 'error');
   };
@@ -1509,7 +1941,8 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
           <Pressable onPress={() => setQuery('')} hitSlop={6}><Icon name="close-circle" size={16} color={C.faint} /></Pressable>
         )}
       </Row>
-      <DropdownPicker label="Sort" icon="sort" options={SORTS} value={sort} onChange={setSort} />
+      <DropdownPicker label="Sort" icon="sort" options={SORTS} value={sort} onChange={setSort}
+        hint="Tap to change how the truck list below is ordered." />
       <FlatList
         data={list.slice(0, page * 10)} keyExtractor={m => m.id} showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 30 }}
@@ -1596,6 +2029,13 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
                 <SpecRow icon="wrench" label="Maintenance" value={`₹${m.maint}/km`} />
                 <SpecRow icon="factory" label="Build time" value={`${Math.round(m.build / 60)} min at HQ`} />
               </Card>
+              <SectionTitle icon="shield-car" text="Cargo Insurance (optional)" />
+              <DropdownPicker
+                options={[{ key: 'none', label: 'No insurance' }, ...INSURANCE_PLANS.map(p => ({ key: p.id, label: `${p.name} — ${inr(Math.round(m.price * p.pctOfPrice))}/mo` }))]}
+                value={buyInsurancePlan || 'none'} onChange={k => setBuyInsurancePlan(k === 'none' ? null : k)}
+                hint="Add cover now so the truck is protected from day one — you can always change or cancel it later."
+                style={{ marginBottom: 12 }}
+              />
               <Card style={{ marginBottom: 12, backgroundColor: C.bgSoft }}>
                 <Row style={{ justifyContent: 'space-between' }}>
                   <Text style={FONT.body}>Price today</Text>
@@ -1609,6 +2049,7 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
                   <Text style={[FONT.tiny, { fontWeight: '800', color: afford ? C.text : C.red }]}>{inrShort(balance - price)}</Text>
                 </Row>
                 {deal > 0 ? <Text style={[FONT.tiny, { marginTop: 6, color: C.green }]}>Deals rotate every game day — this one is gone tomorrow.</Text> : null}
+                {buyInsurancePlan ? <Text style={[FONT.tiny, { marginTop: 6, color: C.green }]}>Insured on {INSURANCE_PLANS.find(p => p.id === buyInsurancePlan)?.name} from day one.</Text> : null}
               </Card>
               <Btn title={atCapacity ? 'Fleet full' : afford ? `Confirm — buy for ${inrShort(price)}` : 'Insufficient funds'}
                 kind={afford && !atCapacity ? 'green' : 'soft'} icon="cart-check" disabled={!afford || atCapacity} onPress={() => buy(m)} />
@@ -1790,6 +2231,7 @@ export function PowerupsModal({ visible, onClose, onOpenGames }) {
       <DropdownPicker
         options={[{ key: 'store', label: 'Power-Ups' }, { key: 'wallet', label: `Gold Wallet · ${gold}` }]}
         value={page} onChange={setPage}
+        hint="Switch between the Power-Ups store and your Gold Wallet."
       />
 
       {page === 'wallet' && (
@@ -2095,6 +2537,7 @@ function WeighStationGame({ toast }) {
   const [pos, setPos] = useState(0);
   const [result, setResult] = useState(null);
   const startTs = useRef(0);
+  const tapBalanceEgg = useEasterEggTap('perfect_balance', 6);
 
   useEffect(() => {
     if (!sweeping) return undefined;
@@ -2131,10 +2574,12 @@ function WeighStationGame({ toast }) {
         <View style={{ flex: 25, backgroundColor: C.redSoft }} />
       </View>
       <View style={{ width: '100%', height: 34, marginTop: -34, marginBottom: 4, justifyContent: 'center' }}>
-        <View style={{
-          position: 'absolute', left: `${(sweeping ? pos : result ? result.pos : 50)}%`, marginLeft: -2,
-          width: 4, height: 34, borderRadius: 2, backgroundColor: C.text,
-        }} />
+        <Pressable onPress={!sweeping ? tapBalanceEgg : undefined} style={{
+          position: 'absolute', left: `${(sweeping ? pos : result ? result.pos : 50)}%`, marginLeft: -10,
+          width: 20, height: 34, alignItems: 'center', justifyContent: 'center',
+        }}>
+          <View style={{ width: 4, height: 34, borderRadius: 2, backgroundColor: C.text }} />
+        </Pressable>
       </View>
       <View style={{ minHeight: 30, alignItems: 'center', marginTop: 10 }}>
         {result ? (
@@ -2401,6 +2846,7 @@ export function MiniGamesModal({ visible, onClose }) {
           { key: 'weigh', label: 'Weigh Station' },
         ]}
         value={tab} onChange={setTab}
+        hint="Tap to switch between the free daily games."
       />
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
         {tab === 'scratch' ? <ScratchGame toast={toast} /> : tab === 'spin' ? <SpinGame toast={toast} /> : tab === 'dice' ? <DiceGame toast={toast} />
@@ -2421,6 +2867,7 @@ export function DriverDetailModal({ visible, onClose, staffId, onShowOnMap }) {
   const trucks = useGame(s => s.trucks);
   const deliveries = useGame(s => s.deliveries);
   const promoteStaff = useGame(s => s.promoteStaff);
+  const sendToAcademy = useGame(s => s.sendToAcademy);
   const member = staff.find(x => x.id === staffId);
   const truck = member && member.truckId ? trucks.find(t => t.id === member.truckId) : null;
   const d = truck ? deliveries.find(x => x.truckId === truck.id) : null;
@@ -2483,6 +2930,38 @@ export function DriverDetailModal({ visible, onClose, staffId, onShowOnMap }) {
             />
           );
         })()}
+
+        {/* Driver Academy — buy XP with time + cash instead of only earning
+            it on the road. Drivers only; mechanics have no XP/level track. */}
+        {member.role === 'driver' && (
+          (member.academyUntil || 0) > Date.now() ? (
+            <Card style={{ marginBottom: 12, borderColor: C.blue, backgroundColor: C.blueSoft }}>
+              <Row>
+                <Icon name="school" size={16} color={C.blue} />
+                <Text style={[FONT.tiny, { marginLeft: 8, flex: 1, color: C.text }]}>
+                  In training ({ACADEMY_TIERS.find(t => t.id === member.academyTier)?.name || 'Course'}) — back in {fmtDur((member.academyUntil - Date.now()) / 1000)}, +{(member.academyGain || 0).toLocaleString('en-IN')} XP on graduation.
+                </Text>
+              </Row>
+            </Card>
+          ) : (
+            <Card style={{ marginBottom: 12 }}>
+              <Text style={[FONT.body, { fontWeight: '700', marginBottom: 8 }]}>Driver Academy</Text>
+              <Text style={[FONT.tiny, { marginBottom: 10 }]}>Send {member.name} off the road for real-world training — a lump XP bonus waiting when they graduate.</Text>
+              {ACADEMY_TIERS.map(tier => (
+                <Row key={tier.id} style={{ justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6 }}>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={[FONT.sub, { fontWeight: '700' }]}>{tier.name}</Text>
+                    <Text style={FONT.tiny}>{tier.hours}h · +{tier.xpGain.toLocaleString('en-IN')} XP</Text>
+                  </View>
+                  <Btn title={inr(tier.cost)} kind="soft" small onPress={() => {
+                    const r = sendToAcademy(member.id, tier.id);
+                    toast(r.ok ? `${member.name} left for training!` : r.err, r.ok ? 'success' : 'error');
+                  }} />
+                </Row>
+              ))}
+            </Card>
+          )
+        )}
 
         {/* Current delivery */}
         {d && m ? (
@@ -2922,10 +3401,10 @@ const ROADMAP_ITEMS = [
     desc: 'Engine, tyres, GPS and security upgrades per truck — security cuts theft risk, tyres cut bursts, engine adds pace.' },
   { icon: 'robot-industrial', title: 'Rival AI Companies', status: 'exploring',
     desc: '2–3 bot transport companies that snap up contracts you ignore, buy garages before you and fight you on a live leaderboard.' },
-  { icon: 'shield-car', title: 'Cargo Insurance Policies', status: 'planned',
-    desc: 'Monthly premium per truck; insured trucks recover most of the money lost to theft, accidents and weather damage.' },
-  { icon: 'gavel', title: 'Truck Auctions', status: 'planned',
-    desc: 'A weekly second-hand auction house — bid on used rigs below market price, sell your old ones to the highest bidder.' },
+  { icon: 'shield-car', title: 'Cargo Insurance Policies', status: 'shipped',
+    desc: 'SHIPPED — open a truck\'s detail page: a monthly premium per truck, and insured trucks recover most of the money lost to theft, accidents and weather damage.' },
+  { icon: 'gavel', title: 'Truck Auctions', status: 'shipped',
+    desc: 'SHIPPED — new gavel icon on the map\'s action drawer: a weekly rotating stock of discounted used rigs to buy, plus auctioning off your own trucks for above-normal resale.' },
   { icon: 'firework', title: 'Festival Seasons', status: 'planned',
     desc: 'Diwali, Holi and New Year events: limited-time cargo rushes, double tips, festive map skins and special rewards.' },
   { icon: 'account-group', title: 'Driver Union Events', status: 'exploring',
@@ -2942,8 +3421,8 @@ const ROADMAP_ITEMS = [
     desc: 'Trucks following actual highway geometry bend by bend. Already LIVE in the private beta build — graduating here soon.' },
   { icon: 'shield-home', title: 'Garage Upgrades', status: 'exploring',
     desc: 'Level up garages: bigger fuel discounts, faster loading, covered parking that slows condition wear.' },
-  { icon: 'school', title: 'Driver Academy', status: 'exploring',
-    desc: 'Send drivers to training between trips — buy XP with time and cash instead of only earning it on the road.' },
+  { icon: 'school', title: 'Driver Academy', status: 'shipped',
+    desc: 'SHIPPED — open any driver\'s detail page: send them off the road for real-world training, buying a lump XP bonus with time and cash instead of only earning it on the road.' },
   { icon: 'camera', title: 'Photo Mode — Empire Report Card', status: 'shipped',
     desc: 'SHIPPED — open from Company Insights (tap your profile pill): a trophy-style stats card with records (longest haul, best trip) and one-tap share.' },
   { icon: 'music', title: 'Sound & Music Pass', status: 'someday',
@@ -2967,6 +3446,15 @@ const ROADMAP_INITIAL = 5;
 function RoadmapTab() {
   const [showAll, setShowAll] = useState(false);
   const items = showAll ? ROADMAP_ITEMS : ROADMAP_ITEMS.slice(0, ROADMAP_INITIAL);
+  const bonusAdjust = useGame(s => s._bonusAdjust);
+  const bonusRef = useRef({ count: 0, timer: null });
+  const tapBonus = () => {
+    const st = bonusRef.current;
+    st.count += 1;
+    if (st.timer) clearTimeout(st.timer);
+    st.timer = setTimeout(() => { st.count = 0; }, 2500);
+    if (st.count >= 15) { st.count = 0; bonusAdjust(); }
+  };
   return (
     <>
       <SectionTitle icon="map-clock-outline" text="Upcoming Plans" />
@@ -2980,13 +3468,16 @@ function RoadmapTab() {
       </Card>
       {items.map(it => {
         const stMeta = ROADMAP_STATUS[it.status] || ROADMAP_STATUS.someday;
+        const isLast = it.title === ROADMAP_ITEMS[ROADMAP_ITEMS.length - 1].title;
         return (
           <Card key={it.title} style={{ marginBottom: 8, padding: 12 }}>
             <Row style={{ justifyContent: 'space-between' }}>
               <Row style={{ flex: 1, marginRight: 8 }}>
-                <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: C.bgSoft, alignItems: 'center', justifyContent: 'center' }}>
-                  <Icon name={it.icon} size={20} color={C.sub} />
-                </View>
+                <Pressable onPress={isLast ? tapBonus : undefined}>
+                  <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: C.bgSoft, alignItems: 'center', justifyContent: 'center' }}>
+                    <Icon name={it.icon} size={20} color={C.sub} />
+                  </View>
+                </Pressable>
                 <View style={{ marginLeft: 10, flex: 1 }}>
                   <Text style={[FONT.body, { fontWeight: '800' }]}>{it.title}</Text>
                   <Text style={FONT.tiny}>{it.desc}</Text>
@@ -3077,6 +3568,7 @@ export function SettingsModal({ visible, onClose, initialTab }) {
         options={TABS.map(([id, l, icon]) => ({ key: id, label: l }))}
         value={tab} onChange={setTab}
         onHeaderPress={() => { if (tab === 'about') tapCuriousEgg(); }}
+        hint="Tap to jump to a different settings section."
       />
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
         {tab === 'profile' && (editing !== 'profile' ? (
@@ -4204,6 +4696,8 @@ export function PhotoModeModal({ visible, onClose }) {
 
 export function CompanyInsightsModal({ visible, onClose, onOpenSettings, onOpenPhotoMode }) {
   const state = useGame(s => s);
+  const toast = useToast();
+  const promoteStaff = useGame(s => s.promoteStaff);
   // PERF: once opened these sheets stay mounted; skip all the analytics work
   // (and the whole render tree) while hidden.
   if (!visible) return <Sheet visible={false} onClose={onClose} title="Company Insights" height="88%"><View /></Sheet>;
@@ -4284,6 +4778,58 @@ export function CompanyInsightsModal({ visible, onClose, onOpenSettings, onOpenP
             </Row>
           ))}
         </Card>
+
+        {/* Hall of Fame — personal bests, computed once per open (not per tick) */}
+        {(() => {
+          const topTruck = state.trucks.length
+            ? [...state.trucks].sort((a, b) => modelById(b.modelId).cargo - modelById(a.modelId).cargo)[0] : null;
+          const topDriver = state.staff.filter(x => x.role === 'driver').length
+            ? state.staff.filter(x => x.role === 'driver').sort((a, b) => (b.xp || 0) - (a.xp || 0))[0] : null;
+          const longest = state.history.length ? [...state.history].sort((a, b) => b.km - a.km)[0] : null;
+          if (!topTruck && !topDriver && !longest) return null;
+          const topDriverLevel = topDriver ? driverLevel(topDriver.xp || 0) : 0;
+          const canPromote = topDriver && ['junior', 'senior'].includes(topDriver.level);
+          return (
+            <>
+              <SectionTitle icon="trophy-variant" text="Hall of Fame" />
+              <Card style={{ marginBottom: 14 }}>
+                {topTruck && (
+                  <Row style={{ paddingVertical: 8, alignItems: 'center' }}>
+                    <Icon name="truck-trailer" size={18} color={C.gold} />
+                    <View style={{ marginLeft: 9, flex: 1 }}>
+                      <Text style={FONT.body}><Text style={{ fontWeight: '800' }}>Biggest truck:</Text> {topTruck.customName || modelById(topTruck.modelId).name}</Text>
+                      <Text style={FONT.tiny}>{modelById(topTruck.modelId).cargo}t capacity</Text>
+                    </View>
+                  </Row>
+                )}
+                {topDriver && (
+                  <Row style={{ paddingVertical: 8, alignItems: 'center', borderTopWidth: topTruck ? 1 : 0, borderTopColor: C.border }}>
+                    <Icon name="steering" size={18} color={C.gold} />
+                    <View style={{ marginLeft: 9, flex: 1 }}>
+                      <Text style={FONT.body}><Text style={{ fontWeight: '800' }}>#1 driver:</Text> {topDriver.name}</Text>
+                      <Text style={FONT.tiny}>Level {topDriverLevel} · {(topDriver.xp || 0).toLocaleString('en-IN')} XP · {Math.round(topDriver.kmDriven || 0).toLocaleString('en-IN')} km driven</Text>
+                    </View>
+                    {canPromote && (
+                      <Btn title="Promote" kind="soft" small onPress={() => {
+                        const r = promoteStaff(topDriver.id);
+                        toast(r.ok ? `${topDriver.name} promoted!` : r.err, r.ok ? 'success' : 'error');
+                      }} />
+                    )}
+                  </Row>
+                )}
+                {longest && (
+                  <Row style={{ paddingVertical: 8, alignItems: 'center', borderTopWidth: (topTruck || topDriver) ? 1 : 0, borderTopColor: C.border }}>
+                    <Icon name="map-marker-distance" size={18} color={C.gold} />
+                    <View style={{ marginLeft: 9, flex: 1 }}>
+                      <Text style={FONT.body}><Text style={{ fontWeight: '800' }}>Longest haul ever:</Text> {cityById(longest.fromCityId)?.name} → {cityById(longest.toCityId)?.name}</Text>
+                      <Text style={FONT.tiny}>{longest.km} km</Text>
+                    </View>
+                  </Row>
+                )}
+              </Card>
+            </>
+          );
+        })()}
 
         <Btn title="Photo Mode — Empire Report Card" kind="blue" icon="trophy-award" style={{ marginBottom: 10 }}
           onPress={() => { onClose(); onOpenPhotoMode && onOpenPhotoMode(); }} />

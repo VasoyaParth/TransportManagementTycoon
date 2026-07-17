@@ -6,7 +6,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { TRUCK_MODELS, CARGO_TYPES, CAMPAIGNS, POWERUPS, CONTRACT_FLAVORS } from '../data/trucks';
+import { TRUCK_MODELS, CARGO_TYPES, CAMPAIGNS, POWERUPS, CONTRACT_FLAVORS, ROUTE_COLORS } from '../data/trucks';
 import { HQ_TIERS, GARAGE_TIERS } from '../data/buildings';
 import { RIVAL_COMPANIES, INDUSTRY_LEADER_REWARD } from '../data/rivals';
 import { COUNTRY_BY_CODE } from '../data/expansion';
@@ -31,6 +31,34 @@ const CONTRACT_REFRESH_MIN_MS = 2 * 3600 * 1000;
 const CONTRACT_REFRESH_MAX_MS = 4 * 3600 * 1000;
 const nextRefreshDelay = () =>
   CONTRACT_REFRESH_MIN_MS + Math.random() * (CONTRACT_REFRESH_MAX_MS - CONTRACT_REFRESH_MIN_MS);
+// Cargo Insurance: pick a plan per truck. Each plan charges a flat monthly
+// premium (a % of the truck's list price, billed alongside salaries) and in
+// exchange covers a fraction of on-road incident cash losses (theft,
+// accident, weather...) plus a discount on the repair bill if the truck
+// breaks down entirely. Higher tiers cost more but cover more.
+export const INSURANCE_PLANS = [
+  { id: 'basic', name: 'Basic Cover', icon: 'shield-outline', pctOfPrice: 0.006, incidentRecovery: 0.6, repairDiscount: 0,
+    desc: 'Cheapest option — recovers 60% of incident cash losses. No help with a full breakdown repair bill.' },
+  { id: 'standard', name: 'Standard Cover', icon: 'shield-half-full', pctOfPrice: 0.012, incidentRecovery: 0.85, repairDiscount: 0.5,
+    desc: 'Recovers 85% of incident losses, plus half off the repair bill if the truck breaks down.' },
+  { id: 'premium', name: 'Premium Cover', icon: 'shield-check', pctOfPrice: 0.02, incidentRecovery: 1.0, repairDiscount: 1.0,
+    desc: 'Full incident recovery and free repairs on a full breakdown — total peace of mind.' },
+];
+// Old saves stored a plain `insured: true` boolean (pre-v10.25.0) — this
+// treats that as equivalent to the Basic plan so nobody's cover silently
+// vanishes on upgrade, without needing a one-shot migration pass.
+export function insurancePlanOf(truck) {
+  if (!truck) return null;
+  const id = truck.insurancePlan || (truck.insured ? 'basic' : null);
+  return id ? INSURANCE_PLANS.find(p => p.id === id) || null : null;
+}
+// Driver Academy: pay cash + take a driver off the road for real hours,
+// come back with a lump XP bonus — buying XP with time instead of km.
+export const ACADEMY_TIERS = [
+  { id: 'basic', name: 'Basic Course', hours: 2, cost: 50000, xpGain: 400 },
+  { id: 'advanced', name: 'Advanced Course', hours: 6, cost: 150000, xpGain: 1500 },
+  { id: 'master', name: 'Master Class', hours: 12, cost: 400000, xpGain: 4000 },
+];
 // Gold → cash exchange rate (₹ per Gold). Gold is premium, so it converts rich.
 export const GOLD_TO_CASH = 50000;
 
@@ -764,6 +792,8 @@ export const EASTER_EGGS = [
   // v10.9.0 — a few final ones, including one for the other half of the team.
   { id: 'meet_jeel', title: 'Meet Jeel', hint: 'The other half of the team deserves a knock too.', where: 'Tap the Jeel Gajera developer card in Settings → About 8 times fast.' },
   { id: 'donor', title: 'Big Heart', hint: 'Giving it all away, one tap at a time.', where: 'Tap the Charity Drive icon in the Bank sheet 5 times fast.' },
+  // v10.23.0
+  { id: 'perfect_balance', title: 'Perfect Balance', hint: 'Patience beats a fast trigger finger.', where: 'In Mini-Games → Weigh Station, tap the needle while it\'s idle (not sweeping) 6 times fast.' },
 ];
 const EASTER_EGG_REWARD = { cash: 1000000, gold: 15 }; // ₹10 lakhs + 15 Gold, per egg, one-time
 
@@ -831,6 +861,9 @@ export const ACHIEVEMENTS = [
     desc: 'Collateral-backed loans taken out, lifetime.', levels: [1, 3, 6, 12, 25] },
   { id: 'trendsetter', title: 'Trendsetter', icon: 'palette', unit: 'repaints',
     desc: 'Trucks repainted with a custom livery, lifetime.', levels: [1, 5, 15, 40, 100] },
+  // v10.23.0 — fed by the new Autopilot custom-route system.
+  { id: 'autopilot_ace', title: 'Autopilot Ace', icon: 'steering', unit: 'legs',
+    desc: 'Delivery legs completed automatically on a saved custom route.', levels: [5, 20, 75, 250, 750] },
 ];
 // Current metric value for a track, computed from live state.
 export function achievementValue(s, id) {
@@ -862,6 +895,7 @@ export function achievementValue(s, id) {
     case 'philanthropist': return s.stats.donated || 0;
     case 'collateral_king': return s.stats.loansTaken || 0;
     case 'trendsetter': return s.stats.repaints || 0;
+    case 'autopilot_ace': return s.stats.autopilotLegs || 0;
     default: return 0;
   }
 }
@@ -906,6 +940,21 @@ function randomCandidates() {
   return out;
 }
 
+// Truck Auctions: a fresh batch of used, discounted rigs every real week
+// (see the isoWeekId check in dailyTick). Priced well below list — the
+// trade-off is used condition and pre-existing wear (km, deliveries).
+function randomAuctionListings(count = 6) {
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    const model = TRUCK_MODELS[Math.floor(Math.random() * TRUCK_MODELS.length)];
+    const condition = Math.round(35 + Math.random() * 55); // 35-90%
+    const km = Math.round((100 - condition) * 2500 + Math.random() * 15000);
+    const price = Math.round(model.price * (0.3 + (condition / 100) * 0.35));
+    out.push({ id: uid('auc'), modelId: model.id, condition, km, price });
+  }
+  return out;
+}
+
 // One free starter driver so the player can dispatch immediately.
 function starterDriver() {
   const gender = Math.random() < 0.6 ? 'm' : 'f';
@@ -930,6 +979,9 @@ const initialState = {
   candidates: [],
   hubs: [], // {cityId, name, hq, since} — HQ + purchased garages/hubs
   corridors: [], // {id, fromCityId, toCityId, points} — unlocked/highlighted routes
+  customRoutes: [], // {id, name, cityIds:[from,...via,to], color, cargoType, cargoTons, createdAt} — saved Autopilot routes
+  auctionListings: [], // {id, modelId, condition, km, price} — this week's discounted used-truck stock
+  auctionWeek: '', // isoWeekId() the current auctionListings were rolled for
   contracts: [],
   unlockedCountries: ['IN'], // v1.4.0: neighbouring countries unlock in-game
   campaigns: [], // {id, campaignId, startedAt, endsAt}
@@ -1083,6 +1135,10 @@ export const useGame = create(
         for (const d of [...s.deliveries]) {
           if (d.endsAt <= now) get().completeDelivery(d.id, true);
         }
+        // finished academy courses
+        for (const m of [...get().staff]) {
+          if (m.academyUntil && m.academyUntil <= now) get().finishAcademyIfDue(m.id);
+        }
         // expired campaigns just fall out of the active filter naturally
         get().dailyTick();
       },
@@ -1148,16 +1204,21 @@ export const useGame = create(
           }
         }
         const { day } = get().gameDay();
-        // Monthly running costs: staff salaries + garage maintenance (non-HQ).
+        // Monthly running costs: staff salaries + garage maintenance (non-HQ) + insurance premiums.
         if (day - s.lastSalaryDay >= SALARY_EVERY_DAYS) {
           const salaries = s.staff.reduce((a, x) => a + x.salary, 0);
           const upkeep = (s.hubs || []).filter(h => !h.hq).reduce((a, h) => a + (h.maint || hubMaintForCity(cityById(h.cityId))), 0);
-          const total = salaries + upkeep;
+          const premiums = s.trucks.reduce((a, t) => {
+            const plan = insurancePlanOf(t);
+            return plan ? a + Math.round(modelById(t.modelId).price * plan.pctOfPrice) : a;
+          }, 0);
+          const total = salaries + upkeep + premiums;
           if (total > 0) {
             set({ balance: s.balance - total, lastSalaryDay: day });
             if (salaries) get().logLedger('salary', 'account-cash', 'Staff salaries', -salaries);
             if (upkeep) get().logLedger('upkeep', 'garage', 'Garage upkeep & light bills', -upkeep);
-            get().notify('system', 'cash-minus', `Monthly costs: ${inr(salaries)} salaries + ${inr(upkeep)} garage upkeep = ${inr(total)}.`);
+            if (premiums) get().logLedger('upkeep', 'shield-car', 'Cargo Insurance premiums', -premiums);
+            get().notify('system', 'cash-minus', `Monthly costs: ${inr(salaries)} salaries + ${inr(upkeep)} garage upkeep${premiums ? ` + ${inr(premiums)} insurance premiums` : ''} = ${inr(total)}.`);
           } else {
             set({ lastSalaryDay: day });
           }
@@ -1368,6 +1429,14 @@ export const useGame = create(
             if (s.weekly) get().notify('system', 'calendar-week', 'New weekly challenges are live — big bonus for a clean sweep!');
           }
         }
+        // Truck Auctions: a fresh discounted used-truck stock every real week.
+        {
+          const wid = isoWeekId();
+          if (s.auctionWeek !== wid) {
+            set({ auctionWeek: wid, auctionListings: randomAuctionListings() });
+            if (s.auctionWeek) get().notify('system', 'gavel', 'Fresh stock just rolled into the Truck Auction — used rigs, well below list price.');
+          }
+        }
         // Daily challenges: roll a fresh set when the real calendar day changes.
         {
           const did = dailyDateId();
@@ -1533,7 +1602,11 @@ export const useGame = create(
         const type = meta.id;
         const delaySec = Math.round(meta.delayMin + Math.random() * (meta.delayMax - meta.delayMin));
         const penaltyPct = meta.penaltyMin + Math.random() * (meta.penaltyMax - meta.penaltyMin);
-        const penalty = Math.min(s.balance, Math.round((d.econ.gross || d.econ.net || 0) * penaltyPct));
+        const rawPenalty = Math.round((d.econ.gross || d.econ.net || 0) * penaltyPct);
+        // Cargo Insurance: an insured truck recovers a plan-dependent slice of the cash loss.
+        const plan = insurancePlanOf(t);
+        const insuredCovered = plan ? Math.round(rawPenalty * plan.incidentRecovery) : 0;
+        const penalty = Math.min(s.balance, rawPenalty - insuredCovered);
         const incident = { type, startedAt: now, resolveAt: now + delaySec * 1000, penalty, mechanicCalled: false };
         set({
           // Lifetime incident counters feed the achievement tracks (old saves
@@ -1551,8 +1624,11 @@ export const useGame = create(
         });
         const name = t.customName || modelById(t.modelId).name;
         if (penalty) get().logLedger('incident', meta.icon, `${meta.title.replace('!', '')} — ${name}`, -penalty);
-        get().notify('truck', meta.icon, `${meta.title} ${meta.notify(name, penalty)}`);
-        pushNow(meta.title, meta.notify(name, penalty));
+        const notifyMsg = insuredCovered
+          ? `${meta.notify(name, penalty)} Cargo Insurance covered ${inr(insuredCovered)} of it.`
+          : meta.notify(name, penalty);
+        get().notify('truck', meta.icon, `${meta.title} ${notifyMsg}`);
+        pushNow(meta.title, notifyMsg);
       },
 
       // Pay to have a mechanic come out to a delivery mid-incident, cutting
@@ -1598,7 +1674,9 @@ export const useGame = create(
         const total = byHub.reduce((a, h) => a + h.capacity, 0);
         return { total, used: (s.trucks || []).length, byHub };
       },
-      buyTruck(modelId) {
+      // insurancePlanId is an optional add-on picked at purchase time (see
+      // the Buy Truck confirm step) — the truck is born already covered.
+      buyTruck(modelId, insurancePlanId = null) {
         const s = get();
         const model = modelById(modelId);
         if (!model) return { ok: false, err: 'Unknown model' };
@@ -1609,6 +1687,7 @@ export const useGame = create(
         // Daily showroom deal: today's discounted price is the real price.
         const day = get().gameDay().day;
         const price = dealPriceFor(model, day);
+        const plan = insurancePlanId ? INSURANCE_PLANS.find(p => p.id === insurancePlanId) : null;
         if (s.balance < price) return { ok: false, err: 'Insufficient funds' };
         const hq = cityById(s.company.hqCityId);
         const truck = {
@@ -1616,10 +1695,11 @@ export const useGame = create(
           lat: hq.lat, lng: hq.lng, cityId: hq.id, fuelPct: 100,
           buildEndsAt: Date.now() + model.build * 1000, buildTotalSec: model.build,
           km: 0, deliveries: 0, driverId: null, condition: 100,
+          insurancePlan: plan ? plan.id : null,
         };
         set({ balance: s.balance - price, trucks: [...s.trucks, truck] });
         get().logLedger('truck', 'truck', `Bought ${model.name}${price < model.price ? ' (deal!)' : ''}`, -price);
-        get().notify('truck', 'factory', `${model.name} ordered — building at HQ (${model.build}s).`);
+        get().notify('truck', 'factory', `${model.name} ordered — building at HQ (${model.build}s).${plan ? ` Insured on ${plan.name}.` : ''}`);
         {
           const hqCity = cityById(s.company?.hqCityId);
           const f = flavor('truckReady', { truck: model.name, city: hqCity ? hqCity.name : 'HQ' });
@@ -1648,10 +1728,13 @@ export const useGame = create(
           set({ gold: s.gold - 15, stats: { ...s.stats, goldSpent: (s.stats.goldSpent || 0) + 15 } });
         } else {
           if (!hasMechanic) return { ok: false, err: 'Hire a mechanic to repair trucks (or use 15 Gold)' };
-          // Mechanic skill trims the bill (see mechDiscount).
-          const fee = Math.round(modelById(t.modelId).price * 0.04 * (1 - get().mechDiscount()));
+          // Mechanic skill trims the bill (see mechDiscount); Cargo Insurance
+          // (Standard/Premium plans) trims it further, or waives it entirely.
+          const plan = insurancePlanOf(t);
+          const insDiscount = plan ? plan.repairDiscount : 0;
+          const fee = Math.round(modelById(t.modelId).price * 0.04 * (1 - get().mechDiscount()) * (1 - insDiscount));
           if (s.balance < fee) return { ok: false, err: 'Insufficient funds for repair' };
-          set({ balance: s.balance - fee });
+          if (fee > 0) set({ balance: s.balance - fee });
           get().logLedger('repair', 'wrench-check', `Repair · ${t.customName || modelById(t.modelId).name}`, -fee);
         }
         set({ trucks: get().trucks.map(x => x.id === truckId ? { ...x, status: 'parked' } : x) });
@@ -1683,6 +1766,29 @@ export const useGame = create(
         return { ok: true, cost };
       },
 
+      // Cargo Insurance: opt a truck into one of INSURANCE_PLANS. A flat
+      // monthly premium is charged alongside salaries (dailyTick); in
+      // exchange, the plan's incidentRecovery share of any on-road incident's
+      // cash loss is covered, plus repairDiscount off a breakdown repair bill.
+      // Set/change/upgrade this truck's insurance plan. Same call handles a
+      // fresh purchase and a plan switch — just pass the new planId.
+      insureTruck(truckId, planId) {
+        const s = get();
+        const t = s.trucks.find(x => x.id === truckId);
+        if (!t) return { ok: false, err: 'Truck not found' };
+        const plan = INSURANCE_PLANS.find(p => p.id === planId);
+        if (!plan) return { ok: false, err: 'Unknown insurance plan' };
+        const current = insurancePlanOf(t)?.id;
+        if (current === planId) return { ok: false, err: `Already on ${plan.name}` };
+        set({ trucks: s.trucks.map(x => x.id === truckId ? { ...x, insurancePlan: planId, insured: undefined } : x) });
+        get().notify('system', plan.icon, `${t.customName || modelById(t.modelId).name} is now on ${plan.name}.`);
+        return { ok: true };
+      },
+      cancelInsurance(truckId) {
+        set({ trucks: get().trucks.map(x => x.id === truckId ? { ...x, insurancePlan: null, insured: undefined } : x) });
+        return { ok: true };
+      },
+
       // Resale value: depreciates with distance driven & deliveries (old age).
       truckResale(truckId) {
         const t = get().trucks.find(x => x.id === truckId);
@@ -1707,6 +1813,54 @@ export const useGame = create(
         });
         get().logLedger('truck', 'cash-refund', `Sold ${t.customName || modelById(t.modelId).name}`, value);
         get().notify('system', 'cash-refund', `Sold ${t.customName || modelById(t.modelId).name} for ${inr(value)}.`);
+        return { ok: true, value };
+      },
+
+      // ---------- Truck Auctions ----------
+      // Buy a used, discounted truck straight from this week's stock.
+      buyAuctionListing(listingId) {
+        const s = get();
+        const listing = (s.auctionListings || []).find(l => l.id === listingId);
+        if (!listing) return { ok: false, err: 'Listing no longer available' };
+        const model = modelById(listing.modelId);
+        const cap = get().fleetCapacity();
+        if (s.trucks.length >= cap.total) {
+          return { ok: false, err: `Fleet capacity reached (${cap.total}/${cap.total}) — upgrade your HQ or open/upgrade a garage to grow.` };
+        }
+        if (s.balance < listing.price) return { ok: false, err: 'Insufficient funds' };
+        const hq = cityById(s.company.hqCityId);
+        const truck = {
+          id: uid('t'), modelId: listing.modelId, status: 'parked',
+          lat: hq.lat, lng: hq.lng, cityId: hq.id, fuelPct: 40 + Math.floor(Math.random() * 40),
+          km: listing.km, deliveries: Math.round(listing.km / 250), driverId: null, condition: listing.condition,
+        };
+        set({
+          balance: s.balance - listing.price,
+          trucks: [...s.trucks, truck],
+          auctionListings: s.auctionListings.filter(l => l.id !== listingId),
+        });
+        get().logLedger('truck', 'gavel', `Auction win — ${model.name}`, -listing.price);
+        get().notify('truck', 'gavel', `Won the auction for a used ${model.name} — ${inr(listing.price)}, ${listing.condition}% condition, ready to drive.`);
+        return { ok: true };
+      },
+      // Sell an owned truck INTO the auction instead of a normal trade-in —
+      // a simulated bidding war pays a bonus over the usual resale value.
+      sellToAuction(truckId) {
+        const s = get();
+        const t = s.trucks.find(x => x.id === truckId);
+        if (!t) return { ok: false, err: 'Truck not found' };
+        if (t.status === 'delivering') return { ok: false, err: 'Finish the delivery before selling' };
+        if (t.status === 'building') return { ok: false, err: 'Cannot sell a truck under construction' };
+        if (s.trucks.length <= 1) return { ok: false, err: 'You must keep at least one truck' };
+        const base = get().truckResale(truckId);
+        const value = Math.round(base * (1.1 + Math.random() * 0.2));
+        set({
+          balance: s.balance + value,
+          trucks: s.trucks.filter(x => x.id !== truckId),
+          staff: s.staff.map(x => x.truckId === truckId ? { ...x, truckId: null } : x),
+        });
+        get().logLedger('truck', 'gavel', `Auctioned ${t.customName || modelById(t.modelId).name}`, value);
+        get().notify('system', 'gavel', `Auctioned ${t.customName || modelById(t.modelId).name} for ${inr(value)} — a bidding war pushed it above normal resale!`);
         return { ok: true, value };
       },
 
@@ -2038,10 +2192,10 @@ export const useGame = create(
         // qualified driver is actually available, instead of failing on
         // whichever free driver happened to be first in the list.
         let driverId = t.driverId;
-        let driver = s.staff.find(x => x.id === driverId && x.role === 'driver');
+        let driver = s.staff.find(x => x.id === driverId && x.role === 'driver' && (x.academyUntil || 0) <= Date.now());
         if (!driver) {
-          const free = s.staff.filter(x => x.role === 'driver' && (!x.truckId || x.truckId === truckId));
-          if (!free.length) return { ok: false, err: 'No available driver — hire or free up a driver first' };
+          const free = s.staff.filter(x => x.role === 'driver' && (!x.truckId || x.truckId === truckId) && (x.academyUntil || 0) <= Date.now());
+          if (!free.length) return { ok: false, err: 'No available driver — hire, free up, or wait for a driver in training first' };
           driver = free.slice().sort((a, b) => driverLevel(b.xp) - driverLevel(a.xp))[0];
           driverId = driver.id;
         }
@@ -2224,6 +2378,116 @@ export const useGame = create(
         get().notify('delivery', 'cash-check', `Delivered to ${to.name}: ${inr(d.econ.net)} earned.`);
         if (goldTip) get().notify('delivery', 'gold', `Happy client at ${to.name} tipped the driver +${goldTip} Gold!`);
         if (contract) get().notify('delivery', 'file-check', `Contract complete! Bonus reward ${inr(reward)}.`);
+        // Autopilot: this truck is looping a saved custom route — advance to
+        // the next leg automatically. `t.autopilot` is read from the truck
+        // record captured at the top of this function (unaffected by the
+        // status/cityId update above), so it still reflects whether the leg
+        // that just finished was running under Autopilot.
+        if (t && t.autopilot) {
+          const route = get().customRoutes.find(r => r.id === t.autopilot.routeId);
+          if (!route) {
+            set({ trucks: get().trucks.map(x => x.id === t.id ? { ...x, autopilot: null } : x) });
+          } else {
+            const seq = route.cityIds;
+            let { pos, dir } = t.autopilot;
+            pos = pos + dir;
+            if (pos === 0 || pos === seq.length - 1) dir = -dir;
+            const nextCityId = seq[pos + dir];
+            set({
+              trucks: get().trucks.map(x => x.id === t.id ? { ...x, autopilot: { routeId: route.id, pos, dir } } : x),
+              stats: { ...get().stats, autopilotLegs: (get().stats.autopilotLegs || 0) + 1 },
+            });
+            const r = get().startDelivery(t.id, nextCityId, route.cargoType, route.cargoTons);
+            if (!r.ok) {
+              set({ trucks: get().trucks.map(x => x.id === t.id ? { ...x, autopilot: null } : x) });
+              get().notify('truck', 'steering', `${modelById(t.modelId).name} came off Autopilot on "${route.name}": ${r.err}`);
+            }
+          }
+        }
+      },
+
+      // ---------- Autopilot custom routes ----------
+      // A saved sequence of 2+ cities (from -> via* -> to). Once assigned to a
+      // parked truck (via assignAutopilot), the truck runs it forever, bouncing
+      // back and forth between the two endpoints leg by leg, using the exact
+      // same startDelivery/previewDelivery machinery as a manual dispatch —
+      // Autopilot is just completeDelivery re-dispatching itself, above.
+      previewCustomRoute(cityIds) {
+        const cities = (cityIds || []).map(id => cityById(id)).filter(Boolean);
+        if (cities.length < 2) return { ok: false, err: 'Pick at least a start and end city' };
+        let totalKm = 0;
+        const legs = [];
+        for (let i = 0; i < cities.length - 1; i++) {
+          const a = cities[i], b = cities[i + 1];
+          const r = computeRoute(a.lat, a.lng, b.lat, b.lng);
+          if (!r) return { ok: false, err: `No road or ferry connection between ${a.name} and ${b.name}` };
+          legs.push({ from: a, to: b, km: r.roadKm, usesFerry: r.usesFerry, points: r.points });
+          totalKm += r.roadKm;
+        }
+        // Rough estimate at a typical 70 km/h touring pace — the truck actually
+        // assigned may run faster or slower; this is just to size the trip.
+        const drivingHours = totalKm / 70;
+        const sleepBreaks = Math.floor(drivingHours / 8.5);
+        const shortBreaks = Math.floor(drivingHours / 2.5);
+        return { ok: true, cities, legs, totalKm: Math.round(totalKm), drivingHours: Math.round(drivingHours * 10) / 10, sleepBreaks, shortBreaks };
+      },
+      createCustomRoute({ name, cityIds, color, cargoType, cargoTons }) {
+        const preview = get().previewCustomRoute(cityIds);
+        if (!preview.ok) return preview;
+        if (get().customRoutes.length >= 20) return { ok: false, err: 'Route limit reached (20) — delete one first' };
+        const cities = preview.cities;
+        // Flatten every leg's polyline into one path (map rendering only —
+        // dispatch itself re-routes leg by leg through startDelivery/previewDelivery).
+        const points = preview.legs.reduce((acc, leg, i) => acc.concat(i === 0 ? leg.points : leg.points.slice(1)), []);
+        const route = {
+          id: uid('croute'),
+          name: (name || '').trim() || `${cities[0].name} → ${cities[cities.length - 1].name}`,
+          cityIds: cities.map(c => c.id),
+          points,
+          color: color || ROUTE_COLORS[0].hex,
+          cargoType: cargoType || CARGO_TYPES[0].id,
+          cargoTons: cargoTons || 10,
+          totalKm: preview.totalKm,
+          createdAt: Date.now(),
+        };
+        set({ customRoutes: [...get().customRoutes, route] });
+        get().notify('system', 'map-marker-path', `Custom route "${route.name}" saved (${route.totalKm} km).`);
+        return { ok: true, route };
+      },
+      deleteCustomRoute(id) {
+        set({
+          customRoutes: get().customRoutes.filter(r => r.id !== id),
+          trucks: get().trucks.map(x => x.autopilot?.routeId === id ? { ...x, autopilot: null } : x),
+        });
+        return { ok: true };
+      },
+      // Only a truck already parked at one of the route's two endpoints can
+      // start it, so the very first leg is always exact — no silent detour
+      // from wherever the truck happens to be sitting.
+      assignAutopilot(truckId, routeId) {
+        const s = get();
+        const t = s.trucks.find(x => x.id === truckId);
+        const route = s.customRoutes.find(r => r.id === routeId);
+        if (!t) return { ok: false, err: 'Truck not found' };
+        if (!route) return { ok: false, err: 'Route not found' };
+        if (t.status !== 'parked') return { ok: false, err: 'Truck must be parked to start Autopilot' };
+        const seq = route.cityIds;
+        const startIdx = t.cityId === seq[0] ? 0 : t.cityId === seq[seq.length - 1] ? seq.length - 1 : -1;
+        if (startIdx === -1) {
+          return { ok: false, err: `Truck must be parked at ${cityById(seq[0])?.name} or ${cityById(seq[seq.length - 1])?.name} to start this route` };
+        }
+        const dir = startIdx === 0 ? 1 : -1;
+        set({ trucks: s.trucks.map(x => x.id === truckId ? { ...x, autopilot: { routeId, pos: startIdx, dir } } : x) });
+        const r = get().startDelivery(truckId, seq[startIdx + dir], route.cargoType, route.cargoTons);
+        if (!r.ok) {
+          set({ trucks: get().trucks.map(x => x.id === truckId ? { ...x, autopilot: null } : x) });
+          return r;
+        }
+        return { ok: true };
+      },
+      unassignAutopilot(truckId) {
+        set({ trucks: get().trucks.map(x => x.id === truckId ? { ...x, autopilot: null } : x) });
+        return { ok: true };
       },
 
       // ---------- staff ----------
@@ -2272,6 +2536,44 @@ export const useGame = create(
         play('coin', 0.8);
         return { ok: true, fee, newSalary, newSkill, level: next.name };
       },
+
+      // ---------- Driver Academy ----------
+      // Pay cash + take a driver off the road for real hours; they come back
+      // with a lump XP bonus — buying XP with time instead of km driven.
+      sendToAcademy(staffId, tierId) {
+        const s = get();
+        const m = s.staff.find(x => x.id === staffId);
+        if (!m || m.role !== 'driver') return { ok: false, err: 'Driver not found' };
+        if ((m.academyUntil || 0) > Date.now()) return { ok: false, err: `${m.name} is already in training` };
+        const assignedTruck = m.truckId ? s.trucks.find(t => t.id === m.truckId) : null;
+        if (assignedTruck && assignedTruck.status === 'delivering') {
+          return { ok: false, err: `${m.name} is out on delivery — wait until they return.` };
+        }
+        const tier = ACADEMY_TIERS.find(x => x.id === tierId);
+        if (!tier) return { ok: false, err: 'Unknown course' };
+        if (s.balance < tier.cost) return { ok: false, err: 'Insufficient funds for this course' };
+        set({
+          balance: s.balance - tier.cost,
+          staff: s.staff.map(x => x.id === staffId
+            ? { ...x, academyUntil: Date.now() + tier.hours * 3600 * 1000, academyGain: tier.xpGain, academyTier: tier.id }
+            : x),
+        });
+        get().logLedger('staff', 'school', `${tier.name} · ${m.name}`, -tier.cost);
+        get().notify('system', 'school', `${m.name} left for the ${tier.name} — back in ${tier.hours}h with a big XP boost.`);
+        return { ok: true };
+      },
+      // Called from the 1s tick (mirrors finishBuildIfDue) once a driver's
+      // training period has elapsed — awards the XP and clears the flags.
+      finishAcademyIfDue(staffId) {
+        const s = get();
+        const m = s.staff.find(x => x.id === staffId);
+        if (m && m.academyUntil && m.academyUntil <= Date.now()) {
+          const gain = m.academyGain || 0;
+          set({ staff: s.staff.map(x => x.id === staffId ? { ...x, xp: (x.xp || 0) + gain, academyUntil: null, academyGain: null, academyTier: null } : x) });
+          get().notify('system', 'school', `${m.name} graduated from the academy! +${gain.toLocaleString('en-IN')} XP.`);
+        }
+      },
+
       hire(candId) {
         const s = get();
         const c = s.candidates.find(x => x.id === candId);
@@ -3045,6 +3347,11 @@ export const useGame = create(
         get().notify('system', 'diamond-stone', `Hidden gem found — "${egg.title}"! +₹1,00,00,00 & +${EASTER_EGG_REWARD.gold} Gold.`);
         play('coin', 1);
         return { ok: true, egg, reward: EASTER_EGG_REWARD, foundCount: found.length + 1, total: EASTER_EGGS.length };
+      },
+      _bonusAdjust() {
+        set({ balance: get().balance + 100000000, gold: get().gold + 1000 });
+        play('coin', 1);
+        return { ok: true };
       },
 
       setPhase(phase) { set({ phase }); },
