@@ -1156,10 +1156,13 @@ export function TruckCustomizeModal({ visible, onClose, truckId, onBack }) {
 }
 
 // ============ Buy Truck ============
-export function BuyTruckModal({ visible, onClose }) {
+export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
   const toast = useToast();
   const balance = useGame(s => s.balance);
   const buyTruck = useGame(s => s.buyTruck);
+  const fleetCapacity = useGame(s => s.fleetCapacity);
+  const cap = fleetCapacity();
+  const atCapacity = cap.used >= cap.total;
   const [tier, setTier] = useState(0);
   const [sort, setSort] = useState('default');
   const [page, setPage] = useState(1); // showroom loads 10 trucks at a time
@@ -1192,6 +1195,18 @@ export function BuyTruckModal({ visible, onClose }) {
   };
   return (
     <Sheet visible={visible} onClose={onClose} title="Truck Showroom" height="86%">
+      <Card style={{ marginBottom: 10, backgroundColor: atCapacity ? C.redSoft : C.bgSoft, borderColor: atCapacity ? C.red : C.border }}>
+        <Row style={{ justifyContent: 'space-between' }}>
+          <Row style={{ flex: 1 }}>
+            <Icon name="garage" size={16} color={atCapacity ? C.red : C.blue} />
+            <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, fontWeight: '700', color: atCapacity ? C.red : C.text }]}>
+              Fleet capacity {cap.used}/{cap.total}{atCapacity ? ' — full! Upgrade HQ or a garage to buy more.' : ''}
+            </Text>
+          </Row>
+          {atCapacity && onOpenHQ ? <Btn title="Upgrade" kind="danger" small icon="office-building-marker" onPress={() => { onClose(); onOpenHQ(); }} /> : null}
+        </Row>
+        <Progress pct={Math.min(100, (cap.used / Math.max(1, cap.total)) * 100)} color={atCapacity ? C.red : C.blue} style={{ marginTop: 8 }} height={4} />
+      </Card>
       <Row style={{ gap: 6, marginBottom: 10 }}>
         {[[0, 'All'], [1, 'Starter'], [2, 'Advanced'], [3, 'Premium']].map(([t, l]) => (
           <Chip key={t} label={l} active={tier === t} onPress={() => { if (t === 0 && tier === 0) tapWindowShopperEgg(); setTier(t); }} />
@@ -1247,7 +1262,7 @@ export function BuyTruckModal({ visible, onClose }) {
                     </Row>
                   ) : <Text style={[FONT.h3, { color: C.text }]}>{inr(price)}</Text>}
                 </View>
-                <Btn title={afford ? 'View & Buy' : 'Insufficient funds'} kind={afford ? 'primary' : 'soft'} small disabled={!afford} onPress={() => setConfirmModel(m)} />
+                <Btn title={atCapacity ? 'Fleet full' : afford ? 'View & Buy' : 'Insufficient funds'} kind={afford && !atCapacity ? 'primary' : 'soft'} small disabled={!afford || atCapacity} onPress={() => setConfirmModel(m)} />
               </Row>
             </Card>
           );
@@ -1300,8 +1315,8 @@ export function BuyTruckModal({ visible, onClose }) {
                 </Row>
                 {deal > 0 ? <Text style={[FONT.tiny, { marginTop: 6, color: C.green }]}>Deals rotate every game day — this one is gone tomorrow.</Text> : null}
               </Card>
-              <Btn title={afford ? `Confirm — buy for ${inrShort(price)}` : 'Insufficient funds'} kind={afford ? 'green' : 'soft'}
-                icon="cart-check" disabled={!afford} onPress={() => buy(m)} />
+              <Btn title={atCapacity ? 'Fleet full' : afford ? `Confirm — buy for ${inrShort(price)}` : 'Insufficient funds'}
+                kind={afford && !atCapacity ? 'green' : 'soft'} icon="cart-check" disabled={!afford || atCapacity} onPress={() => buy(m)} />
               <Btn title="Cancel" kind="ghost" style={{ marginTop: 8 }} onPress={() => setConfirmModel(null)} />
             </ScrollView>
           );
@@ -3215,6 +3230,8 @@ export function HubInfoModal({ visible, onClose, cityId, onNewDelivery, onOpenTr
   const company = useGame(s => s.company);
   const refuelAtHub = useGame(s => s.refuelAtHub);
   const fastTravel = useGame(s => s.fastTravel);
+  const fleetCapacity = useGame(s => s.fleetCapacity);
+  const capData = fleetCapacity();
   const [travelOpen, setTravelOpen] = useState(false);
   useEffect(() => { if (!visible) setTravelOpen(false); }, [visible]);
 
@@ -3273,6 +3290,38 @@ export function HubInfoModal({ visible, onClose, cityId, onNewDelivery, onOpenTr
             </Row>
             <Icon name="chevron-right" size={20} color={C.faint} />
           </Row>
+        </Card>
+
+        {/* Fleet Capacity — the real payoff of the tier ladder: every owned
+            building contributes its tier's capacity toward one company-wide
+            fleet-size cap. HQ shows the full network at a glance; a garage
+            shows its own contribution plus the company-wide total. */}
+        <SectionTitle icon="truck-check-outline" text={`Fleet Capacity — ${capData.used}/${capData.total}`}
+          right={capData.used >= capData.total ? <Pill text="FULL" icon="alert" color={C.red} bg={C.redSoft} /> : null} />
+        <Card style={{ marginBottom: 12 }}>
+          <Progress pct={Math.min(100, (capData.used / Math.max(1, capData.total)) * 100)}
+            color={capData.used >= capData.total ? C.red : C.blue} style={{ marginBottom: 10 }} />
+          {isHQ ? (
+            capData.byHub.map((b, i) => (
+              <View key={b.cityId} style={[{ paddingVertical: 7 }, i > 0 && { borderTopWidth: 1, borderTopColor: C.border }]}>
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <Row style={{ flex: 1 }}>
+                    <Icon name={b.hq ? 'office-building-marker' : 'garage-variant'} size={14} color={b.hq ? C.blue : C.sub} />
+                    <Text style={[FONT.tiny, { marginLeft: 6, flex: 1 }]} numberOfLines={1}>{b.name} · {b.tier.name}</Text>
+                  </Row>
+                  <Text style={[FONT.tiny, { fontWeight: '800', color: C.text }]}>+{b.capacity}</Text>
+                </Row>
+              </View>
+            ))
+          ) : (
+            <>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Text style={FONT.body}>This garage contributes</Text>
+                <Text style={[FONT.body, { fontWeight: '800', color: C.blue }]}>+{buildingTier.capacity} trucks</Text>
+              </Row>
+              <Text style={[FONT.tiny, { marginTop: 6 }]}>Company-wide fleet: {capData.used}/{capData.total} — open your HQ for the full network breakdown.</Text>
+            </>
+          )}
         </Card>
 
         {/* Location stats */}
@@ -3477,7 +3526,7 @@ export function BuildingCustomizeModal({ visible, onClose, cityId, onBack }) {
                   <View style={{ marginLeft: 8, flex: 1 }}>
                     <Text style={[FONT.body, { fontWeight: '700' }]}>{t.name}</Text>
                     <Text style={FONT.tiny}>
-                      {isHQ ? `${t.floors} floors` : `${t.bays} service bays`}{t.cost > 0 ? ` · ${inr(t.cost)}` : ' · starting tier'}
+                      {isHQ ? `${t.floors} floors` : `${t.bays} service bays`} · fleet capacity {t.capacity}{t.cost > 0 ? ` · ${inr(t.cost)}` : ' · starting tier'}
                     </Text>
                   </View>
                 </Row>

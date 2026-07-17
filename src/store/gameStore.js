@@ -1502,10 +1502,30 @@ export const useGame = create(
       },
 
       // ---------- fleet ----------
+      // Every owned building (HQ + every garage) contributes its tier's
+      // capacity toward one company-wide fleet-size cap — this is the real
+      // gameplay purpose of the building tier ladder, not just a bigger
+      // icon on the map. buyTruck() below is blocked once trucks.length
+      // reaches the total, so growing the fleet past a maxed-out HQ means
+      // either upgrading further or opening/upgrading garages.
+      fleetCapacity() {
+        const s = get();
+        const byHub = (s.hubs || []).map(h => {
+          const tiers = h.hq ? HQ_TIERS : GARAGE_TIERS;
+          const t = tiers[h.tier || 0] || tiers[0];
+          return { cityId: h.cityId, name: h.hq ? 'Headquarters' : h.name, hq: !!h.hq, tier: t, capacity: t.capacity };
+        });
+        const total = byHub.reduce((a, h) => a + h.capacity, 0);
+        return { total, used: (s.trucks || []).length, byHub };
+      },
       buyTruck(modelId) {
         const s = get();
         const model = modelById(modelId);
         if (!model) return { ok: false, err: 'Unknown model' };
+        const cap = get().fleetCapacity();
+        if (s.trucks.length >= cap.total) {
+          return { ok: false, err: `Fleet capacity reached (${cap.total}/${cap.total}) — upgrade your HQ or open/upgrade a garage to grow.` };
+        }
         // Daily showroom deal: today's discounted price is the real price.
         const day = get().gameDay().day;
         const price = dealPriceFor(model, day);
@@ -1669,6 +1689,14 @@ export const useGame = create(
         set({ balance: s.balance + refund, hubs: s.hubs.filter(h => h.cityId !== cityId) });
         get().logLedger('garage', 'garage', `Sold garage · ${hub.name.replace(' Garage', '')}`, refund);
         get().notify('system', 'garage', `Garage in ${hub.name.replace(' Garage', '')} sold for ${inr(refund)}.`);
+        // Losing this garage's fleet-capacity contribution can put an
+        // already-large fleet over the new (lower) total — nothing gets
+        // repossessed for it, but buyTruck() won't allow more until the
+        // player upgrades/opens a garage again, so surface that up front.
+        const cap = get().fleetCapacity();
+        if (cap.used > cap.total) {
+          get().notify('system', 'alert-circle-outline', `Fleet is now over capacity (${cap.used}/${cap.total}) — buying new trucks is paused until you upgrade or open another garage.`);
+        }
         return { ok: true, refund };
       },
 

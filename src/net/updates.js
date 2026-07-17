@@ -6,7 +6,7 @@
 export const REPO = 'VasoyaParth/TransportManagementTycoon';
 // The version baked into THIS build. Bump together with android versionName and
 // the release tag. Compared against the latest GitHub release to detect updates.
-export const APP_VERSION = 'v10.12.0';
+export const APP_VERSION = 'v10.13.0';
 
 const RELEASES_URL = `https://api.github.com/repos/${REPO}/releases`;
 

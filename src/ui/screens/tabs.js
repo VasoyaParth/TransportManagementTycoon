@@ -139,6 +139,8 @@ const FLEET_PAGE = 8;
 export function FleetTab({ onTruckPress, onBuyTruck }) {
   const trucks = useGame(s => s.trucks);
   const deliveries = useGame(s => s.deliveries);
+  const fleetCapacity = useGame(s => s.fleetCapacity);
+  const cap = fleetCapacity();
   const loansForPledge = useGame(s => s.loans);
   const pledged = useMemo(() => pledgedTruckIds({ loans: loansForPledge }), [loansForPledge]);
   const hasLive = trucks.some(t => t.status === 'delivering' || t.status === 'building');
@@ -255,7 +257,9 @@ export function FleetTab({ onTruckPress, onBuyTruck }) {
                 <Text style={[FONT.tiny, { color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 1 }]}>Fleet Command</Text>
                 <Row style={{ alignItems: 'flex-end', marginTop: 2 }}>
                   <Text style={[FONT.h1, { color: '#F8FAFC' }]}>{trucks.length}</Text>
-                  <Text style={[FONT.tiny, { color: '#94A3B8', marginLeft: 6, marginBottom: 5 }]}>truck{trucks.length === 1 ? '' : 's'} · {counts.delivering} earning now</Text>
+                  <Text style={[FONT.tiny, { color: cap.used >= cap.total ? '#F87171' : '#94A3B8', marginLeft: 6, marginBottom: 5 }]}>
+                    / {cap.total} capacity · {counts.delivering} earning now
+                  </Text>
                 </Row>
               </View>
               <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: '#1E293B', alignItems: 'center', justifyContent: 'center' }}>
