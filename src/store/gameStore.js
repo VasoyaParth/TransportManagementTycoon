@@ -87,15 +87,16 @@ export const SLOT_SYMBOLS = [
 ];
 const SLOT_JACKPOT = { cherry: 2, lemon: 3, bell: 4, clover: 6, gem: 10, seven: 20 };
 
-// Golden Convoy symbols — `count` copies of each go into the 9-container bag,
-// `value` is the Gold tier (pair pays value, three-of-a-kind pays value × 3).
-export const CONVOY_SYMBOLS = [
-  { id: 'diesel', icon: 'barrel', name: 'Diesel', value: 1, count: 3, color: '#8C6D3F' },
-  { id: 'tyre', icon: 'tire', name: 'Tyre', value: 2, count: 3, color: '#3E4650' },
-  { id: 'horn', icon: 'bullhorn', name: 'Air Horn', value: 3, count: 2, color: '#B4562F' },
-  { id: 'gold', icon: 'gold', name: 'Gold Bar', value: 5, count: 2, color: '#B8860B' },
-  { id: 'gem', icon: 'diamond-stone', name: 'Diamond', value: 8, count: 1, color: '#2563EB' },
-  { id: 'key', icon: 'key-variant', name: 'Golden Key', value: 12, count: 1, color: '#7D3C98' },
+// Weigh Station zones — a needle sweeps a 0-100 dial and the player stops it
+// as close to the dead-centre "legal load" mark (50) as they can. `maxDist`
+// is the widest miss still inside that tier, checked in order (tightest
+// first), so this is purely skill/timing rather than luck like the other
+// free games.
+export const WEIGH_ZONES = [
+  { id: 'bullseye', maxDist: 4, reward: 15, label: 'Perfect Load!' },
+  { id: 'good', maxDist: 12, reward: 6, label: 'Legal Load' },
+  { id: 'off', maxDist: 25, reward: 2, label: 'Off-scale — small fine' },
+  { id: 'miss', maxDist: Infinity, reward: 1, label: 'Overweight — big miss' },
 ];
 const clampSlot = v => Math.max(0, Math.min(25, Math.round(v))); // jackpot can exceed scratch's 5 cap
 function rollSlotSymbol() {
@@ -2438,11 +2439,11 @@ export const useGame = create(
           spinLeft: Math.max(0, DAILY_PLAYS - g.spinUsed),
           diceLeft: Math.max(0, DAILY_PLAYS - (g.diceUsed || 0)),
           slotLeft: Math.max(0, DAILY_PLAYS - (g.slotUsed || 0)),
-          convoyLeft: Math.max(0, DAILY_PLAYS - (g.convoyUsed || 0)),
+          weighLeft: Math.max(0, DAILY_PLAYS - (g.weighUsed || 0)),
           betLeft: Math.max(0, DAILY_PLAYS - (g.betUsed || 0)),
           plateLeft: Math.max(0, DAILY_PLAYS - (g.plateUsed || 0)),
           tollLeft: Math.max(0, DAILY_PLAYS - (g.tollUsed || 0)),
-          scratchUsed: g.scratchUsed, spinUsed: g.spinUsed, diceUsed: g.diceUsed || 0, slotUsed: g.slotUsed || 0, convoyUsed: g.convoyUsed || 0,
+          scratchUsed: g.scratchUsed, spinUsed: g.spinUsed, diceUsed: g.diceUsed || 0, slotUsed: g.slotUsed || 0, weighUsed: g.weighUsed || 0,
         };
       },
       _bumpGame(kind) {
@@ -2493,34 +2494,21 @@ export const useGame = create(
       // notification never leaks the result early.
       revealGameResult(icon, message) { get().notify('system', icon, message); },
 
-      // Golden Convoy: 9 sealed containers, pick 3. Matching symbols pay by
-      // tier — three-of-a-kind pays triple the symbol value, a pair pays it
-      // once, no match pays 1 consolation Gold. Board is generated up front;
-      // the reveal (and notification) happens in the UI, tap by tap.
-      playConvoy() {
+      // Weigh Station: a needle sweeps back and forth across a 0-100 dial;
+      // the player taps STOP and the position (reported by the UI, which
+      // owns the sweep animation) decides the payout tier by how close to
+      // dead-centre (the "legal load" mark) it landed. Single-step, unlike
+      // the pick-then-claim games, since there's nothing to hide server-side.
+      playWeighStation(pos) {
         const t = get().gamesToday();
-        if (t.convoyLeft <= 0) return { ok: false, err: 'No convoy picks left today — come back tomorrow!' };
-        const bag = [];
-        CONVOY_SYMBOLS.forEach(sym => { for (let i = 0; i < sym.count; i++) bag.push(sym.id); });
-        for (let i = bag.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[bag[i], bag[j]] = [bag[j], bag[i]]; }
-        const board = bag.slice(0, 9);
-        set({ _convoyBoard: board });
-        get()._bumpGame('convoyUsed');
-        return { ok: true, board, left: t.convoyLeft - 1 };
-      },
-      claimConvoy(indices) {
-        const s = get();
-        const board = s._convoyBoard;
-        if (!board || !Array.isArray(indices) || new Set(indices).size !== 3) return { ok: false, err: 'Pick 3 containers first' };
-        const picked = indices.map(i => board[i]).filter(Boolean);
-        const counts = {};
-        picked.forEach(id => { counts[id] = (counts[id] || 0) + 1; });
-        const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
-        const sym = CONVOY_SYMBOLS.find(x => x.id === best[0]);
-        const reward = best[1] >= 3 ? sym.value * 3 : best[1] === 2 ? sym.value : 1;
-        set({ gold: s.gold + reward, _convoyBoard: null });
-        if (reward > 1) play('coin', 0.9);
-        return { ok: true, reward, matched: best[1], symbol: sym.id };
+        if (t.weighLeft <= 0) return { ok: false, err: 'No weigh-ins left today — come back tomorrow!' };
+        const clamped = Math.max(0, Math.min(100, Math.round(pos)));
+        const dist = Math.abs(clamped - 50);
+        const zone = WEIGH_ZONES.find(z => dist <= z.maxDist);
+        get()._bumpGame('weighUsed');
+        set({ gold: get().gold + zone.reward });
+        if (zone.reward > 2) play('coin', 0.9);
+        return { ok: true, pos: clamped, dist, reward: zone.reward, zoneId: zone.id, label: zone.label, left: t.weighLeft - 1 };
       },
 
       // Dice roll: roll two dice, doubles pay out big, otherwise sum → small Gold.

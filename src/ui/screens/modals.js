@@ -7,7 +7,7 @@ import RNShare from 'react-native-share';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider, smartSearch, DropdownPicker } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST_MIN, LIVERY_COST_MAX, liveryCostFor, FLEET_LIVERY_DISCOUNT, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, CONVOY_SYMBOLS, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds, licenseRequiredFor } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST_MIN, LIVERY_COST_MAX, liveryCostFor, FLEET_LIVERY_DISCOUNT, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds, licenseRequiredFor } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
@@ -101,10 +101,14 @@ function useTick(active, ms = 1000) {
   }, [active]);
 }
 
-// Human-readable duration: "2h 21m", "34m 10s", "45s".
+// Human-readable duration: "3d 8h", "2h 21m", "34m 10s", "45s". Long-haul
+// routes can rack up 24h+ of driving + mandatory rest breaks, so anything
+// past a day rolls over into days instead of showing a raw triple-digit
+// hour count (which read as broken/"impossible" rather than just long).
 function fmtDur(sec) {
   sec = Math.max(0, Math.round(sec));
-  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  if (d > 0) return `${d}d ${h}h`;
   if (h > 0) return `${h}h ${m}m`;
   if (m > 0) return `${m}m ${s}s`;
   return `${s}s`;
@@ -633,6 +637,15 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
                     <Text style={[FONT.tiny, { marginLeft: 8, flex: 1, color: C.text }]}>
                       International haul — crosses {preview.borders} border{preview.borders === 1 ? '' : 's'}
                       {preview.borderNames?.length ? ` (${preview.borderNames.join(', ')})` : ''}. Adds customs time & a {inr(preview.econ.customs || 0)} fee.
+                    </Text>
+                  </Row>
+                )}
+                {preview.sleepBreaks > 0 && (
+                  <Row style={{ marginTop: 8, backgroundColor: C.blueSoft, borderRadius: RADIUS.md, padding: 10 }}>
+                    <Icon name="sleep" size={16} color={C.blue} />
+                    <Text style={[FONT.tiny, { marginLeft: 8, flex: 1, color: C.text }]}>
+                      Long haul — {preview.drivingHours}h of driving needs {preview.sleepBreaks} mandatory sleep break{preview.sleepBreaks === 1 ? '' : 's'}
+                      {preview.shortBreaks > 0 ? ` and ${preview.shortBreaks} short break${preview.shortBreaks === 1 ? '' : 's'}` : ''} along the way — already counted in the {fmtDur(preview.durationSec)} duration above.
                     </Text>
                   </Row>
                 )}
@@ -2062,82 +2075,76 @@ function DiceGame({ toast }) {
   );
 }
 
-// Golden Convoy — 9 sealed shipping containers, pick 3. Two-of-a-kind pays
-// that symbol's value, three-of-a-kind pays triple; a miss still pays 1
-// consolation Gold. The board is dealt up front (playConvoy) but kept hidden
-// in local state — each tap flips just that container — and claimConvoy()
-// only runs once 3 picks are in, matching the reveal-then-notify pattern the
-// other games use.
-function ConvoyGame({ toast }) {
-  const playConvoy = useGame(s => s.playConvoy);
-  const claimConvoy = useGame(s => s.claimConvoy);
+// Weigh Station — a needle sweeps back and forth across a 0-100 dial; tap
+// STOP as close to the dead-centre "legal load" mark as you can. This is a
+// genuine timing/precision mini-game (not luck-of-the-draw like the others):
+// the closer to 50 you land, the bigger the payout. The sweep itself is pure
+// client-side animation (setInterval driving local state); only the final
+// stopped position gets sent to the store, which decides the tier.
+const WEIGH_SWEEP_MS = 1400; // one full 0->100->0 cycle
+function needleAt(elapsedMs) {
+  const t = (elapsedMs % WEIGH_SWEEP_MS) / WEIGH_SWEEP_MS; // 0..1
+  return t < 0.5 ? t * 2 * 100 : (1 - t) * 2 * 100; // triangle wave 0->100->0
+}
+function WeighStationGame({ toast }) {
+  const playWeighStation = useGame(s => s.playWeighStation);
   const games = useGame(s => s.games); // re-render on play
   const gamesToday = useGame(s => s.gamesToday);
-  const left = gamesToday().convoyLeft;
-  const [board, setBoard] = useState(null); // hidden symbol ids, revealed only locally as tapped
-  const [picked, setPicked] = useState([]);
+  const left = gamesToday().weighLeft;
+  const [sweeping, setSweeping] = useState(false);
+  const [pos, setPos] = useState(0);
   const [result, setResult] = useState(null);
+  const startTs = useRef(0);
 
-  const startRound = () => {
-    const r = playConvoy();
-    if (!r.ok) { toast(r.err, 'warn'); return; }
-    setBoard(r.board); setPicked([]); setResult(null);
-  };
-  const tap = (i) => {
-    if (!board || result || picked.includes(i) || picked.length >= 3) return;
+  useEffect(() => {
+    if (!sweeping) return undefined;
+    startTs.current = Date.now();
+    const iv = setInterval(() => setPos(needleAt(Date.now() - startTs.current)), 30);
+    return () => clearInterval(iv);
+  }, [sweeping]);
+
+  const start = () => { setResult(null); setPos(0); setSweeping(true); };
+  const stop = () => {
+    if (!sweeping) return;
+    setSweeping(false);
     haptic('light'); play('tap', 0.3);
-    const next = [...picked, i];
-    setPicked(next);
-    if (next.length === 3) {
-      const r = claimConvoy(next);
-      if (!r.ok) { toast(r.err, 'warn'); return; }
-      setResult(r);
-      haptic(r.reward > 1 ? 'success' : 'light');
-      if (r.reward > 1) play('coin', 0.8);
-      toast(r.matched >= 2 ? `Matched ${r.matched}× ${CONVOY_SYMBOLS.find(x => x.id === r.symbol)?.name}! +${r.reward} Gold` : `No match — +${r.reward} Gold consolation`, r.matched >= 2 ? 'success' : 'info');
-    }
+    const r = playWeighStation(pos);
+    if (!r.ok) { toast(r.err, 'warn'); return; }
+    setResult(r);
+    haptic(r.reward >= 6 ? 'success' : 'light');
+    if (r.reward >= 6) play('coin', 0.8);
+    toast(`${r.label} — +${r.reward} Gold`, r.reward >= 6 ? 'success' : 'info');
   };
 
   return (
     <View style={{ alignItems: 'center' }}>
       <Text style={[FONT.sub, { textAlign: 'center', marginBottom: 4 }]}>
-        9 sealed containers just rolled in — pick 3. A pair pays its symbol's value, three-of-a-kind pays triple.
+        The needle sweeps the weigh bridge — tap STOP as close to the legal-load mark (centre) as you can.
       </Text>
-      <Text style={[FONT.tiny, { marginBottom: 14 }]}>{left} of {DAILY_PLAYS} free rounds left today</Text>
-      {board ? (
-        <Row style={{ flexWrap: 'wrap', justifyContent: 'center', gap: 8, width: 3 * 58 + 16 }}>
-          {board.map((symId, i) => {
-            const isPicked = picked.includes(i);
-            const sym = CONVOY_SYMBOLS.find(x => x.id === symId);
-            return (
-              <Pressable key={i} onPress={() => tap(i)} disabled={!isPicked && (result || picked.length >= 3)}
-                style={{
-                  width: 58, height: 58, borderRadius: 10, borderWidth: 2,
-                  borderColor: isPicked ? sym.color : C.border, backgroundColor: isPicked ? sym.color + '22' : C.bgSoft,
-                  alignItems: 'center', justifyContent: 'center', opacity: (result && !isPicked) ? 0.45 : 1,
-                }}>
-                <Icon name={isPicked ? sym.icon : 'package-variant-closed'} size={24} color={isPicked ? sym.color : C.faint} />
-              </Pressable>
-            );
-          })}
-        </Row>
-      ) : (
-        <View style={{ alignItems: 'center', paddingVertical: 18 }}>
-          <Icon name="truck-fast-outline" size={42} color={C.faint} />
-          <Text style={[FONT.sub, { marginTop: 8 }]}>Tap below to wave in the convoy.</Text>
-        </View>
-      )}
-      <View style={{ minHeight: 30, alignItems: 'center', marginTop: 12 }}>
+      <Text style={[FONT.tiny, { marginBottom: 14 }]}>{left} of {DAILY_PLAYS} free weigh-ins left today</Text>
+      <View style={{ width: '100%', height: 34, borderRadius: 8, overflow: 'hidden', flexDirection: 'row', marginBottom: 4 }}>
+        <View style={{ flex: 25, backgroundColor: C.redSoft }} />
+        <View style={{ flex: 13, backgroundColor: C.amberSoft }} />
+        <View style={{ flex: 8, backgroundColor: C.greenSoft }} />
+        <View style={{ flex: 8, backgroundColor: C.greenSoft }} />
+        <View style={{ flex: 13, backgroundColor: C.amberSoft }} />
+        <View style={{ flex: 25, backgroundColor: C.redSoft }} />
+      </View>
+      <View style={{ width: '100%', height: 34, marginTop: -34, marginBottom: 4, justifyContent: 'center' }}>
+        <View style={{
+          position: 'absolute', left: `${(sweeping ? pos : result ? result.pos : 50)}%`, marginLeft: -2,
+          width: 4, height: 34, borderRadius: 2, backgroundColor: C.text,
+        }} />
+      </View>
+      <View style={{ minHeight: 30, alignItems: 'center', marginTop: 10 }}>
         {result ? (
-          <Text style={[FONT.h3, { color: result.reward > 1 ? C.green : C.sub }]}>
-            {result.matched >= 2 ? `Matched ${result.matched}× — ` : ''}+{result.reward} Gold
-          </Text>
-        ) : board && picked.length < 3 ? (
-          <Text style={FONT.tiny}>{3 - picked.length} more pick{3 - picked.length === 1 ? '' : 's'}…</Text>
+          <Text style={[FONT.h3, { color: result.reward >= 6 ? C.green : C.sub }]}>{result.label} — +{result.reward} Gold</Text>
+        ) : sweeping ? (
+          <Text style={FONT.tiny}>Tap STOP!</Text>
         ) : null}
       </View>
-      <Btn title={!board ? 'Start round' : result ? 'New convoy' : 'Pick 3 containers above'} kind="green" icon="truck-fast"
-        style={{ marginTop: 8, alignSelf: 'stretch' }} disabled={(board && !result) || left <= 0} onPress={startRound} />
+      <Btn title={sweeping ? 'STOP!' : 'Start weigh-in'} kind={sweeping ? 'danger' : 'green'} icon={sweeping ? 'hand-back-left' : 'scale-balance'}
+        style={{ marginTop: 8, alignSelf: 'stretch' }} disabled={left <= 0 && !sweeping} onPress={sweeping ? stop : start} />
       {left <= 0 ? <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 6 }]}>Come back tomorrow for 10 more.</Text> : null}
     </View>
   );
@@ -2391,14 +2398,14 @@ export function MiniGamesModal({ visible, onClose }) {
           { key: 'toll', label: 'Toll Gate' },
           { key: 'bet', label: 'High-Stakes' },
           { key: 'plate', label: 'Lucky Plate' },
-          { key: 'convoy', label: 'Golden Convoy' },
+          { key: 'weigh', label: 'Weigh Station' },
         ]}
         value={tab} onChange={setTab}
       />
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
         {tab === 'scratch' ? <ScratchGame toast={toast} /> : tab === 'spin' ? <SpinGame toast={toast} /> : tab === 'dice' ? <DiceGame toast={toast} />
           : tab === 'toll' ? <TollGateGame toast={toast} /> : tab === 'bet' ? <BetSlotGame toast={toast} />
-            : tab === 'convoy' ? <ConvoyGame toast={toast} /> : <PlateGame toast={toast} />}
+            : tab === 'weigh' ? <WeighStationGame toast={toast} /> : <PlateGame toast={toast} />}
       </ScrollView>
     </Sheet>
   );

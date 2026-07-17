@@ -69,7 +69,8 @@ function useNow(active = true) {
 const clampPct = v => Math.max(0, Math.min(100, v));
 const mmss = ms => {
   const sec = Math.max(0, Math.ceil(ms / 1000));
-  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  if (d > 0) return `${d}d ${h}h`;
   if (h > 0) return `${h}h ${m}m`;
   if (m > 0) return `${m}m ${s}s`;
   return `${s}s`;

@@ -472,6 +472,12 @@ export const TRUCK_MODELS = [
     desc: 'The biggest thing that will ever touch these highways — a mining-class ultra-hauler, road-registered on a dare. One of these outmoves a small fleet.',
     speed: 64, cargo: 250, tank: 1600, eff: 1.1, range: 1850, maint: 35, build: 14000, price: 120000000,
   },
+  {
+    id: 'voltra-titan-hx350', name: 'Voltra Titan HX-350', brand: 'Voltra',
+    tier: 3, propulsion: 'hybrid', rating: 5.0, icon: 'leaf-circle-outline', shape: 'doubletrailer',
+    desc: 'The new top of the catalog — a diesel-electric hybrid mega-hauler that out-tons the MH-250 and still sips less fuel per ton, thanks to regenerative braking down every mountain pass.',
+    speed: 60, cargo: 350, tank: 1900, eff: 1.3, range: 2000, maint: 42, build: 17000, price: 185000000,
+  },
 ];
 
 // Truck livery colours for customization (id + hex + display name).

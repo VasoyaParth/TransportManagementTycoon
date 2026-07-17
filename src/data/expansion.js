@@ -80,6 +80,9 @@ export const COUNTRIES = [
   // v10.19.0 "Steppe Road" expansion
   { code: 'MN', name: 'Mongolia', icon: 'horse-variant', unlockCost: 58000000, bonusCash: 11500000, bonusGold: 115,
     blurb: 'The far edge of the map — endless steppe to Ulaanbaatar and the Gobi. One of the longest hauls in the empire.' },
+  // v10.22.0 "Tian Shan" expansion
+  { code: 'KG', name: 'Kyrgyzstan', icon: 'image-filter-hdr-outline', unlockCost: 32000000, bonusCash: 6500000, bonusGold: 75,
+    blurb: 'The Tian Shan highlands — Bishkek to the high-altitude Torugart Pass into China.' },
 ];
 
 export const COUNTRY_BY_CODE = COUNTRIES.reduce((m, c) => (m[c.code] = c, m), {});
@@ -2032,6 +2035,16 @@ export const INTL_CITIES = [
     ['sainshand', 'Sainshand', 'Dornogovi', 44.88, 110.14, 20000, 3],
     ['khovd', 'Khovd', 'Khovd', 48.01, 91.64, 30000, 3],
   ]),
+  // v10.22.0 "Tian Shan" — Kyrgyzstan, wedged between Kazakhstan, Uzbekistan,
+  // Tajikistan and China's Xinjiang.
+  ...C('KG')([
+    ['bishkek', 'Bishkek', 'Chuy', 42.87, 74.59, 1074000, 1],
+    ['osh', 'Osh', 'Osh', 40.53, 72.80, 322000, 2],
+    ['jalal-abad', 'Jalal-Abad', 'Jalal-Abad', 40.93, 73.00, 105000, 3],
+    ['karakol', 'Karakol', 'Issyk-Kul', 42.49, 78.39, 71000, 3],
+    ['tokmok', 'Tokmok', 'Chuy', 42.84, 75.29, 53000, 3],
+    ['naryn', 'Naryn', 'Naryn', 41.43, 75.99, 40000, 3],
+  ]),
 ];
 
 // ---- Road nodes: every foreign city + a couple of Indian-side helper nodes --
@@ -2182,6 +2195,16 @@ export const INTL_EDGES = [
   // ——— Mongolia (v10.19.0 "Steppe Road") — one of the longest hauls in the
   // empire: Beijing north across the Gobi to Ulaanbaatar. ———
   border('cn-beijing', 'mn-ulaanbaatar', 'CN', 'MN', 'Erenhot–Zamyn-Üüd Border'),
+  // ——— Kyrgyzstan (v10.22.0 "Tian Shan") — bridges Kazakhstan, Uzbekistan,
+  // Tajikistan and China's Xinjiang all at once. Every city named in a hand
+  // edge below is also chained onward by hand (auto-connect skips them).
+  border('kg-bishkek', 'kz-almaty', 'KG', 'KZ', 'Korday Border'),
+  border('kg-osh', 'uz-andijan', 'KG', 'UZ', 'Dostyk Border'),
+  border('kg-osh', 'tj-khujand', 'KG', 'TJ', 'Isfara Border'),
+  border('kg-naryn', 'cn-kashgar', 'KG', 'CN', 'Torugart Pass'),
+  road('kg-bishkek', 'kg-tokmok'), road('kg-bishkek', 'kg-karakol'),
+  road('kg-bishkek', 'kg-naryn'), road('kg-naryn', 'kg-osh'),
+  road('kg-osh', 'kg-jalal-abad'),
   road('ru-barnaul', 'ru-novosibirsk'), road('ru-novosibirsk', 'ru-omsk'),
   road('ru-omsk', 'ru-tyumen'), road('ru-tyumen', 'ru-yekaterinburg'),
   road('ru-yekaterinburg', 'ru-chelyabinsk'), road('ru-yekaterinburg', 'ru-perm'),
