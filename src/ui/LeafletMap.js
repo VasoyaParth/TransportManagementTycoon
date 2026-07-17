@@ -33,10 +33,15 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
   const hq = company ? cityById(company.hqCityId) : { lat: 22, lng: 79, name: 'HQ' };
 
   const hubs = useGame(s => s.hubs || []);
+  const hqHub = useGame(s => (s.hubs || []).find(h => h.hq));
   const hubData = useCallback(() => hubs.filter(h => !h.hq).map(h => {
     const c = cityById(h.cityId);
-    return c ? { lat: c.lat, lng: c.lng, name: h.name, hq: false, cityId: h.cityId } : null;
+    return c ? { lat: c.lat, lng: c.lng, name: h.name, hq: false, cityId: h.cityId, color: h.color || null, tier: h.tier || 0 } : null;
   }).filter(Boolean), [hubs]);
+  // Content signature (not just .length) — a repaint/upgrade doesn't change
+  // how many garages exist, so window.setHubs must fire on this too, not
+  // just on buy/sell.
+  const hubsSig = hubs.map(h => `${h.cityId}:${h.tier || 0}:${h.color || ''}`).join('|');
 
   const initial = useMemo(() => ({
     hq: { lat: hq.lat, lng: hq.lng, name: hq.name },
@@ -44,6 +49,7 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
     cities: CITY_DATA,
     stations: STATION_DATA,
     hubs: hubData(),
+    hqStyle: { color: hqHub?.color || null, tier: hqHub?.tier || 0 },
     ports: PORT_DATA,
     ferryArt: ferrySvgString(), // constant RO-RO ship art — sent once, not per truck per tick
     // Persisted port visibility — "off" stays off across restarts.
@@ -139,8 +145,14 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
   // Only show city dots for countries the player has unlocked.
   useEffect(() => { if (ready) inject(`window.setVisibleCountries(${JSON.stringify(unlockedCountries)})`); }, [ready, unlockedCountries]);
 
-  // Keep garage markers in sync when hubs are bought/sold.
-  useEffect(() => { if (ready) inject(`window.setHubs(${JSON.stringify(hubData())})`); }, [ready, hubs.length]);
+  // Keep garage markers in sync when hubs are bought/sold/repainted/upgraded.
+  useEffect(() => { if (ready) inject(`window.setHubs(${JSON.stringify(hubData())})`); }, [ready, hubsSig]);
+
+  // Keep the HQ marker in sync with its Customize HQ colour/tier.
+  useEffect(() => {
+    if (!ready) return;
+    inject(`window.setHQ(${JSON.stringify({ color: hqHub?.color || null, tier: hqHub?.tier || 0 })})`);
+  }, [ready, hqHub?.color, hqHub?.tier]);
 
   // Live regional weather (v2.4.0) — overlays drawn ONLY where a zone is
   // actually active today: radius circle + kind badge, slowing trucks inside.

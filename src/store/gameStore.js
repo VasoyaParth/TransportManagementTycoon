@@ -7,6 +7,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { TRUCK_MODELS, CARGO_TYPES, CAMPAIGNS, POWERUPS, CONTRACT_FLAVORS } from '../data/trucks';
+import { HQ_TIERS, GARAGE_TIERS } from '../data/buildings';
 import { COUNTRY_BY_CODE } from '../data/expansion';
 import { STAFF_NAMES, STAFF_LEVELS } from '../data/staffNames';
 import { CITIES } from '../data/cities';
@@ -1669,6 +1670,45 @@ export const useGame = create(
         get().logLedger('garage', 'garage', `Sold garage · ${hub.name.replace(' Garage', '')}`, refund);
         get().notify('system', 'garage', `Garage in ${hub.name.replace(' Garage', '')} sold for ${inr(refund)}.`);
         return { ok: true, refund };
+      },
+
+      // Upgrade a building (HQ or garage) to its next tier — cash cost,
+      // status/visual upgrade only (bigger building on the map, more window
+      // rows / bay doors). Same tier ladder logic for both via hub.hq to pick
+      // the right catalog, so one action covers the whole real-estate side.
+      upgradeHub(cityId) {
+        const s = get();
+        const hub = s.hubs.find(h => h.cityId === cityId);
+        if (!hub) return { ok: false, err: 'No building found here' };
+        const tiers = hub.hq ? HQ_TIERS : GARAGE_TIERS;
+        const cur = hub.tier || 0;
+        const next = tiers[cur + 1];
+        if (!next) return { ok: false, err: 'Already at the top tier' };
+        if (s.balance < next.cost) return { ok: false, err: `Need ${inr(next.cost)} to upgrade` };
+        set({
+          balance: s.balance - next.cost,
+          hubs: s.hubs.map(h => h.cityId === cityId ? { ...h, tier: next.id } : h),
+        });
+        const label = hub.hq ? 'Headquarters' : hub.name;
+        get().logLedger(hub.hq ? 'hq' : 'garage', 'office-building-marker', `${label} upgraded — ${next.name}`, -next.cost);
+        get().notify('system', 'office-building-marker', `${label} upgraded to ${next.name}!`);
+        play('coin', 1);
+        return { ok: true };
+      },
+      // Repaint a building's colour — same flat-Gold, apply-once model as
+      // paintTruck() (see there for the free-preview rationale).
+      paintHub(cityId, color) {
+        const s = get();
+        const hub = s.hubs.find(h => h.cityId === cityId);
+        if (!hub) return { ok: false, err: 'No building found here' };
+        if ((hub.color || null) === (color || null)) return { ok: false, err: 'Nothing to apply' };
+        if (s.gold < LIVERY_COST) return { ok: false, err: `Need ${LIVERY_COST} Gold to repaint` };
+        set({ gold: s.gold - LIVERY_COST, hubs: s.hubs.map(h => h.cityId === cityId ? { ...h, color } : h) });
+        const label = hub.hq ? 'Headquarters' : hub.name;
+        get().logLedger(hub.hq ? 'hq' : 'garage', 'palette', `${label} repainted`, 0);
+        get().notify('system', 'palette', `${label} got a fresh new look!`);
+        play('coin', 0.6);
+        return { ok: true };
       },
 
       // Free refuel for a truck parked at any of your garages/HQ.

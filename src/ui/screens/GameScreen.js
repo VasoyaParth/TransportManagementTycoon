@@ -12,7 +12,7 @@ import { FleetTab, RoutesTab, StaffTab, EconomyTab, MarketingTab, RewardsTab } f
 import {
   NewDeliveryModal, TruckDetailModal, TruckCustomizeModal, BuyTruckModal, ContractsModal,
   PowerupsModal, NotificationsModal, SettingsModal, HubsModal, DriverDetailModal, CountriesModal, MiniGamesModal, HubInfoModal,
-  CompanyInsightsModal, NewsModal, PhotoModeModal, FinaleModal,
+  BuildingCustomizeModal, CompanyInsightsModal, NewsModal, PhotoModeModal, FinaleModal,
 } from './modals';
 import { haptic } from '../../engine/haptics';
 import Tutorial from './Tutorial';
@@ -332,6 +332,11 @@ export default function GameScreen() {
         visible={modal?.kind === 'hubinfo'} onClose={() => setModal(null)} cityId={modal?.cityId}
         onNewDelivery={(tid) => openNewDelivery(tid)}
         onOpenTruck={(tid) => setModal({ kind: 'truck', truckId: tid })}
+        onCustomize={(cid) => setModal({ kind: 'buildingCustomize', cityId: cid })}
+      />}
+      {mounted('buildingCustomize') && <BuildingCustomizeModal
+        visible={modal?.kind === 'buildingCustomize'} onClose={() => setModal(null)} cityId={modal?.cityId}
+        onBack={() => setModal({ kind: 'hubinfo', cityId: modal?.cityId })}
       />}
       {mounted('settings') && <SettingsModal visible={modal?.kind === 'settings'} onClose={() => setModal(null)} initialTab={modal?.tab} />}
       {mounted('company') && <CompanyInsightsModal visible={modal?.kind === 'company'} onClose={() => setModal(null)}
