@@ -77,6 +77,9 @@ export const COUNTRIES = [
     blurb: 'Mombasa port to Nairobi — the gateway to East Africa.' },
   { code: 'ET', name: 'Ethiopia', icon: 'coffee-outline', unlockCost: 55000000, bonusCash: 11000000, bonusGold: 110,
     blurb: 'Highland routes to Addis Ababa, the roof of Africa.' },
+  // v10.19.0 "Steppe Road" expansion
+  { code: 'MN', name: 'Mongolia', icon: 'horse-variant', unlockCost: 58000000, bonusCash: 11500000, bonusGold: 115,
+    blurb: 'The far edge of the map — endless steppe to Ulaanbaatar and the Gobi. One of the longest hauls in the empire.' },
 ];
 
 export const COUNTRY_BY_CODE = COUNTRIES.reduce((m, c) => (m[c.code] = c, m), {});
@@ -2020,6 +2023,15 @@ export const INTL_CITIES = [
     ['pu-er', "Pu'er", 'Yunnan', 22.83, 100.97, 240000, 3],
     ['lincang', 'Lincang', 'Yunnan', 23.88, 100.09, 320000, 3],
   ]),
+  // v10.19.0 "Steppe Road" — Mongolia, the far northern edge of the map.
+  ...C('MN')([
+    ['ulaanbaatar', 'Ulaanbaatar', 'Ulaanbaatar', 47.92, 106.92, 1600000, 1],
+    ['erdenet', 'Erdenet', 'Orkhon', 49.03, 104.06, 100000, 2],
+    ['darkhan', 'Darkhan', 'Darkhan-Uul', 49.49, 105.96, 90000, 2],
+    ['choibalsan', 'Choibalsan', 'Dornod', 48.08, 114.53, 40000, 3],
+    ['sainshand', 'Sainshand', 'Dornogovi', 44.88, 110.14, 20000, 3],
+    ['khovd', 'Khovd', 'Khovd', 48.01, 91.64, 30000, 3],
+  ]),
 ];
 
 // ---- Road nodes: every foreign city + a couple of Indian-side helper nodes --
@@ -2167,6 +2179,9 @@ export const INTL_EDGES = [
   road('cn-kashgar', 'cn-aksu'), road('cn-aksu', 'cn-korla'),
   road('cn-korla', 'cn-urumqi'), road('cn-urumqi', 'cn-turpan'),
   border('ru-barnaul', 'cn-urumqi', 'RU', 'CN', 'Altai Corridor'),
+  // ——— Mongolia (v10.19.0 "Steppe Road") — one of the longest hauls in the
+  // empire: Beijing north across the Gobi to Ulaanbaatar. ———
+  border('cn-beijing', 'mn-ulaanbaatar', 'CN', 'MN', 'Erenhot–Zamyn-Üüd Border'),
   road('ru-barnaul', 'ru-novosibirsk'), road('ru-novosibirsk', 'ru-omsk'),
   road('ru-omsk', 'ru-tyumen'), road('ru-tyumen', 'ru-yekaterinburg'),
   road('ru-yekaterinburg', 'ru-chelyabinsk'), road('ru-yekaterinburg', 'ru-perm'),

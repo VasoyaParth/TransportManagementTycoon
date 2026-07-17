@@ -7,7 +7,7 @@ import RNShare from 'react-native-share';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST_MIN, LIVERY_COST_MAX, liveryCostFor, FLEET_LIVERY_DISCOUNT, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, CONVOY_SYMBOLS, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds, LICENSE_TIERS, licenseRequiredFor, licenseHeldBy } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST_MIN, LIVERY_COST_MAX, liveryCostFor, FLEET_LIVERY_DISCOUNT, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, CONVOY_SYMBOLS, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds, licenseRequiredFor } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
@@ -79,6 +79,7 @@ const propMeta = {
   electric: { color: C.green, bg: C.greenSoft, icon: 'lightning-bolt', label: 'Electric' },
   hybrid: { color: C.blue, bg: C.blueSoft, icon: 'leaf', label: 'Hybrid' },
 };
+const TIER_LABELS = { 1: 'Starter', 2: 'Advanced', 3: 'Premium' };
 
 function Stars({ rating, size = 13 }) {
   return (
@@ -751,8 +752,8 @@ const TruckLivePanel = React.memo(function TruckLivePanel({ truckId }) {
       {truck.status === 'delivering' && d && (
         <Card style={{ marginBottom: 12 }}>
           <Row style={{ justifyContent: 'space-between' }}>
-            <Text style={FONT.h3}>{cityById(d.fromCityId)?.name} → {cityById(d.toCityId)?.name}</Text>
-            <Text style={[FONT.mono, { color: C.blue }]}>ETA {eta}</Text>
+            <Text style={[FONT.h3, { flex: 1, marginRight: 8 }]} numberOfLines={1}>{cityById(d.fromCityId)?.name} → {cityById(d.toCityId)?.name}</Text>
+            <Text style={[FONT.mono, { color: C.blue, flexShrink: 0 }]}>ETA {eta}</Text>
           </Row>
           <Progress pct={prog} color={C.green} style={{ marginTop: 8 }} />
           <Row style={{ justifyContent: 'space-between', marginTop: 4 }}>
@@ -1444,14 +1445,13 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
   const fleetCapacity = useGame(s => s.fleetCapacity);
   const cap = fleetCapacity();
   const atCapacity = cap.used >= cap.total;
-  const [tier, setTier] = useState(0);
   const [sort, setSort] = useState('default');
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1); // showroom loads 10 trucks at a time
   const [confirmModel, setConfirmModel] = useState(null); // full-detail confirm sheet before buying
   const gameDay = useGame(st => st.gameDay);
   const day = gameDay().day;
-  useEffect(() => { setPage(1); }, [tier, sort, query]);
+  useEffect(() => { setPage(1); }, [sort, query]);
   useEffect(() => { if (!visible) setConfirmModel(null); }, [visible]);
   const tapWindowShopperEgg = useEasterEggTap('window_shopper', 8);
   const SORTS = [
@@ -1463,15 +1463,23 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
   ];
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const filtered = TRUCK_MODELS.filter(m => (tier === 0 || m.tier === tier)
-      && (!q || m.name.toLowerCase().includes(q) || m.brand.toLowerCase().includes(q)));
+    const filtered = !q ? TRUCK_MODELS : TRUCK_MODELS.filter(m => {
+      // Search everything about the truck, not just its name — brand, tier,
+      // propulsion, tonnage, speed, range, price, description all match.
+      const haystack = [
+        m.name, m.brand, TIER_LABELS[m.tier], propMeta[m.propulsion]?.label,
+        `${m.cargo}t`, `${m.cargo} ton`, `${m.cargo}`, `${m.speed}`, `${m.range}km`, `${m.range}`,
+        String(m.price), m.desc,
+      ].join(' ').toLowerCase();
+      return haystack.includes(q);
+    });
     const sorted = [...filtered];
     if (sort === 'name-asc') sorted.sort((a, b) => a.name.localeCompare(b.name));
     else if (sort === 'name-desc') sorted.sort((a, b) => b.name.localeCompare(a.name));
     else if (sort === 'price-asc') sorted.sort((a, b) => a.price - b.price);
     else if (sort === 'price-desc') sorted.sort((a, b) => b.price - a.price);
     return sorted;
-  }, [tier, sort, query]);
+  }, [sort, query]);
   const buy = (m) => {
     const r = buyTruck(m.id);
     if (r.ok) { toast(`${m.name} ordered — building at HQ`, 'success'); setConfirmModel(null); }
@@ -1492,19 +1500,14 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
         <Progress pct={Math.min(100, (cap.used / Math.max(1, cap.total)) * 100)} color={atCapacity ? C.red : C.blue} style={{ marginTop: 8 }} height={4} />
       </Card>
       <Row style={{ marginBottom: 10, borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.md, paddingHorizontal: 10 }}>
-        <Icon name="magnify" size={16} color={C.faint} />
+        <Pressable onPress={tapWindowShopperEgg} hitSlop={6}><Icon name="magnify" size={16} color={C.faint} /></Pressable>
         <TextInput
-          value={query} onChangeText={setQuery} placeholder="Search truck name or brand…" placeholderTextColor={C.faint}
+          value={query} onChangeText={setQuery} placeholder="Search by name, brand, tier, fuel, tonnage, price…" placeholderTextColor={C.faint}
           style={{ flex: 1, paddingVertical: 9, paddingHorizontal: 8, fontSize: 14, color: C.text }}
         />
         {query.length > 0 && (
           <Pressable onPress={() => setQuery('')} hitSlop={6}><Icon name="close-circle" size={16} color={C.faint} /></Pressable>
         )}
-      </Row>
-      <Row style={{ gap: 6, marginBottom: 10 }}>
-        {[[0, 'All'], [1, 'Starter'], [2, 'Advanced'], [3, 'Premium']].map(([t, l]) => (
-          <Chip key={t} label={l} active={tier === t} onPress={() => { if (t === 0 && tier === 0) tapWindowShopperEgg(); setTier(t); }} />
-        ))}
       </Row>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 10 }}
         contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', paddingRight: 8 }}>
@@ -2495,8 +2498,8 @@ export function DriverDetailModal({ visible, onClose, staffId, onShowOnMap }) {
           <>
             <Card style={{ marginBottom: 12 }}>
               <Row style={{ justifyContent: 'space-between' }}>
-                <Text style={FONT.h3}>{cityById(d.fromCityId)?.name} → {cityById(d.toCityId)?.name}</Text>
-                <Text style={[FONT.mono, { color: C.blue }]}>ETA {eta}</Text>
+                <Text style={[FONT.h3, { flex: 1, marginRight: 8 }]} numberOfLines={1}>{cityById(d.fromCityId)?.name} → {cityById(d.toCityId)?.name}</Text>
+                <Text style={[FONT.mono, { color: C.blue, flexShrink: 0 }]}>ETA {eta}</Text>
               </Row>
               <Row style={{ marginTop: 4 }}>
                 <Icon name={m.icon} size={14} color={C.sub} />
@@ -2565,21 +2568,22 @@ export function DriverDetailModal({ visible, onClose, staffId, onShowOnMap }) {
 // heavy to open. Show the newest NOTIF_PAGE, and load the rest in pages via a
 // "Show more" footer (count resets whenever the sheet reopens or filter flips).
 const NOTIF_PAGE = 12;
-// One notification row, swipeable left to reveal a delete action underneath —
-// same "swipe to remove" affordance as any mobile inbox/messaging app. Built
-// on core RN's PanResponder + Animated (no gesture-handler dependency in this
-// project) rather than a tap: a horizontal drag past SWIPE_THRESHOLD releases
-// into a slide-out-and-remove animation; anything short of that springs back.
-const SWIPE_THRESHOLD = -80;
+// One notification row, swipeable EITHER direction to reveal a delete action
+// underneath — same "swipe to remove" affordance as any mobile inbox/
+// messaging app. Built on core RN's PanResponder + Animated (no
+// gesture-handler dependency in this project): a horizontal drag past
+// SWIPE_THRESHOLD (either side) releases into a slide-out-and-remove
+// animation in the direction dragged; anything short of that springs back.
+const SWIPE_THRESHOLD = 80;
 function SwipeableNotifRow({ n, onPress, onDismiss }) {
   const translateX = useRef(new Animated.Value(0)).current;
   const panResponder = useRef(PanResponder.create({
     onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
-    onPanResponderMove: (_, g) => { if (g.dx < 0) translateX.setValue(Math.max(g.dx, -140)); },
+    onPanResponderMove: (_, g) => translateX.setValue(Math.max(-140, Math.min(140, g.dx))),
     onPanResponderRelease: (_, g) => {
-      if (g.dx < SWIPE_THRESHOLD) {
+      if (Math.abs(g.dx) > SWIPE_THRESHOLD) {
         haptic('light');
-        Animated.timing(translateX, { toValue: -400, duration: 180, useNativeDriver: true }).start(() => onDismiss());
+        Animated.timing(translateX, { toValue: g.dx < 0 ? -400 : 400, duration: 180, useNativeDriver: true }).start(() => onDismiss());
       } else {
         Animated.spring(translateX, { toValue: 0, useNativeDriver: true, bounciness: 6 }).start();
       }
@@ -2587,7 +2591,7 @@ function SwipeableNotifRow({ n, onPress, onDismiss }) {
   })).current;
   return (
     <View style={{ marginBottom: 6 }}>
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: C.red, borderRadius: RADIUS.md, alignItems: 'flex-end', justifyContent: 'center', paddingRight: 18 }]}>
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: C.red, borderRadius: RADIUS.md, alignItems: 'center', justifyContent: 'center' }]}>
         <Icon name="trash-can-outline" size={20} color="#fff" />
       </View>
       <Animated.View {...panResponder.panHandlers} style={{ transform: [{ translateX }] }}>
@@ -2640,14 +2644,13 @@ export function NotificationsModal({ visible, onClose }) {
           )}
         </Row>
       </Row>
-      <Pressable onPress={() => saveSettings({ notifSnoozeUntil: snoozed ? 0 : Date.now() + 60 * 60 * 1000 })}
-        style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }} hitSlop={4}>
-        <Icon name={snoozed ? 'bell-sleep' : 'bell-outline'} size={13} color={snoozed ? C.amber : C.faint} />
-        <Text style={[FONT.tiny, { marginLeft: 4, color: snoozed ? C.amber : C.faint, fontWeight: snoozed ? '700' : '400' }]}>
-          {snoozed ? `Pop-ups snoozed until ${new Date(settings.notifSnoozeUntil).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })} · tap to cancel` : 'Snooze pop-ups for 1 hour'}
-        </Text>
-      </Pressable>
-      <Text style={[FONT.tiny, { color: C.faint, marginBottom: 8 }]}>Swipe a notification left to remove it.</Text>
+      <Btn
+        title={snoozed ? `Pop-ups snoozed until ${new Date(settings.notifSnoozeUntil).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })} · tap to cancel` : 'Snooze pop-ups for 1 hour'}
+        kind="soft" icon={snoozed ? 'bell-sleep' : 'bell-outline'} small
+        style={[{ marginBottom: 10, alignSelf: 'flex-start' }, snoozed && { backgroundColor: C.amberSoft }]}
+        onPress={() => saveSettings({ notifSnoozeUntil: snoozed ? 0 : Date.now() + 60 * 60 * 1000 })}
+      />
+      <Text style={[FONT.tiny, { color: C.faint, marginBottom: 8 }]}>Swipe a notification either direction to remove it.</Text>
       <FlatList
         data={shown} keyExtractor={n => n.id} showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 30 }}
@@ -4650,7 +4653,10 @@ const cs = StyleSheet.create({
   resRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border },
   pickerBox: { marginTop: 10, backgroundColor: C.bgSoft, borderRadius: RADIUS.md, borderWidth: 1, borderColor: C.border, padding: 10 },
   suggChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, borderWidth: 1, borderColor: C.border, backgroundColor: C.bgSoft, alignItems: 'center' },
-  notif: { flexDirection: 'row', alignItems: 'center', padding: 10, borderRadius: RADIUS.md, marginBottom: 6 },
+  // backgroundColor here is load-bearing, not decoration: SwipeableNotifRow
+  // stacks a red delete-affordance View behind this row, so the row MUST be
+  // opaque or that red bleeds through every read (unhighlighted) notification.
+  notif: { flexDirection: 'row', alignItems: 'center', padding: 10, borderRadius: RADIUS.md, marginBottom: 6, backgroundColor: '#fff' },
   notifIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.border },
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.blue },
   iconTile: { width: 52, height: 52, borderRadius: 14, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center', backgroundColor: '#fff' },

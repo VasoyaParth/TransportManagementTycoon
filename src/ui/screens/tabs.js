@@ -494,9 +494,9 @@ export function RoutesTab({ onTrack, onNewDelivery }) {
                   <View style={{ flex: 1, marginRight: 8 }}>
                     <Text style={FONT.h3} numberOfLines={1}>{truck?.customName || (model ? model.name : 'Truck')}</Text>
                     <Row style={{ marginTop: 3 }}>
-                      <Text style={FONT.sub}>{from ? from.name : '?'}</Text>
-                      <Icon name="arrow-right" size={13} color={C.faint} style={{ marginHorizontal: 5 }} />
-                      <Text style={FONT.sub}>{to ? to.name : '?'}</Text>
+                      <Text style={[FONT.sub, { flexShrink: 1 }]} numberOfLines={1}>{from ? from.name : '?'}</Text>
+                      <Icon name="arrow-right" size={13} color={C.faint} style={{ marginHorizontal: 5, flexShrink: 0 }} />
+                      <Text style={[FONT.sub, { flexShrink: 1 }]} numberOfLines={1}>{to ? to.name : '?'}</Text>
                     </Row>
                   </View>
                   <Btn title="Track" icon="crosshairs-gps" kind="soft" small onPress={() => onTrack && onTrack(d)} />
