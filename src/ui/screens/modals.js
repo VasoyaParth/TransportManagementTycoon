@@ -774,6 +774,9 @@ export function AutopilotModal({ visible, onClose }) {
         value={page} onChange={setPage}
         hint="Switch between your saved Autopilot routes and building a new one."
       />
+      {page === 'list' && (
+        <Btn title="+ Create New Route" icon="plus-circle" kind="green" style={{ marginBottom: 12 }} onPress={() => setPage('create')} />
+      )}
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
         {page === 'create' ? (
           <>
@@ -943,18 +946,38 @@ export function AuctionsModal({ visible, onClose }) {
             </Card>
           ) : auctionListings.map(l => {
             const m = modelById(l.modelId);
+            const pm = propMeta[m.propulsion];
+            const conditionColor = l.condition >= 70 ? C.green : l.condition >= 40 ? C.amber : C.red;
+            const discountPct = Math.round((1 - l.price / m.price) * 100);
             return (
               <Card key={l.id} style={{ marginBottom: 10 }}>
                 <Row>
-                  <Icon name={m.icon} size={22} color={C.blue} />
-                  <View style={{ marginLeft: 9, flex: 1 }}>
+                  <TruckArtBadge model={m} size={64} bg={pm.bg} />
+                  <View style={{ marginLeft: 10, flex: 1 }}>
                     <Text style={[FONT.body, { fontWeight: '800' }]}>{m.name}</Text>
-                    <Text style={FONT.tiny}>{l.condition}% condition · {l.km.toLocaleString('en-IN')} km driven · list price {inr(m.price)}</Text>
+                    <Text style={FONT.tiny}>{m.brand}</Text>
+                    <Row style={{ marginTop: 4, gap: 6 }}>
+                      <Pill text={pm.label} icon={pm.icon} color={pm.color} bg={pm.bg} />
+                      <Stars rating={m.rating} size={11} />
+                    </Row>
                   </View>
                 </Row>
-                <Row style={{ justifyContent: 'space-between', marginTop: 8, alignItems: 'center' }}>
-                  <Text style={[FONT.h3, { color: C.green }]}>{inr(l.price)}</Text>
-                  <Btn title="Buy" kind="green" small onPress={() => {
+                <Row style={{ justifyContent: 'space-between', marginTop: 10 }}>
+                  <Text style={[FONT.tiny, { color: conditionColor, fontWeight: '700' }]}>{l.condition}% condition</Text>
+                  <Text style={FONT.tiny}>{l.km.toLocaleString('en-IN')} km driven</Text>
+                </Row>
+                <Progress pct={l.condition} color={conditionColor} style={{ marginTop: 4, marginBottom: 8 }} />
+                <View style={{ borderTopWidth: 1, borderTopColor: C.border, paddingTop: 8 }}>
+                  <SpecRow icon="speedometer" label="Top speed" value={`${m.speed} km/h`} />
+                  <SpecRow icon="weight" label="Cargo capacity" value={`${m.cargo} t`} />
+                  <SpecRow icon="map-marker-distance" label="Range (full tank)" value={`${m.range} km`} />
+                </View>
+                <Row style={{ justifyContent: 'space-between', marginTop: 10, alignItems: 'center' }}>
+                  <View>
+                    <Text style={[FONT.tiny, { textDecorationLine: 'line-through', color: C.faint }]}>{inr(m.price)} new</Text>
+                    <Text style={[FONT.h3, { color: C.green }]}>{inr(l.price)}{discountPct > 0 ? ` (-${discountPct}%)` : ''}</Text>
+                  </View>
+                  <Btn title="Buy" kind="green" onPress={() => {
                     const r = buyAuctionListing(l.id);
                     toast(r.ok ? 'Truck won — parked at HQ!' : r.err, r.ok ? 'success' : 'error');
                   }} />
@@ -970,22 +993,29 @@ export function AuctionsModal({ visible, onClose }) {
             </Card>
           ) : sellable.map(t => {
             const m = modelById(t.modelId);
+            const pm = propMeta[m.propulsion];
             const base = truckResale(t.id);
+            const condition = Math.round(t.condition == null ? 100 : t.condition);
             return (
               <Card key={t.id} style={{ marginBottom: 10 }}>
-                <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Row style={{ flex: 1, marginRight: 8 }}>
-                    <Icon name={m.icon} size={20} color={C.sub} />
-                    <View style={{ marginLeft: 9, flex: 1 }}>
-                      <Text style={[FONT.body, { fontWeight: '700' }]}>{t.customName || m.name}</Text>
-                      <Text style={FONT.tiny}>Normal resale ~{inr(base)} — an auction typically pays 10-30% more</Text>
-                    </View>
-                  </Row>
-                  <Btn title="Auction it" kind="soft" small onPress={() => {
-                    const r = sellToAuction(t.id);
-                    toast(r.ok ? `Sold for ${inr(r.value)}!` : r.err, r.ok ? 'success' : 'error');
-                  }} />
+                <Row>
+                  <TruckArtBadge model={m} color={t.color} accent={t.accentColor} logoIcon={t.logoIcon}
+                    pattern={t.pattern} booster={t.booster} rimColor={t.rimColor} size={64} bg={pm.bg} />
+                  <View style={{ marginLeft: 10, flex: 1 }}>
+                    <Text style={[FONT.body, { fontWeight: '800' }]}>{t.customName || m.name}</Text>
+                    <Text style={FONT.tiny}>{m.brand} · {condition}% condition · {Math.round(t.km || 0).toLocaleString('en-IN')} km</Text>
+                    <Row style={{ marginTop: 4 }}>
+                      <Pill text={pm.label} icon={pm.icon} color={pm.color} bg={pm.bg} />
+                    </Row>
+                  </View>
                 </Row>
+                <Row style={{ justifyContent: 'space-between', marginTop: 10, alignItems: 'center' }}>
+                  <Text style={FONT.tiny}>Normal resale ~{inr(base)} — an auction typically pays 10-30% more</Text>
+                </Row>
+                <Btn title="Auction it" kind="soft" style={{ marginTop: 8 }} onPress={() => {
+                  const r = sellToAuction(t.id);
+                  toast(r.ok ? `Sold for ${inr(r.value)}!` : r.err, r.ok ? 'success' : 'error');
+                }} />
               </Card>
             );
           })

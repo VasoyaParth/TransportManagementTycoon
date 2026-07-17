@@ -224,20 +224,17 @@ export default function GameScreen() {
         </View>
         {/* Right-side action stack (garage / contracts / power-ups) */}
         <View style={st.actionStack}>
-          {/* Pinned: always visible, never buried in the scrolling drawer
-              below — news, garages, and (since they were easy to miss
-              scrolled inside the drawer) insurance + auctions. */}
+          {/* Pinned: news + garages. Insurance, Auctions and Autopilot moved
+              off this stack entirely — they live inside the Economy and
+              Routes tabs now (see EconomyTab / RoutesTab), both because
+              they fit those tabs' subject matter better and because a
+              taller pinned/drawer stack here was overlapping the controls
+              below it. */}
           <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'news' }); }}>
             <Icon name="newspaper-variant-outline" size={19} color="#C0161C" />
           </Pressable>
           <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'hubs' }); }}>
             <Icon name="garage" size={19} color={C.text} />
-          </Pressable>
-          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'insurance' }); }}>
-            <Icon name="shield-car" size={19} color={C.green} />
-          </Pressable>
-          <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'auctions' }); }}>
-            <Icon name="gavel" size={19} color={C.text} />
           </Pressable>
           {/* Folding drawer: expands smoothly above the toggle. Capped at a
               fixed 3-button height (not 4) so it never grows again as more
@@ -261,9 +258,6 @@ export default function GameScreen() {
               </Pressable>
               <Pressable style={[st.actionBtn, { marginBottom: 8 }]} onPress={() => { haptic('light'); setModal({ kind: 'rankings' }); }}>
                 <Icon name="podium-gold" size={19} color={C.gold} />
-              </Pressable>
-              <Pressable style={[st.actionBtn, { marginBottom: 8 }]} onPress={() => { haptic('light'); setModal({ kind: 'autopilot' }); }}>
-                <Icon name="steering" size={19} color={C.blue} />
               </Pressable>
             </ScrollView>
           </Animated.View>
@@ -331,9 +325,12 @@ export default function GameScreen() {
           onOpenFleetLivery={() => setModal({ kind: 'fleetLivery' })} />}
         {tab === 'routes' && <RoutesTab
           onTrack={d => { setTab(null); const t = trucks.find(x => x.id === d.truckId); if (t) showOnMap(t); }}
-          onNewDelivery={() => openNewDelivery()} />}
+          onNewDelivery={() => openNewDelivery()}
+          onOpenAutopilot={() => setModal({ kind: 'autopilot' })} />}
         {tab === 'staff' && <StaffTab onOpenDriver={(mem) => setModal({ kind: 'driver', staffId: mem.id })} />}
-        {tab === 'economy' && <EconomyTab />}
+        {tab === 'economy' && <EconomyTab
+          onOpenInsurance={() => setModal({ kind: 'insurance' })}
+          onOpenAuctions={() => setModal({ kind: 'auctions' })} />}
         {tab === 'marketing' && <MarketingTab />}
         {tab === 'rewards' && <RewardsTab onOpenGames={() => { setTab(null); setModal({ kind: 'games' }); }} />}
       </Sheet>
