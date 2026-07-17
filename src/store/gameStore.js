@@ -909,6 +909,7 @@ const initialState = {
     finaleSeen: false, finaleModalShown: false, // Grand Finale gift + celebration screen, each one-time-ever
     stockRemovalGiftClaimed: false, // one-time thank-you gift for the Stock Market's removal
     notif: { delivery: true, truck: true, fuel: true, daily: true },
+    notifSnoozeUntil: 0, // real ms; while in the future, new notifications still land in the inbox but skip the pop-up toast
   },
   easterEggs: { found: [] }, // ids of discovered hidden gems (persisted, one-time rewards)
   achievements: { unlocked: {} }, // {"road_warrior:2": ts} — track:tierIndex reached (persisted)
@@ -2839,6 +2840,10 @@ export const useGame = create(
       // ---------- notifications / settings ----------
       markRead(id) { set({ notifications: get().notifications.map(n => n.id === id ? { ...n, read: true } : n) }); },
       markAllRead() { set({ notifications: get().notifications.map(n => ({ ...n, read: true })) }); },
+      // Swipe-to-dismiss on a single notification — removes it from the inbox
+      // entirely (unlike markRead, which just clears the unread dot).
+      removeNotification(id) { set({ notifications: get().notifications.filter(n => n.id !== id) }); },
+      clearAllNotifications() { set({ notifications: [] }); },
       saveSettings(patch) {
         set({ settings: { ...get().settings, ...patch } });
         if ('sound' in patch) setSoundEnabled(patch.sound !== false);

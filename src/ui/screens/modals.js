@@ -1,7 +1,7 @@
 // Modal flows — all rendered inside the shared <Sheet>. New delivery, truck
 // detail, buy truck, contracts, power-ups, notifications, settings.
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Switch, Animated, Easing, Linking, Share } from 'react-native';
+import { View, Text, ScrollView, FlatList, Pressable, TextInput, StyleSheet, Switch, Animated, Easing, Linking, Share, PanResponder } from 'react-native';
 import ViewShot from 'react-native-view-shot';
 import RNShare from 'react-native-share';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
@@ -404,11 +404,11 @@ function SpecRow({ icon, label, value }) {
   );
 }
 
-function Chip({ label, active, onPress, icon, color = C.blue }) {
+function Chip({ label, active, onPress, icon, color = C.blue, style }) {
   return (
-    <Pressable onPress={onPress} style={[cs.chip, active && { backgroundColor: color, borderColor: color }]}>
-      {icon ? <Icon name={icon} size={13} color={active ? '#fff' : C.sub} style={{ marginRight: 4 }} /> : null}
-      <Text style={{ fontSize: 12.5, fontWeight: '700', color: active ? '#fff' : C.sub }} numberOfLines={1}>{label}</Text>
+    <Pressable onPress={onPress} style={[cs.chip, active && { backgroundColor: color, borderColor: color }, style]}>
+      {icon ? <Icon name={icon} size={13} color={active ? '#fff' : C.sub} style={{ marginRight: 4, flexShrink: 0 }} /> : null}
+      <Text style={{ fontSize: 12.5, fontWeight: '700', color: active ? '#fff' : C.sub, flexShrink: 0 }} numberOfLines={1}>{label}</Text>
     </Pressable>
   );
 }
@@ -1205,11 +1205,12 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
   const atCapacity = cap.used >= cap.total;
   const [tier, setTier] = useState(0);
   const [sort, setSort] = useState('default');
+  const [query, setQuery] = useState('');
   const [page, setPage] = useState(1); // showroom loads 10 trucks at a time
   const [confirmModel, setConfirmModel] = useState(null); // full-detail confirm sheet before buying
   const gameDay = useGame(st => st.gameDay);
   const day = gameDay().day;
-  useEffect(() => { setPage(1); }, [tier, sort]);
+  useEffect(() => { setPage(1); }, [tier, sort, query]);
   useEffect(() => { if (!visible) setConfirmModel(null); }, [visible]);
   const tapWindowShopperEgg = useEasterEggTap('window_shopper', 8);
   const SORTS = [
@@ -1220,14 +1221,16 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
     ['price-desc', 'Price High-Low'],
   ];
   const list = useMemo(() => {
-    const filtered = TRUCK_MODELS.filter(m => tier === 0 || m.tier === tier);
+    const q = query.trim().toLowerCase();
+    const filtered = TRUCK_MODELS.filter(m => (tier === 0 || m.tier === tier)
+      && (!q || m.name.toLowerCase().includes(q) || m.brand.toLowerCase().includes(q)));
     const sorted = [...filtered];
     if (sort === 'name-asc') sorted.sort((a, b) => a.name.localeCompare(b.name));
     else if (sort === 'name-desc') sorted.sort((a, b) => b.name.localeCompare(a.name));
     else if (sort === 'price-asc') sorted.sort((a, b) => a.price - b.price);
     else if (sort === 'price-desc') sorted.sort((a, b) => b.price - a.price);
     return sorted;
-  }, [tier, sort]);
+  }, [tier, sort, query]);
   const buy = (m) => {
     const r = buyTruck(m.id);
     if (r.ok) { toast(`${m.name} ordered — building at HQ`, 'success'); setConfirmModel(null); }
@@ -1247,22 +1250,32 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
         </Row>
         <Progress pct={Math.min(100, (cap.used / Math.max(1, cap.total)) * 100)} color={atCapacity ? C.red : C.blue} style={{ marginTop: 8 }} height={4} />
       </Card>
+      <Row style={{ marginBottom: 10, borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.md, paddingHorizontal: 10 }}>
+        <Icon name="magnify" size={16} color={C.faint} />
+        <TextInput
+          value={query} onChangeText={setQuery} placeholder="Search truck name or brand…" placeholderTextColor={C.faint}
+          style={{ flex: 1, paddingVertical: 9, paddingHorizontal: 8, fontSize: 14, color: C.text }}
+        />
+        {query.length > 0 && (
+          <Pressable onPress={() => setQuery('')} hitSlop={6}><Icon name="close-circle" size={16} color={C.faint} /></Pressable>
+        )}
+      </Row>
       <Row style={{ gap: 6, marginBottom: 10 }}>
         {[[0, 'All'], [1, 'Starter'], [2, 'Advanced'], [3, 'Premium']].map(([t, l]) => (
           <Chip key={t} label={l} active={tier === t} onPress={() => { if (t === 0 && tier === 0) tapWindowShopperEgg(); setTier(t); }} />
         ))}
       </Row>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 10 }} contentContainerStyle={{ paddingRight: 8 }}>
-        <Row style={{ gap: 6 }}>
-          <Row style={{ marginRight: 2 }}><Icon name="sort" size={14} color={C.sub} /></Row>
-          {SORTS.map(([k, l]) => (
-            <Chip key={k} label={l} active={sort === k} onPress={() => setSort(k)} />
-          ))}
-        </Row>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 10 }}
+        contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', paddingRight: 8 }}>
+        <Icon name="sort" size={14} color={C.sub} style={{ marginRight: 8, flexShrink: 0 }} />
+        {SORTS.map(([k, l]) => (
+          <Chip key={k} label={l} active={sort === k} onPress={() => setSort(k)} style={{ marginRight: 6 }} />
+        ))}
       </ScrollView>
       <FlatList
         data={list.slice(0, page * 10)} keyExtractor={m => m.id} showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 30 }}
+        ListEmptyComponent={<View style={{ alignItems: 'center', padding: 30 }}><Icon name="truck-remove-outline" size={30} color={C.faint} /><Text style={[FONT.sub, { marginTop: 6 }]}>No trucks match "{query}".</Text></View>}
         ListFooterComponent={page * 10 < list.length ? (
           <Btn title={`Show more trucks (${list.length - page * 10})`} kind="soft" icon="chevron-down"
             onPress={() => setPage(pg => pg + 1)} style={{ marginTop: 4 }} />
@@ -2140,16 +2153,15 @@ export function MiniGamesModal({ visible, onClose }) {
           <Pressable onPress={tapMidasEgg}><Text style={[FONT.h2, { color: C.gold }]}>{gold}</Text></Pressable>
         </Row>
       </Card>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 14 }} contentContainerStyle={{ paddingRight: 8 }}>
-        <Row style={{ gap: 6 }}>
-          <Chip label="Scratch Card" icon="ticket-confirmation" active={tab === 'scratch'} onPress={() => setTab('scratch')} />
-          <Chip label="Lucky Spin" icon="rotate-right" active={tab === 'spin'} onPress={() => setTab('spin')} />
-          <Chip label="Dice Roll" icon="dice-multiple" active={tab === 'dice'} onPress={() => setTab('dice')} />
-          <Chip label="Toll Gate" icon="highway" color={C.green} active={tab === 'toll'} onPress={() => setTab('toll')} />
-          <Chip label="High-Stakes" icon="slot-machine-outline" color={C.red} active={tab === 'bet'} onPress={() => setTab('bet')} />
-          <Chip label="Lucky Plate" icon="card-text" color={C.gold} active={tab === 'plate'} onPress={() => setTab('plate')} />
-          <Chip label="Golden Convoy" icon="truck-fast" color={C.amber} active={tab === 'convoy'} onPress={() => setTab('convoy')} />
-        </Row>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 14 }}
+        contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', paddingRight: 8 }}>
+        <Chip label="Scratch Card" icon="ticket-confirmation" active={tab === 'scratch'} onPress={() => setTab('scratch')} style={{ marginRight: 6 }} />
+        <Chip label="Lucky Spin" icon="rotate-right" active={tab === 'spin'} onPress={() => setTab('spin')} style={{ marginRight: 6 }} />
+        <Chip label="Dice Roll" icon="dice-multiple" active={tab === 'dice'} onPress={() => setTab('dice')} style={{ marginRight: 6 }} />
+        <Chip label="Toll Gate" icon="highway" color={C.green} active={tab === 'toll'} onPress={() => setTab('toll')} style={{ marginRight: 6 }} />
+        <Chip label="High-Stakes" icon="slot-machine-outline" color={C.red} active={tab === 'bet'} onPress={() => setTab('bet')} style={{ marginRight: 6 }} />
+        <Chip label="Lucky Plate" icon="card-text" color={C.gold} active={tab === 'plate'} onPress={() => setTab('plate')} style={{ marginRight: 6 }} />
+        <Chip label="Golden Convoy" icon="truck-fast" color={C.amber} active={tab === 'convoy'} onPress={() => setTab('convoy')} style={{ marginRight: 6 }} />
       </ScrollView>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
         {tab === 'scratch' ? <ScratchGame toast={toast} /> : tab === 'spin' ? <SpinGame toast={toast} /> : tab === 'dice' ? <DiceGame toast={toast} />
@@ -2308,31 +2320,93 @@ export function DriverDetailModal({ visible, onClose, staffId, onShowOnMap }) {
 // heavy to open. Show the newest NOTIF_PAGE, and load the rest in pages via a
 // "Show more" footer (count resets whenever the sheet reopens or filter flips).
 const NOTIF_PAGE = 12;
+// One notification row, swipeable left to reveal a delete action underneath —
+// same "swipe to remove" affordance as any mobile inbox/messaging app. Built
+// on core RN's PanResponder + Animated (no gesture-handler dependency in this
+// project) rather than a tap: a horizontal drag past SWIPE_THRESHOLD releases
+// into a slide-out-and-remove animation; anything short of that springs back.
+const SWIPE_THRESHOLD = -80;
+function SwipeableNotifRow({ n, onPress, onDismiss }) {
+  const translateX = useRef(new Animated.Value(0)).current;
+  const panResponder = useRef(PanResponder.create({
+    onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
+    onPanResponderMove: (_, g) => { if (g.dx < 0) translateX.setValue(Math.max(g.dx, -140)); },
+    onPanResponderRelease: (_, g) => {
+      if (g.dx < SWIPE_THRESHOLD) {
+        haptic('light');
+        Animated.timing(translateX, { toValue: -400, duration: 180, useNativeDriver: true }).start(() => onDismiss());
+      } else {
+        Animated.spring(translateX, { toValue: 0, useNativeDriver: true, bounciness: 6 }).start();
+      }
+    },
+  })).current;
+  return (
+    <View style={{ marginBottom: 6 }}>
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: C.red, borderRadius: RADIUS.md, alignItems: 'flex-end', justifyContent: 'center', paddingRight: 18 }]}>
+        <Icon name="trash-can-outline" size={20} color="#fff" />
+      </View>
+      <Animated.View {...panResponder.panHandlers} style={{ transform: [{ translateX }] }}>
+        <Pressable onPress={onPress} style={[cs.notif, { marginBottom: 0 }, !n.read && { backgroundColor: C.blueSoft }]}>
+          <View style={[cs.notifIcon, { backgroundColor: n.read ? C.bgSoft : '#fff' }]}><Icon name={n.icon} size={18} color={C.blue} /></View>
+          <View style={{ marginLeft: 10, flex: 1 }}>
+            <Text style={[FONT.body, { fontWeight: n.read ? '500' : '700' }]}>{n.message}</Text>
+            <Text style={FONT.tiny}>{relTime(n.ts)}</Text>
+          </View>
+          {!n.read && <View style={cs.dot} />}
+        </Pressable>
+      </Animated.View>
+    </View>
+  );
+}
+
 export function NotificationsModal({ visible, onClose }) {
   const notifications = useGame(s => s.notifications);
   const markRead = useGame(s => s.markRead);
   const markAllRead = useGame(s => s.markAllRead);
+  const removeNotification = useGame(s => s.removeNotification);
+  const clearAllNotifications = useGame(s => s.clearAllNotifications);
+  const settings = useGame(s => s.settings);
+  const saveSettings = useGame(s => s.saveSettings);
   const [filter, setFilter] = useState('all');
   const [shownCount, setShownCount] = useState(NOTIF_PAGE);
+  const [confirmClear, setConfirmClear] = useState(false);
   const tapInboxEgg = useEasterEggTap('inbox_zero', 5);
   useEffect(() => { if (visible) setShownCount(NOTIF_PAGE); }, [visible, filter]);
+  useEffect(() => { if (!visible) setConfirmClear(false); }, [visible]);
   const list = notifications.filter(n => filter === 'all' || (filter === 'delivery' ? n.type === 'delivery' : n.type !== 'delivery'));
   const shown = list.slice(0, shownCount);
   const hidden = list.length - shown.length;
+  const snoozed = settings.notifSnoozeUntil > Date.now();
   return (
     <Sheet visible={visible} onClose={onClose} title="Notifications" height="82%">
-      <Row style={{ justifyContent: 'space-between', marginBottom: 10 }}>
-        <Row style={{ gap: 6 }}>
-          <Chip label="All" active={filter === 'all'} onPress={() => setFilter('all')} />
-          <Chip label="Deliveries" active={filter === 'delivery'} onPress={() => setFilter('delivery')} />
+      <Row style={{ justifyContent: 'space-between', marginBottom: 6 }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }}
+          contentContainerStyle={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Chip label="All" active={filter === 'all'} onPress={() => setFilter('all')} style={{ marginRight: 6 }} />
+          <Chip label="Deliveries" active={filter === 'delivery'} onPress={() => setFilter('delivery')} style={{ marginRight: 6 }} />
           <Chip label="System" active={filter === 'system'} onPress={() => setFilter('system')} />
+        </ScrollView>
+        <Row>
+          <Btn title="Mark all read" kind="ghost" small onPress={() => { tapInboxEgg(); markAllRead(); }} />
+          {list.length > 0 && (
+            <IconBtn name={confirmClear ? 'trash-can' : 'trash-can-outline'} size={17}
+              color={confirmClear ? C.red : C.faint} style={{ marginLeft: 4 }}
+              onPress={() => { if (confirmClear) { clearAllNotifications(); setConfirmClear(false); } else { setConfirmClear(true); setTimeout(() => setConfirmClear(false), 3000); } }} />
+          )}
         </Row>
-        <Btn title="Mark all read" kind="ghost" small onPress={() => { tapInboxEgg(); markAllRead(); }} />
       </Row>
+      <Pressable onPress={() => saveSettings({ notifSnoozeUntil: snoozed ? 0 : Date.now() + 60 * 60 * 1000 })}
+        style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }} hitSlop={4}>
+        <Icon name={snoozed ? 'bell-sleep' : 'bell-outline'} size={13} color={snoozed ? C.amber : C.faint} />
+        <Text style={[FONT.tiny, { marginLeft: 4, color: snoozed ? C.amber : C.faint, fontWeight: snoozed ? '700' : '400' }]}>
+          {snoozed ? `Pop-ups snoozed until ${new Date(settings.notifSnoozeUntil).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })} · tap to cancel` : 'Snooze pop-ups for 1 hour'}
+        </Text>
+      </Pressable>
+      <Text style={[FONT.tiny, { color: C.faint, marginBottom: 8 }]}>Swipe a notification left to remove it.</Text>
       <FlatList
         data={shown} keyExtractor={n => n.id} showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 30 }}
-        initialNumToRender={NOTIF_PAGE} windowSize={5} removeClippedSubviews
+        initialNumToRender={NOTIF_PAGE} windowSize={5}
         ListEmptyComponent={<View style={{ alignItems: 'center', padding: 30 }}><Icon name="bell-sleep-outline" size={30} color={C.faint} /><Text style={[FONT.sub, { marginTop: 6 }]}>Nothing yet.</Text></View>}
         ListFooterComponent={hidden > 0 ? (
           <Pressable onPress={() => setShownCount(c => c + 15)}
@@ -2342,14 +2416,7 @@ export function NotificationsModal({ visible, onClose }) {
           </Pressable>
         ) : null}
         renderItem={({ item: n }) => (
-          <Pressable onPress={() => markRead(n.id)} style={[cs.notif, !n.read && { backgroundColor: C.blueSoft }]}>
-            <View style={[cs.notifIcon, { backgroundColor: n.read ? C.bgSoft : '#fff' }]}><Icon name={n.icon} size={18} color={C.blue} /></View>
-            <View style={{ marginLeft: 10, flex: 1 }}>
-              <Text style={[FONT.body, { fontWeight: n.read ? '500' : '700' }]}>{n.message}</Text>
-              <Text style={FONT.tiny}>{relTime(n.ts)}</Text>
-            </View>
-            {!n.read && <View style={cs.dot} />}
-          </Pressable>
+          <SwipeableNotifRow n={n} onPress={() => markRead(n.id)} onDismiss={() => removeNotification(n.id)} />
         )}
       />
     </Sheet>
@@ -2759,8 +2826,12 @@ export function SettingsModal({ visible, onClose, initialTab }) {
 
   return (
     <Sheet visible={visible} onClose={onClose} title="Settings" height="88%">
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 12 }}>
-        <Row style={{ gap: 6 }}>{TABS.map(([id, l, icon]) => <Chip key={id} label={l} icon={icon} active={tab === id} onPress={() => { if (id === 'about' && tab === 'about') tapCuriousEgg(); setTab(id); }} />)}</Row>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 12 }}
+        contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', paddingRight: 8 }}>
+        {TABS.map(([id, l, icon]) => (
+          <Chip key={id} label={l} icon={icon} active={tab === id}
+            onPress={() => { if (id === 'about' && tab === 'about') tapCuriousEgg(); setTab(id); }} style={{ marginRight: 6 }} />
+        ))}
       </ScrollView>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
         {tab === 'profile' && (editing !== 'profile' ? (
@@ -2905,6 +2976,21 @@ export function SettingsModal({ visible, onClose, initialTab }) {
               {[['delivery', 'Delivery updates'], ['truck', 'Truck ready'], ['fuel', 'Low fuel warning'], ['daily', 'Daily summary']].map(([k, l]) => (
                 <ToggleRow key={k} label={l} value={settings.notif[k]} onChange={v => saveSettings({ notif: { ...settings.notif, [k]: v } })} />
               ))}
+            </Card>
+            <Text style={[FONT.tiny, { marginTop: 14, marginBottom: 6 }]}>
+              SNOOZE POP-UPS{settings.notifSnoozeUntil > Date.now() ? ` — active until ${new Date(settings.notifSnoozeUntil).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}` : ''}
+            </Text>
+            <Card>
+              <Text style={FONT.sub}>New notifications still land in your inbox (bell icon) — this only silences the pop-up toast while it's on.</Text>
+              <Row style={{ flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+                {[[0, 'Off'], [60 * 60 * 1000, '1 hour'], [4 * 60 * 60 * 1000, '4 hours'], [8 * 60 * 60 * 1000, 'Rest of day']].map(([ms, l]) => {
+                  const active = ms === 0 ? !(settings.notifSnoozeUntil > Date.now()) : settings.notifSnoozeUntil > Date.now() && Math.abs((settings.notifSnoozeUntil - Date.now()) - ms) < 5 * 60 * 1000;
+                  return (
+                    <Chip key={l} label={l} active={active}
+                      onPress={() => saveSettings({ notifSnoozeUntil: ms === 0 ? 0 : Date.now() + ms })} />
+                  );
+                })}
+              </Row>
             </Card>
           </>
         )}
@@ -4286,7 +4372,7 @@ const cs = StyleSheet.create({
   // flexShrink: 0 — a chip must never be squeezed narrower than its label
   // (squished chips wrap their text and look bent/overlapped); rows of chips
   // either wrap (flexWrap) or scroll horizontally instead.
-  chip: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1, borderColor: C.border, backgroundColor: '#fff', flexShrink: 0 },
+  chip: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1, borderColor: C.border, backgroundColor: '#fff', flexShrink: 0, flexGrow: 0 },
   truckCard: { width: 120, padding: 10, borderRadius: RADIUS.md, borderWidth: 1, borderColor: C.border, marginRight: 8, backgroundColor: '#fff' },
   heroIcon: { width: 64, height: 64, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   badgeDot: {

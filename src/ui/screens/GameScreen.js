@@ -130,7 +130,8 @@ export default function GameScreen() {
   }, []);
 
 
-  // surface new notifications as toasts
+  // Surface new notifications as toasts — unless snoozed, in which case they
+  // still land in the inbox (bell icon) silently, with no pop-up interrupt.
   const notifications = useGame(s => s.notifications);
   useEffect(() => {
     if (!notifications.length) return;
@@ -138,9 +139,10 @@ export default function GameScreen() {
     if (lastToastN.current === null) { lastToastN.current = top.id; return; }
     if (top.id !== lastToastN.current) {
       lastToastN.current = top.id;
-      toast(top.message, top.message.includes('earned') || top.message.includes('ready') ? 'success' : 'info');
+      const snoozed = settings.notifSnoozeUntil && settings.notifSnoozeUntil > Date.now();
+      if (!snoozed) toast(top.message, top.message.includes('earned') || top.message.includes('ready') ? 'success' : 'info');
     }
-  }, [notifications]);
+  }, [notifications, settings.notifSnoozeUntil]);
 
   const hq = company ? cityById(company.hqCityId) : null;
 
@@ -287,6 +289,26 @@ export default function GameScreen() {
 
       {/* ---- Dashboard sheet ---- */}
       <Sheet visible={!!tab} onClose={() => setTab(null)} title={TABS.find(t => t.id === tab)?.label || ''} height="78%">
+        {/* Quick-switch strip — the bottom nav below sits behind this sheet's
+            native Modal once open, so this in-sheet copy is what lets you
+            jump between Fleet/Routes/Staff/… without closing first. */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 12 }}
+          contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', paddingRight: 8 }}>
+          {TABS.map(t => {
+            const on = tab === t.id;
+            return (
+              <Pressable key={t.id} onPress={() => { haptic('light'); if (t.id === 'economy') tapEconomyEgg(); setTab(t.id); }}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', flexShrink: 0, marginRight: 6,
+                  paddingHorizontal: 12, paddingVertical: 7, borderRadius: 20, borderWidth: 1,
+                  borderColor: on ? C.blue : C.border, backgroundColor: on ? C.blueSoft : '#fff',
+                }}>
+                <Icon name={t.icon} size={15} color={on ? C.blue : C.sub} style={{ marginRight: 5 }} />
+                <Text style={{ fontSize: 12.5, fontWeight: '700', color: on ? C.blue : C.sub }}>{t.label}</Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
         {tab === 'fleet' && <FleetTab onTruckPress={t => setModal({ kind: 'truck', truckId: t.id })} onBuyTruck={() => setModal({ kind: 'buy' })} />}
         {tab === 'routes' && <RoutesTab
           onTrack={d => { setTab(null); const t = trucks.find(x => x.id === d.truckId); if (t) showOnMap(t); }}
