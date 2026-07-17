@@ -34,9 +34,20 @@ const nextRefreshDelay = () =>
 // Gold → cash exchange rate (₹ per Gold). Gold is premium, so it converts rich.
 export const GOLD_TO_CASH = 50000;
 
-// Flat Gold cost to apply a new truck livery (colour/accent/emblem), charged
-// once per Apply — see paintTruck().
-export const LIVERY_COST = 20;
+// Cash (₹) cost to apply a livery/paint change — priced by how MUCH is
+// actually changing, not a flat fee, so a quick recolour stays cheap while a
+// full respray (pattern + booster + rim, all at once) costs real money.
+// Charged once per Apply, not per swatch tap — see paintTruck()/paintHub().
+const LIVERY_ITEM_COST = {
+  color: 25000, accentColor: 10000, logoIcon: 10000,
+  pattern: 20000, booster: 20000, rimColor: 15000, flagColor: 15000,
+};
+export const LIVERY_COST_MIN = 25000;
+export const LIVERY_COST_MAX = 100000;
+export function liveryCostFor(changedKeys) {
+  const total = changedKeys.reduce((sum, k) => sum + (LIVERY_ITEM_COST[k] || 10000), 0);
+  return Math.max(LIVERY_COST_MIN, Math.min(LIVERY_COST_MAX, total));
+}
 // Fleet-wide preset apply is discounted per-truck vs. a one-off repaint —
 // see applyPresetToFleet().
 export const FLEET_LIVERY_DISCOUNT = 0.6;
@@ -283,7 +294,7 @@ function makeNotification(type, icon, message) {
 // the New Delivery sheet can pre-select the right cargo instead of always
 // defaulting to "General Goods" for every contract.
 const FLAVOR_CARGO = {
-  bulk: 'construction', longhaul: 'general', government: 'general', mining: 'steel',
+  bulk: 'construction', longhaul: 'general', government: 'general', mining: 'mining',
   urgent: 'retail', pharma: 'pharma', green: 'electronics', island: 'general',
 };
 
@@ -1680,28 +1691,30 @@ export const useGame = create(
         set({ trucks: get().trucks.map(t => t.id === truckId ? { ...t, ...patch } : t) });
       },
 
-      // Repaint a truck's livery: body colour, trim/accent colour, emblem.
-      // Costs a flat LIVERY_COST Gold per apply (not per swatch tap) — the
-      // Livery modal lets the player freely preview combinations for free and
-      // only spends Gold once they commit. Applies instantly everywhere the
-      // truck is rendered (fleet list, truck detail, map body colour) since
-      // it's just a store patch, same as every other live-reflected field.
+      // Repaint a truck's livery: body colour, trim/accent, emblem, pattern,
+      // booster, rims. Costs real Cash, priced by how much is actually
+      // changing (see liveryCostFor) — the Livery modal lets the player
+      // freely preview combinations for free and only spends money once they
+      // commit. Applies instantly everywhere the truck is rendered (fleet
+      // list, truck detail, map) since it's just a store patch.
       paintTruck(truckId, patch) {
         const s = get();
         const t = s.trucks.find(x => x.id === truckId);
         if (!t) return { ok: false, err: 'Truck not found' };
-        const changed = ['color', 'accentColor', 'logoIcon', 'pattern', 'booster', 'rimColor'].some(k => patch[k] !== undefined && patch[k] !== (t[k] ?? null));
-        if (!changed) return { ok: false, err: 'Nothing to apply' };
-        if (s.gold < LIVERY_COST) return { ok: false, err: `Need ${LIVERY_COST} Gold to repaint` };
+        const keys = ['color', 'accentColor', 'logoIcon', 'pattern', 'booster', 'rimColor']
+          .filter(k => patch[k] !== undefined && patch[k] !== (t[k] ?? null));
+        if (!keys.length) return { ok: false, err: 'Nothing to apply' };
+        const cost = liveryCostFor(keys);
+        if (s.balance < cost) return { ok: false, err: `Need ${inr(cost)} to repaint` };
         set({
-          gold: s.gold - LIVERY_COST,
+          balance: s.balance - cost,
           trucks: s.trucks.map(x => x.id === truckId ? { ...x, ...patch } : x),
           stats: { ...s.stats, repaints: (s.stats.repaints || 0) + 1 },
         });
-        get().logLedger('truck', 'palette', `Repainted ${t.customName || modelById(t.modelId).name}`, 0);
+        get().logLedger('truck', 'palette', `Repainted ${t.customName || modelById(t.modelId).name}`, -cost);
         get().notify('truck', 'palette', `${t.customName || modelById(t.modelId).name} got a fresh new look!`);
         play('coin', 0.6);
-        return { ok: true };
+        return { ok: true, cost };
       },
 
       // ---------- Livery presets ----------
@@ -1726,26 +1739,27 @@ export const useGame = create(
         set({ liveryPresets: (get().liveryPresets || []).filter(p => p.id !== id) });
       },
       // Fleet-wide repaint costs less per truck than a one-off (bulk discount) —
-      // still real money, still instant, applies the exact same patch shape
+      // still real Cash, still instant, applies the exact same patch shape
       // paintTruck uses so every render site picks it up with no extra work.
       applyPresetToFleet(presetId) {
         const s = get();
         const preset = (s.liveryPresets || []).find(p => p.id === presetId);
         if (!preset) return { ok: false, err: 'Preset not found' };
         if (!s.trucks.length) return { ok: false, err: 'No trucks in your fleet yet' };
-        const perTruck = Math.max(1, Math.ceil(LIVERY_COST * FLEET_LIVERY_DISCOUNT));
+        const presetKeys = ['color', 'accentColor', 'logoIcon', 'pattern', 'booster', 'rimColor'].filter(k => preset[k] != null && preset[k] !== 'none');
+        const perTruck = Math.max(1, Math.round(liveryCostFor(presetKeys) * FLEET_LIVERY_DISCOUNT));
         const total = perTruck * s.trucks.length;
-        if (s.gold < total) return { ok: false, err: `Need ${total} Gold to repaint the whole fleet (${perTruck}/truck)` };
+        if (s.balance < total) return { ok: false, err: `Need ${inr(total)} to repaint the whole fleet (${inr(perTruck)}/truck)` };
         const patch = {
           color: preset.color, accentColor: preset.accentColor, logoIcon: preset.logoIcon,
           pattern: preset.pattern, booster: preset.booster, rimColor: preset.rimColor,
         };
         set({
-          gold: s.gold - total,
+          balance: s.balance - total,
           trucks: s.trucks.map(t => ({ ...t, ...patch })),
           stats: { ...s.stats, repaints: (s.stats.repaints || 0) + s.trucks.length },
         });
-        get().logLedger('truck', 'palette', `Fleet-wide repaint — "${preset.name}" (${s.trucks.length} trucks)`, 0);
+        get().logLedger('truck', 'palette', `Fleet-wide repaint — "${preset.name}" (${s.trucks.length} trucks)`, -total);
         get().notify('truck', 'palette', `Whole fleet repainted in "${preset.name}"!`);
         play('coin', 0.9);
         return { ok: true, count: s.trucks.length, cost: total };
@@ -1823,12 +1837,14 @@ export const useGame = create(
         const colorChanged = (hub.color || null) !== (color || null);
         const flagChanged = flagColor !== undefined && (hub.flagColor || null) !== (flagColor || null);
         if (!colorChanged && !flagChanged) return { ok: false, err: 'Nothing to apply' };
-        if (s.gold < LIVERY_COST) return { ok: false, err: `Need ${LIVERY_COST} Gold to repaint` };
+        const keys = [colorChanged && 'color', flagChanged && 'flagColor'].filter(Boolean);
+        const cost = liveryCostFor(keys);
+        if (s.balance < cost) return { ok: false, err: `Need ${inr(cost)} to repaint` };
         const patch = { color };
         if (flagChanged) patch.flagColor = flagColor;
-        set({ gold: s.gold - LIVERY_COST, hubs: s.hubs.map(h => h.cityId === cityId ? { ...h, ...patch } : h) });
+        set({ balance: s.balance - cost, hubs: s.hubs.map(h => h.cityId === cityId ? { ...h, ...patch } : h) });
         const label = hub.hq ? 'Headquarters' : hub.name;
-        get().logLedger(hub.hq ? 'hq' : 'garage', 'palette', `${label} repainted`, 0);
+        get().logLedger(hub.hq ? 'hq' : 'garage', 'palette', `${label} repainted`, -cost);
         get().notify('system', 'palette', `${label} got a fresh new look!`);
         play('coin', 0.6);
         return { ok: true };
