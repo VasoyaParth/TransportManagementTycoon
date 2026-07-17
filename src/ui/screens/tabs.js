@@ -91,23 +91,22 @@ function SectionTitle({ icon, text, right }) {
 // Pill-shaped filter tabs (used by Fleet & Staff). options: [{key,label,count}]
 function FilterChips({ options, value, onChange }) {
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 12 }}>
-      <Row style={{ gap: 6 }}>
-        {options.map(o => {
-          const on = value === o.key;
-          return (
-            <Pressable key={o.key} onPress={() => { haptic('light'); onChange(o.key); }}
-              style={[st.filterChip, on && { backgroundColor: C.blue, borderColor: C.blue }]}>
-              <Text style={{ fontSize: 12.5, fontWeight: '700', color: on ? '#fff' : C.sub }} numberOfLines={1}>{o.label}</Text>
-              {o.count != null && (
-                <View style={[st.filterCount, { backgroundColor: on ? 'rgba(255,255,255,0.25)' : C.bgSoft }]}>
-                  <Text style={{ fontSize: 10.5, fontWeight: '800', color: on ? '#fff' : C.sub }} numberOfLines={1}>{o.count}</Text>
-                </View>
-              )}
-            </Pressable>
-          );
-        })}
-      </Row>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 12 }}
+      contentContainerStyle={{ flexDirection: 'row', alignItems: 'center', paddingRight: 8 }}>
+      {options.map(o => {
+        const on = value === o.key;
+        return (
+          <Pressable key={o.key} onPress={() => { haptic('light'); onChange(o.key); }}
+            style={[st.filterChip, on && { backgroundColor: C.blue, borderColor: C.blue }, { marginRight: 6 }]}>
+            <Text style={{ fontSize: 12.5, fontWeight: '700', color: on ? '#fff' : C.sub, flexShrink: 0 }} numberOfLines={1}>{o.label}</Text>
+            {o.count != null && (
+              <View style={[st.filterCount, { backgroundColor: on ? 'rgba(255,255,255,0.25)' : C.bgSoft }]}>
+                <Text style={{ fontSize: 10.5, fontWeight: '800', color: on ? '#fff' : C.sub, flexShrink: 0 }} numberOfLines={1}>{o.count}</Text>
+              </View>
+            )}
+          </Pressable>
+        );
+      })}
     </ScrollView>
   );
 }
@@ -2244,9 +2243,9 @@ const st = StyleSheet.create({
   },
   divider: { borderTopWidth: 1, borderTopColor: C.border },
   filterChip: {
-    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8,
+    flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', paddingHorizontal: 14, paddingVertical: 8,
     borderRadius: 22, borderWidth: 1, borderColor: C.border, backgroundColor: '#fff',
-    flexShrink: 1,
+    flexShrink: 0, flexGrow: 0,
   },
   filterCount: { marginLeft: 6, minWidth: 20, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 10, alignItems: 'center' },
   loadMore: {
