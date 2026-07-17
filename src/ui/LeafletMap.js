@@ -13,7 +13,7 @@ import { useGame, modelById, deliveryPhase, WEATHER_KINDS, weatherPolygon } from
 import { cityById, ferryPorts } from '../engine/routing';
 import { statusMeta, useEasterEggTap } from './components';
 import { haptic } from '../engine/haptics';
-import { truckSvgString, truckShapes, bodyTypeFor, defaultBodyColor, headlightFor, isNightHour, ferrySvgString } from './truckArt';
+import { planeSvgString, planeShapes, bodyTypeFor, defaultBodyColor, headlightFor, isNightHour } from './planeArt';
 
 const CITY_DATA = CITIES.map(c => ({ id: c.id, name: c.name, state: c.state, lat: c.lat, lng: c.lng, tier: c.tier, country: c.country || 'IN' }));
 const STATION_DATA = STATIONS.map(s => ({ lat: s.lat, lng: s.lng, type: s.type, price: s.price, name: s.name }));
@@ -51,7 +51,6 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
     hubs: hubData(),
     hqStyle: { color: hqHub?.color || null, tier: hqHub?.tier || 0 },
     ports: PORT_DATA,
-    ferryArt: ferrySvgString(), // constant RO-RO ship art — sent once, not per truck per tick
     // Persisted port visibility — "off" stays off across restarts.
     portsOn: useGame.getState().settings?.showPorts !== false,
   }), []);
@@ -67,21 +66,19 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
     const now = Date.now();
     const tk = trucks.map(t => {
       const d = deliveries.find(x => x.truckId === t.id);
-      let lat = t.lat, lng = t.lng, heading = 0, ferryOn = false, ferryLoading = false, phase = null;
+      let lat = t.lat, lng = t.lng, heading = 0, phase = null;
       if (d) {
-        // Freeze the truck in place while an accident/theft incident is
-        // unresolved instead of letting it keep crawling — resumes with no
-        // position jump once the mechanic arrives or the incident clears.
+        // Freeze the aircraft in place while a delay incident is unresolved
+        // instead of letting it keep flying — resumes with no position jump
+        // once the incident clears.
         let effNow = now;
         if (d.incident) {
           effNow = now < d.incident.resolveAt ? d.incident.startedAt : now - (d.incident.resolveAt - d.incident.startedAt);
         }
-        // Lifecycle phases: loading, driving, ferry board/sail/dock, unloading.
+        // Lifecycle phases: loading, flying, unloading.
         const pp = deliveryPhase(d, effNow);
         const p = pointAlong(d.route.points, d.route.cum, Math.min(1, Math.max(0, pp.frac)));
         lat = p.lat; lng = p.lng; heading = p.heading;
-        ferryOn = pp.phase === 'ferry';
-        ferryLoading = pp.phase === 'ferry-board' || pp.phase === 'ferry-unboard';
         phase = pp.phase;
       }
       const meta = statusMeta[t.status] || statusMeta.parked;
@@ -90,35 +87,21 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, focu
       const accent = t.status === 'delivering' ? '#0E9F5B' : t.status === 'building' ? '#D97706'
         : t.status === 'broken' ? '#DC3D43' : '#9DB2D6';
       const bt = bodyTypeFor(model);
-      // Headlights on for trucks driving at night (real local clock, 6pm–6am).
+      // Landing lights on for aircraft flying at night (real local clock, 6pm–6am).
       const night = isNightHour(new Date().getHours());
       const lights = night && t.status === 'delivering' ? headlightFor(model) : null;
-      const dims = truckShapes(bt, color, accent, { lights });
+      const dims = planeShapes(bt, color, accent, { lights });
       const artKey = `${bt}|${color}|${accent}|${lights ? 1 : 0}`;
       const artChanged = artKeys.current[t.id] !== artKey;
       if (artChanged) artKeys.current[t.id] = artKey;
       return { id: t.id, lat, lng, heading, status: t.status, statusLabel: meta.label, color,
         // art omitted when unchanged — the WebView reuses its cached copy.
-        art: artChanged ? truckSvgString(bt, color, accent, { lights }) : undefined,
+        art: artChanged ? planeSvgString(bt, color, accent, { lights }) : undefined,
         artW: dims.w, artH: dims.h, bodyH: dims.bodyH,
-        ferryOn, ferryLoading, phase, incidentType: (d && d.incident && d.incident.type) || null,
+        phase, incidentType: (d && d.incident && d.incident.type) || null,
         fuelPct: Math.round(t.fuelPct), name: t.customName || model.name };
     });
-    // Split each route's sea (ferry) legs out as separate polylines so water
-    // crossings render as ship lanes between two docks — never a "road on
-    // water". ferrySegments carry start/end fractions of total route length.
-    const routes = deliveries.map(d => {
-      const pts = d.route.points, cum = d.route.cum || [];
-      const total = cum.length ? cum[cum.length - 1] : 0;
-      const segs = d.route.ferrySegments || (d.route.ferrySegment ? [d.route.ferrySegment] : []);
-      const seaLegs = total > 0 ? segs.map(fs => {
-        let i0 = 0, i1 = pts.length - 1;
-        for (let i = 0; i < cum.length; i++) { if (cum[i] / total >= fs.startFrac) { i0 = i; break; } }
-        for (let i = i0; i < cum.length; i++) { if (cum[i] / total >= fs.endFrac) { i1 = i; break; } }
-        return pts.slice(i0, i1 + 1);
-      }).filter(l => l.length > 1) : [];
-      return { id: d.id, points: pts, stops: d.stops || [], seaLegs };
-    });
+    const routes = deliveries.map(d => ({ id: d.id, points: d.route.points, stops: d.stops || [] }));
     const corr = (useGame.getState().corridors || []).map(c => ({ id: c.id, points: c.points }));
     return { trucks: tk, routes, corridors: corr };
   }, [trucks, deliveries]);

@@ -1,16 +1,18 @@
-// Shared top-down building artwork for HQ and garages — mirrors truckArt.js:
-// one shape-descriptor builder feeds both the in-app RN preview and the
-// Leaflet WebView map (see leafletHtml.js, which hand-writes an equivalent
-// plain-JS version of these same two functions since a WebView string can't
-// import RN modules — same split the truck art already lives with).
+// Shared top-down building artwork for the home hub control tower and
+// regional airport terminals — mirrors planeArt.js: one shape-descriptor
+// builder feeds both the in-app RN preview and the Leaflet WebView map (see
+// leafletHtml.js, which hand-writes an equivalent plain-JS version of these
+// same two functions since a WebView string can't import RN modules — same
+// split the aircraft art already lives with).
 import React from 'react';
 import { G, Rect, Path } from 'react-native-svg';
-import { shade } from './truckArt';
+import { shade } from './planeArt';
 
 export const DEFAULT_HQ_COLOR = '#2563EB';
 export const DEFAULT_GARAGE_COLOR = '#5C6470';
 
-// kind: 'hq' | 'garage'. `tier` is the catalog entry from data/buildings.js
+// kind: 'hq' (home hub control tower) | 'garage' (regional airport
+// terminal). `tier` is the catalog entry from data/buildings.js
 // (HQ_TIERS[n] / GARAGE_TIERS[n]) — floors/bays drive the silhouette size.
 export function buildingShapes(kind, color, tier) {
   const s = [];

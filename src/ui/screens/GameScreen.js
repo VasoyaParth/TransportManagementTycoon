@@ -19,9 +19,9 @@ import Tutorial from './Tutorial';
 import { checkForUpdate } from '../../net/updates';
 
 const TABS = [
-  { id: 'fleet', icon: 'truck', label: 'Fleet' },
-  { id: 'routes', icon: 'map-marker-path', label: 'Routes' },
-  { id: 'staff', icon: 'account-group', label: 'Staff' },
+  { id: 'fleet', icon: 'airplane', label: 'Fleet' },
+  { id: 'routes', icon: 'map-marker-path', label: 'Flights' },
+  { id: 'staff', icon: 'account-group', label: 'Crew' },
   { id: 'economy', icon: 'chart-areaspline', label: 'Economy' },
   { id: 'marketing', icon: 'bullhorn', label: 'Marketing' },
   { id: 'rewards', icon: 'gift-outline', label: 'Rewards' },
@@ -223,7 +223,7 @@ export default function GameScreen() {
             <Icon name="newspaper-variant-outline" size={19} color="#C0161C" />
           </Pressable>
           <Pressable style={st.actionBtn} onPress={() => { haptic('light'); setModal({ kind: 'hubs' }); }}>
-            <Icon name="garage" size={19} color={C.text} />
+            <Icon name="office-building-marker" size={19} color={C.text} />
           </Pressable>
           {/* Folding drawer: expands smoothly above the toggle. Capped at a
               fixed 3-button height (not 4) so it never grows again as more
@@ -253,7 +253,7 @@ export default function GameScreen() {
         </View>
         {/* Floating company profile capsule (opens Settings → Profile) */}
         <Pressable style={st.profileCap} onPress={() => { haptic('light'); setModal({ kind: 'company' }); }}>
-          <View style={st.logoCircle}><Icon name={company?.logo || 'truck'} size={16} color={C.blue} /></View>
+          <View style={st.logoCircle}><Icon name={company?.logo || 'airplane'} size={16} color={C.blue} /></View>
           <View style={{ marginLeft: 7, flexShrink: 1 }}>
             <Text style={[FONT.tiny, { fontWeight: '800' }]} numberOfLines={1}>{company?.name}</Text>
             <Text style={[FONT.tiny, { color: C.sub }]} numberOfLines={1}>{hq?.name}, {hq?.state}</Text>
@@ -271,7 +271,7 @@ export default function GameScreen() {
         ) : null}
         {/* Delivery action — matches the map toggle buttons (same size/style) */}
         <Pressable style={st.fab} onPress={() => { haptic('medium'); openNewDelivery(); }}>
-          <Icon name="truck-plus" size={19} color={C.text} />
+          <Icon name="airplane-takeoff" size={19} color={C.text} />
         </Pressable>
       </View>
 

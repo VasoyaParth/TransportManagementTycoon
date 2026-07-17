@@ -11,9 +11,9 @@ import { BrandEmblem, BrandWordmark } from '../BrandLogo';
 const BOOT_LINES = [
   'Warming up the engines…',
   'Loading your empire…',
-  'Checking tyre pressure…',
-  'Waking up the drivers…',
-  'Brewing chai for the fleet…',
+  'Running pre-flight checks…',
+  'Waking up the crew…',
+  'Brewing chai for the flight deck…',
   'Counting yesterday’s earnings…',
 ];
 export function BootSplash() {
@@ -94,7 +94,7 @@ export default function Splash({ onNew, onContinue, hasSave }) {
             <BrandEmblem size={136} />
           </Pressable>
           <BrandWordmark scale={1.15} />
-          <Text style={st.tagline}>Build your empire. Rule the roads.{'\n'}Conquer every highway.</Text>
+          <Text style={st.tagline}>Build your empire. Rule the skies.{'\n'}Conquer every route.</Text>
         </Animated.View>
 
         <Animated.View style={{ width: '100%', marginTop: 44, opacity: btnFade, transform: [{ translateY: btnSlide }] }}>

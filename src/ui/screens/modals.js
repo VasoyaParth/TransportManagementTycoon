@@ -13,13 +13,13 @@ import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
 import { CITIES } from '../../data/cities';
 import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
-import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, TRUCK_COLORS, TRUCK_ACCENTS, TRUCK_LOGOS, CAMPAIGNS } from '../../data/trucks';
+import { AIRCRAFT_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, AIRCRAFT_COLORS, AIRCRAFT_ACCENTS, AIRCRAFT_LOGOS, CAMPAIGNS } from '../../data/aircraft';
 import { HQ_TIERS, GARAGE_TIERS } from '../../data/buildings';
 import { inr, inrShort } from '../../engine/economy';
 import { APP_VERSION, checkForUpdate, fmtMB, cmpVer } from '../../net/updates';
 import { exportBackup, parseBackup, readAutoBackup, pickBackupFile } from '../../engine/backup';
 import { COUNTRIES, COUNTRY_BY_CODE } from '../../data/expansion';
-import { TruckTopShapes, truckShapes, bodyTypeFor, defaultBodyColor } from '../truckArt';
+import { PlaneTopShapes, planeShapes, bodyTypeFor, defaultBodyColor } from '../planeArt';
 import { BuildingTopShapes, buildingShapes, DEFAULT_HQ_COLOR, DEFAULT_GARAGE_COLOR } from '../buildingArt';
 import { BrandEmblem } from '../BrandLogo';
 
@@ -28,18 +28,18 @@ import { BrandEmblem } from '../BrandLogo';
 // badge overlaid in the corner — both purely cosmetic, set via the Livery
 // modal, and rendered here so every place this badge appears (fleet list,
 // truck detail, livery preview) reflects a repaint instantly.
-function TruckArtBadge({ model, color, accent, logoIcon, size = 56, bg }) {
+function AircraftArtBadge({ model, color, accent, logoIcon, size = 56, bg }) {
   const bt = bodyTypeFor(model);
   const body = color || defaultBodyColor(model);
   const trim = accent || '#9DB2D6';
-  const { w, h } = truckShapes(bt, body, trim);
+  const { w, h } = planeShapes(bt, body, trim);
   const scale = (size - 8) / h;
   const badge = Math.max(16, Math.round(size * 0.28));
   return (
     <View style={{ width: size, height: size, borderRadius: 14, backgroundColor: bg || C.bgSoft,
       alignItems: 'center', justifyContent: 'center' }}>
       <Svg width={w * scale} height={size - 8} viewBox={`0 0 ${w} ${h}`}>
-        <TruckTopShapes type={bt} body={body} accent={trim} />
+        <PlaneTopShapes type={bt} body={body} accent={trim} />
       </Svg>
       {logoIcon ? (
         <View style={{
@@ -55,7 +55,7 @@ function TruckArtBadge({ model, color, accent, logoIcon, size = 56, bg }) {
 }
 
 // Same shared top-down art as the map's HQ/garage markers, framed for cards —
-// see TruckArtBadge above for the identical pattern applied to trucks.
+// see AircraftArtBadge above for the identical pattern applied to trucks.
 function BuildingArtBadge({ kind, color, tier, size = 56, bg }) {
   const { w, h } = buildingShapes(kind, color, tier);
   const scale = (size - 8) / h;
@@ -648,7 +648,7 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
               </Card>
             )}
 
-            <Btn title="Start Delivery" kind="green" icon="truck-fast" style={{ marginTop: 14, marginBottom: 30 }}
+            <Btn title="Start Delivery" kind="green" icon="airplane-takeoff" style={{ marginTop: 14, marginBottom: 30 }}
               disabled={!preview || !!preview.err} onPress={confirm} />
           </>
         )}
@@ -923,7 +923,7 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
   const [historyOpen, setHistoryOpen] = useState(false);
   useEffect(() => { if (!visible) { setConfirmSell(false); setHistoryOpen(false); } }, [visible]);
   const truck = trucks.find(t => t.id === truckId);
-  if (!visible || !truck) return <Sheet visible={visible && !!truck} onClose={onClose} title="Truck" height="50%"><View /></Sheet>;
+  if (!visible || !truck) return <Sheet visible={visible && !!truck} onClose={onClose} title="Aircraft" height="50%"><View /></Sheet>;
   // Everything below renders ONCE per open (plus on real state changes) —
   // no per-second tick here; live data lives inside <TruckLivePanel/>.
   const m = modelById(truck.modelId);
@@ -943,7 +943,7 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
       <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" removeClippedSubviews={false}>
         <Row style={{ marginBottom: 12 }}>
           <Pressable onPress={() => onCustomize && onCustomize(truck.id)}>
-            <TruckArtBadge model={m} color={truck.color} accent={truck.accentColor} logoIcon={truck.logoIcon} size={60} bg={meta.bg} />
+            <AircraftArtBadge model={m} color={truck.color} accent={truck.accentColor} logoIcon={truck.logoIcon} size={60} bg={meta.bg} />
           </Pressable>
           <View style={{ marginLeft: 12, flex: 1 }}>
             <Text style={FONT.h2}>{truck.customName || m.name}</Text>
@@ -1009,9 +1009,9 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
         <Card style={{ marginTop: 10 }} onPress={() => onCustomize && onCustomize(truck.id)}>
           <Row style={{ justifyContent: 'space-between' }}>
             <Row style={{ flex: 1 }}>
-              <TruckArtBadge model={m} color={truck.color} accent={truck.accentColor} logoIcon={truck.logoIcon} size={44} bg={C.bgSoft} />
+              <AircraftArtBadge model={m} color={truck.color} accent={truck.accentColor} logoIcon={truck.logoIcon} size={44} bg={C.bgSoft} />
               <View style={{ marginLeft: 10, flex: 1 }}>
-                <Text style={[FONT.h3]}>Customize Truck</Text>
+                <Text style={[FONT.h3]}>Customize Aircraft</Text>
                 <Text style={FONT.tiny}>Name, paint job & emblem — {LIVERY_COST} Gold per repaint</Text>
               </View>
             </Row>
@@ -1020,7 +1020,7 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
         </Card>
 
         <Row style={{ marginTop: 14, gap: 8 }}>
-          {truck.status === 'parked' && <Btn title="New Delivery" kind="green" icon="truck-fast" style={{ flex: 1 }} onPress={() => { onClose(); onNewDelivery(truck.id); }} />}
+          {truck.status === 'parked' && <Btn title="New Delivery" kind="green" icon="airplane-takeoff" style={{ flex: 1 }} onPress={() => { onClose(); onNewDelivery(truck.id); }} />}
           <Btn title="Show on Map" kind="soft" icon="crosshairs-gps" style={{ flex: 1 }} onPress={() => onShowOnMap(truck)} />
         </Row>
         {(truck.status === 'parked' || truck.status === 'broken') && (
@@ -1059,16 +1059,16 @@ export function TruckCustomizeModal({ visible, onClose, truckId, onBack }) {
     if (visible && truck) setDraft({ color: truck.color || null, accentColor: truck.accentColor || null, logoIcon: truck.logoIcon || null });
   }, [visible, truckId]);
 
-  if (!visible || !truck || !draft) return <Sheet visible={visible && !!truck} onClose={onClose} title="Customize Truck" height="50%"><View /></Sheet>;
+  if (!visible || !truck || !draft) return <Sheet visible={visible && !!truck} onClose={onClose} title="Customize Aircraft" height="50%"><View /></Sheet>;
   const m = modelById(truck.modelId);
   const accentNow = draft.accentColor || '#9DB2D6';
   const dirty = draft.color !== (truck.color || null) || draft.accentColor !== (truck.accentColor || null) || draft.logoIcon !== (truck.logoIcon || null);
 
   const randomize = () => {
     haptic('light'); play('tap', 0.4);
-    const c = TRUCK_COLORS[Math.floor(Math.random() * TRUCK_COLORS.length)];
-    const a = TRUCK_ACCENTS[Math.floor(Math.random() * TRUCK_ACCENTS.length)];
-    const l = Math.random() < 0.8 ? TRUCK_LOGOS[Math.floor(Math.random() * TRUCK_LOGOS.length)] : null;
+    const c = AIRCRAFT_COLORS[Math.floor(Math.random() * AIRCRAFT_COLORS.length)];
+    const a = AIRCRAFT_ACCENTS[Math.floor(Math.random() * AIRCRAFT_ACCENTS.length)];
+    const l = Math.random() < 0.8 ? AIRCRAFT_LOGOS[Math.floor(Math.random() * AIRCRAFT_LOGOS.length)] : null;
     setDraft({ color: c.hex, accentColor: a.hex, logoIcon: l });
   };
 
@@ -1078,7 +1078,7 @@ export function TruckCustomizeModal({ visible, onClose, truckId, onBack }) {
   };
 
   return (
-    <Sheet visible={visible} onClose={onClose} title="Customize Truck" height="92%">
+    <Sheet visible={visible} onClose={onClose} title="Customize Aircraft" height="92%">
       <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         {onBack && (
           <Pressable onPress={onBack} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }} hitSlop={6}>
@@ -1089,7 +1089,7 @@ export function TruckCustomizeModal({ visible, onClose, truckId, onBack }) {
 
         {/* Live preview — every tap below updates this instantly, for free */}
         <Card style={{ alignItems: 'center', paddingVertical: 20, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
-          <TruckArtBadge model={m} color={draft.color} accent={accentNow} logoIcon={draft.logoIcon} size={140} bg="transparent" />
+          <AircraftArtBadge model={m} color={draft.color} accent={accentNow} logoIcon={draft.logoIcon} size={140} bg="transparent" />
           <Text style={[FONT.tiny, { color: '#94A3B8', marginTop: 10 }]}>Live preview — free to browse, {LIVERY_COST} Gold to apply</Text>
         </Card>
 
@@ -1103,7 +1103,7 @@ export function TruckCustomizeModal({ visible, onClose, truckId, onBack }) {
 
         <Text style={[FONT.tiny, { marginTop: 14 }]}>BODY COLOUR</Text>
         <Row style={{ flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
-          {TRUCK_COLORS.map(c => {
+          {AIRCRAFT_COLORS.map(c => {
             const sel = (draft.color || defaultBodyColor(m)) === c.hex;
             return (
               <Pressable key={c.id} onPress={() => { haptic('light'); play('tap', 0.3); setDraft(d => ({ ...d, color: c.hex })); }}
@@ -1117,7 +1117,7 @@ export function TruckCustomizeModal({ visible, onClose, truckId, onBack }) {
 
         <Text style={[FONT.tiny, { marginTop: 14 }]}>TRIM / ACCENT</Text>
         <Row style={{ flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
-          {TRUCK_ACCENTS.map(a => {
+          {AIRCRAFT_ACCENTS.map(a => {
             const sel = accentNow === a.hex;
             return (
               <Pressable key={a.id} onPress={() => { haptic('light'); play('tap', 0.3); setDraft(d => ({ ...d, accentColor: a.hex })); }}
@@ -1131,7 +1131,7 @@ export function TruckCustomizeModal({ visible, onClose, truckId, onBack }) {
 
         <Text style={[FONT.tiny, { marginTop: 14 }]}>EMBLEM</Text>
         <Row style={{ flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
-          {TRUCK_LOGOS.map(l => {
+          {AIRCRAFT_LOGOS.map(l => {
             const sel = draft.logoIcon === l;
             return (
               <Pressable key={l} onPress={() => { haptic('light'); play('tap', 0.3); setDraft(d => ({ ...d, logoIcon: sel ? null : l })); }}
@@ -1155,7 +1155,7 @@ export function TruckCustomizeModal({ visible, onClose, truckId, onBack }) {
   );
 }
 
-// ============ Buy Truck ============
+// ============ Buy Aircraft ============
 export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
   const toast = useToast();
   const balance = useGame(s => s.balance);
@@ -1180,7 +1180,7 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
     ['price-desc', 'Price High-Low'],
   ];
   const list = useMemo(() => {
-    const filtered = TRUCK_MODELS.filter(m => tier === 0 || m.tier === tier);
+    const filtered = AIRCRAFT_MODELS.filter(m => tier === 0 || m.tier === tier);
     const sorted = [...filtered];
     if (sort === 'name-asc') sorted.sort((a, b) => a.name.localeCompare(b.name));
     else if (sort === 'name-desc') sorted.sort((a, b) => b.name.localeCompare(a.name));
@@ -1194,7 +1194,7 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
     else toast(r.err, 'error');
   };
   return (
-    <Sheet visible={visible} onClose={onClose} title="Truck Showroom" height="86%">
+    <Sheet visible={visible} onClose={onClose} title="Aircraft Hangar" height="86%">
       <Card style={{ marginBottom: 10, backgroundColor: atCapacity ? C.redSoft : C.bgSoft, borderColor: atCapacity ? C.red : C.border }}>
         <Row style={{ justifyContent: 'space-between' }}>
           <Row style={{ flex: 1 }}>
@@ -1240,7 +1240,7 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
                 </View>
               )}
               <Row>
-                <TruckArtBadge model={m} size={52} bg={pm.bg} />
+                <AircraftArtBadge model={m} size={52} bg={pm.bg} />
                 <View style={{ marginLeft: 12, flex: 1 }}>
                   <Text style={FONT.h3}>{m.name}</Text>
                   <Text style={FONT.tiny}>{m.brand}</Text>
@@ -1280,7 +1280,7 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
           return (
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
               <Card style={{ alignItems: 'center', paddingVertical: 18, marginBottom: 12 }}>
-                <TruckArtBadge model={m} size={84} bg={pm.bg} />
+                <AircraftArtBadge model={m} size={84} bg={pm.bg} />
                 <Text style={[FONT.h2, { marginTop: 8 }]}>{m.name}</Text>
                 <Text style={FONT.tiny}>{m.brand}</Text>
                 <Row style={{ marginTop: 6, gap: 6 }}>
@@ -1413,7 +1413,7 @@ export function ContractsModal({ visible, onClose, onAccept }) {
                 {done ? (
                   <Row><Icon name="check-circle" size={15} color={C.green} /><Text style={[FONT.sub, { color: C.green, marginLeft: 4 }]}>Completed · +{inr(c.rewardPaid)}</Text></Row>
                 ) : c.status === 'inprogress' ? (
-                  <Pill text="In Progress" icon="truck-fast" />
+                  <Pill text="In Progress" icon="airplane-takeoff" />
                 ) : expired ? (
                   <Text style={[FONT.sub, { color: C.faint }]}>Expired</Text>
                 ) : (
@@ -2173,7 +2173,7 @@ export function DriverDetailModal({ visible, onClose, staffId, onShowOnMap }) {
         })()}
 
         {truck && (
-          <Btn title="Show truck on map" kind="soft" icon="crosshairs-gps" style={{ marginTop: 12 }}
+          <Btn title="Show aircraft on map" kind="soft" icon="crosshairs-gps" style={{ marginTop: 12 }}
             onPress={() => { onShowOnMap && onShowOnMap(truck); }} />
         )}
       </ScrollView>
@@ -3105,7 +3105,7 @@ export function HubsModal({ visible, onClose, onShowOnMap }) {
   const sell = (h) => { const r = sellHub(h.cityId); toast(r.ok ? `Garage sold for ${inrShort(r.refund)}` : r.err, r.ok ? 'success' : 'error'); };
 
   return (
-    <Sheet visible={visible} onClose={onClose} title="Garages & Network" height="88%">
+    <Sheet visible={visible} onClose={onClose} title="Airports & Network" height="88%">
       <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         <Card style={{ marginBottom: 12, backgroundColor: C.bgSoft }}>
           <Row style={{ justifyContent: 'space-between' }}>
@@ -3153,7 +3153,7 @@ export function HubsModal({ visible, onClose, onShowOnMap }) {
                     onPress={() => { needFuel.forEach(t => refuelAtHub(t.id)); toast(`Refuelled ${needFuel.length} truck(s) free`, 'success'); }} />
                 )}
                 {elsewhere.length > 0 && (
-                  <Btn title="Send truck here" kind="blue" small icon="transfer"
+                  <Btn title="Send aircraft here" kind="blue" small icon="transfer"
                     onPress={() => setTravelFor(travelFor === h.cityId ? null : h.cityId)} />
                 )}
                 {!h.hq && (
@@ -3237,7 +3237,7 @@ export function HubInfoModal({ visible, onClose, cityId, onNewDelivery, onOpenTr
 
   const hub = hubs.find(h => h.cityId === cityId);
   const city = cityId ? cityById(cityId) : null;
-  if (!hub || !city) return <Sheet visible={visible} onClose={onClose} title="Garage" height="40%"><View /></Sheet>;
+  if (!hub || !city) return <Sheet visible={visible} onClose={onClose} title="Airport" height="40%"><View /></Sheet>;
 
   const isHQ = !!hub.hq;
   const buildingTiers = isHQ ? HQ_TIERS : GARAGE_TIERS;
@@ -3328,7 +3328,7 @@ export function HubInfoModal({ visible, onClose, cityId, onNewDelivery, onOpenTr
         <Row style={{ marginBottom: 8, backgroundColor: C.bgSoft, borderRadius: RADIUS.md, paddingVertical: 10 }}>
           <ContractStat icon="truck" label="Trucks here" value={String(here.length)} />
           <ContractStat icon="parking" label="Parked" value={String(parked.length)} color={C.blue} />
-          <ContractStat icon="truck-fast" label="To / from" value={String(delivering.length)} color={C.green} />
+          <ContractStat icon="airplane-takeoff" label="To / from" value={String(delivering.length)} color={C.green} />
           <ContractStat icon="history" label="Past trips" value={String(trips.length)} />
         </Row>
         {trips.length > 0 && (
@@ -3383,7 +3383,7 @@ export function HubInfoModal({ visible, onClose, cityId, onNewDelivery, onOpenTr
           <Card style={{ marginBottom: 10 }}>
             <Text style={FONT.sub}>No trucks parked here right now.</Text>
             {elsewhere.length > 0 && (
-              <Btn title="Fast-travel a truck here" kind="blue" small icon="transfer" style={{ marginTop: 10 }}
+              <Btn title="Fast-travel an aircraft here" kind="blue" small icon="transfer" style={{ marginTop: 10 }}
                 onPress={() => setTravelOpen(v => !v)} />
             )}
           </Card>
@@ -3399,14 +3399,14 @@ export function HubInfoModal({ visible, onClose, cityId, onNewDelivery, onOpenTr
                     <Text style={FONT.tiny}>Fuel {Math.round(t.fuelPct)}% · condition {Math.round(t.condition == null ? 100 : t.condition)}%</Text>
                   </View>
                 </Pressable>
-                <Btn title="Dispatch" kind="primary" small icon="truck-fast"
+                <Btn title="Dispatch" kind="primary" small icon="airplane-takeoff"
                   onPress={() => { onClose(); onNewDelivery && onNewDelivery(t.id); }} />
               </Row>
             </Card>
           );
         })}
         {parked.length > 0 && elsewhere.length > 0 && (
-          <Btn title="Fast-travel another truck here" kind="soft" small icon="transfer" style={{ marginBottom: 8 }}
+          <Btn title="Fast-travel another aircraft here" kind="soft" small icon="transfer" style={{ marginBottom: 8 }}
             onPress={() => setTravelOpen(v => !v)} />
         )}
         {travelOpen && (
@@ -3494,7 +3494,7 @@ export function BuildingCustomizeModal({ visible, onClose, cityId, onBack }) {
 
         <Text style={[FONT.tiny, { marginTop: 14 }]}>PAINT COLOUR</Text>
         <Row style={{ flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
-          {TRUCK_COLORS.map(c => {
+          {AIRCRAFT_COLORS.map(c => {
             const sel = (draftColor || defaultColor) === c.hex;
             return (
               <Pressable key={c.id} onPress={() => { haptic('light'); play('tap', 0.3); setDraftColor(c.hex); }}
@@ -3781,7 +3781,7 @@ export function CompanyInsightsModal({ visible, onClose, onOpenSettings, onOpenP
         {/* Health scorecard */}
         <SectionTitle icon="heart-pulse" text="Company Health" />
         <Row style={{ marginBottom: 8, backgroundColor: C.bgSoft, borderRadius: RADIUS.md, paddingVertical: 10 }}>
-          <ContractStat icon="truck-fast" label="Fleet busy" value={`${utilisation}%`} color={utilisation >= 50 ? C.green : C.amber} />
+          <ContractStat icon="airplane-takeoff" label="Fleet busy" value={`${utilisation}%`} color={utilisation >= 50 ? C.green : C.amber} />
           <ContractStat icon="bank" label="Credit" value={String(score)} color={score >= 650 ? C.green : C.red} />
           <ContractStat icon="account-group" label="Staff" value={String(state.staff.length)} />
           <ContractStat icon="earth" label="Countries" value={String((state.unlockedCountries || ['IN']).length)} color={C.blue} />
