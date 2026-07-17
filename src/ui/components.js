@@ -370,6 +370,26 @@ export function relTime(ts) {
   return `${Math.floor(s / 86400)}d ago`;
 }
 
+// Search that understands numbers, not just substrings: typing "45" first
+// tries a normal text match (so "45" still finds a truck literally named
+// "45"), but if that comes up empty AND the query is a plain number, it
+// falls back to everything within ±33% (floor 5) of that number across the
+// given numeric fields — so "45" surfaces the 30-60 range of trucks around
+// it instead of a dead "no results" screen when nothing is EXACTLY 45.
+// `text` = pre-joined lowercase haystack string; `numbers` = array of the
+// record's searchable numeric values (tonnage, speed, price, whatever).
+export function smartSearch(query, text, numbers = []) {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  if (text.includes(q)) return true;
+  if (/^\d+(\.\d+)?$/.test(q)) {
+    const n = parseFloat(q);
+    const tol = Math.max(n * 0.33, 5);
+    return numbers.some(v => v != null && Math.abs(v - n) <= tol);
+  }
+  return false;
+}
+
 const st = StyleSheet.create({
   card: { backgroundColor: C.card, borderRadius: RADIUS.lg, borderWidth: 1, borderColor: C.border, padding: 14 },
   btn: {

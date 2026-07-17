@@ -6,7 +6,7 @@ import ViewShot from 'react-native-view-shot';
 import RNShare from 'react-native-share';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
-import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider } from '../components';
+import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider, smartSearch } from '../components';
 import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST_MIN, LIVERY_COST_MAX, liveryCostFor, FLEET_LIVERY_DISCOUNT, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, CONVOY_SYMBOLS, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds, licenseRequiredFor } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
@@ -1462,16 +1462,13 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
     ['price-desc', 'Price High-Low'],
   ];
   const list = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const filtered = !q ? TRUCK_MODELS : TRUCK_MODELS.filter(m => {
-      // Search everything about the truck, not just its name — brand, tier,
-      // propulsion, tonnage, speed, range, price, description all match.
-      const haystack = [
-        m.name, m.brand, TIER_LABELS[m.tier], propMeta[m.propulsion]?.label,
-        `${m.cargo}t`, `${m.cargo} ton`, `${m.cargo}`, `${m.speed}`, `${m.range}km`, `${m.range}`,
-        String(m.price), m.desc,
-      ].join(' ').toLowerCase();
-      return haystack.includes(q);
+    // Search everything about the truck, not just its name — brand, tier,
+    // propulsion and description as text, plus tonnage/speed/range/price as
+    // NUMBERS: typing "45" with nothing at exactly 45t still surfaces the
+    // ~30-60t trucks around it instead of a dead "no results" screen.
+    const filtered = TRUCK_MODELS.filter(m => {
+      const text = [m.name, m.brand, TIER_LABELS[m.tier], propMeta[m.propulsion]?.label, m.desc].join(' ').toLowerCase();
+      return smartSearch(query, text, [m.cargo, m.speed, m.range, m.price]);
     });
     const sorted = [...filtered];
     if (sort === 'name-asc') sorted.sort((a, b) => a.name.localeCompare(b.name));
