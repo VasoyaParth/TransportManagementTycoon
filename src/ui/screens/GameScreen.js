@@ -66,7 +66,7 @@ export default function GameScreen() {
   const mountedModals = useRef(new Set());
   if (modal?.kind) mountedModals.current.add(modal.kind);
   const mounted = (kind) => mountedModals.current.has(kind);
-  const [picking, setPicking] = useState(null); // {truckId, contract}
+  const [picking, setPicking] = useState(null); // {kind:'delivery',truckId,contract} | {kind:'autopilot',step,markers,stepLabel}
   const [focus, setFocus] = useState(null);
   const [clock, setClock] = useState({ day: 1, hour: 8 });
   const lastToastN = useRef(null);
@@ -158,7 +158,11 @@ export default function GameScreen() {
   const handleCityPick = useCallback((city) => {
     const p = picking;
     setPicking(null);
-    setModal({ kind: 'delivery', truckId: p?.truckId, dest: city.id, contract: p?.contract });
+    if (p?.kind === 'autopilot') {
+      setModal({ kind: 'autopilot', pick: { step: p.step, cityId: city.id, token: Date.now() } });
+    } else {
+      setModal({ kind: 'delivery', truckId: p?.truckId, dest: city.id, contract: p?.contract });
+    }
   }, [picking]);
 
   const showOnMap = useCallback((truck) => {
@@ -193,7 +197,9 @@ export default function GameScreen() {
         <MapContainer
           pickingMode={!!picking}
           onCityPick={handleCityPick}
-          onCancelPick={() => setPicking(null)}
+          onCancelPick={() => { if (picking?.kind === 'autopilot') setModal({ kind: 'autopilot' }); setPicking(null); }}
+          pickMarkers={picking?.markers}
+          pickLabel={picking?.kind === 'autopilot' ? `Tap a city to set ${picking.stepLabel || 'this stop'}` : undefined}
           focus={focus}
           onTruckTap={onTruckTap}
           onHubTap={onHubTap}
@@ -342,7 +348,7 @@ export default function GameScreen() {
         presetTruckId={modal?.truckId}
         presetDest={modal?.dest}
         contract={modal?.contract}
-        onPickOnMap={() => { setPicking({ truckId: modal?.truckId, contract: modal?.contract }); setModal(null); }}
+        onPickOnMap={() => { setPicking({ kind: 'delivery', truckId: modal?.truckId, contract: modal?.contract }); setModal(null); }}
       />}
       {mounted('truck') && <TruckDetailModal
         visible={modal?.kind === 'truck'} onClose={() => setModal(null)} truckId={modal?.truckId}
@@ -360,7 +366,10 @@ export default function GameScreen() {
       />}
       {mounted('fleetLivery') && <FleetLiveryModal visible={modal?.kind === 'fleetLivery'} onClose={() => setModal(null)} />}
       {mounted('rankings') && <IndustryRankingsModal visible={modal?.kind === 'rankings'} onClose={() => setModal(null)} />}
-      {mounted('autopilot') && <AutopilotModal visible={modal?.kind === 'autopilot'} onClose={() => setModal(null)} />}
+      {mounted('autopilot') && <AutopilotModal visible={modal?.kind === 'autopilot'} onClose={() => setModal(null)}
+        pickResult={modal?.pick}
+        onPickOnMap={(step, markers, stepLabel) => { setPicking({ kind: 'autopilot', step, markers, stepLabel }); setModal(null); }}
+      />}
       {mounted('auctions') && <AuctionsModal visible={modal?.kind === 'auctions'} onClose={() => setModal(null)} />}
       {mounted('insurance') && <InsuranceModal visible={modal?.kind === 'insurance'} onClose={() => setModal(null)} />}
       {mounted('countries') && <CountriesModal visible={modal?.kind === 'countries'} onClose={() => setModal(null)} />}

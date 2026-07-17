@@ -692,7 +692,7 @@ function PreviewStat({ icon, label, value }) {
 // A single search-to-pick city field — reused for every stop (From/Via/To)
 // in the Autopilot route builder. Clears its own query once a city is
 // picked; the picked value itself lives in the parent's state.
-function CitySearchRow({ placeholder, valueLabel, onPick }) {
+function CitySearchRow({ placeholder, valueLabel, onPick, onMapPress }) {
   const [query, setQuery] = useState('');
   const results = useMemo(() => {
     if (!query.trim()) return [];
@@ -701,7 +701,14 @@ function CitySearchRow({ placeholder, valueLabel, onPick }) {
   }, [query]);
   return (
     <View style={{ marginBottom: 10 }}>
-      <TextInput value={query} onChangeText={setQuery} placeholder={placeholder} placeholderTextColor={C.faint} style={cs.input} />
+      <Row style={{ gap: 8 }}>
+        <TextInput value={query} onChangeText={setQuery} placeholder={placeholder} placeholderTextColor={C.faint} style={[cs.input, { flex: 1 }]} />
+        {onMapPress && (
+          <Pressable onPress={onMapPress} style={{ width: 42, height: 42, borderRadius: RADIUS.md, backgroundColor: C.blueSoft, alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="map-marker-radius" size={19} color={C.blue} />
+          </Pressable>
+        )}
+      </Row>
       {results.map(c => (
         <Pressable key={c.id} onPress={() => { onPick(c); setQuery(''); }} style={cs.resRow}>
           <Icon name="map-marker" size={16} color={(c.country || 'IN') === 'IN' ? C.blue : C.amber} />
@@ -722,7 +729,7 @@ function CitySearchRow({ placeholder, valueLabel, onPick }) {
 // there the truck loops the route forever (bouncing end to end) with zero
 // further input — completeDelivery() in the store re-dispatches each next
 // leg automatically until you tap Stop.
-export function AutopilotModal({ visible, onClose }) {
+export function AutopilotModal({ visible, onClose, onPickOnMap, pickResult }) {
   const toast = useToast();
   const trucks = useGame(s => s.trucks);
   const customRoutes = useGame(s => s.customRoutes || []);
@@ -741,11 +748,39 @@ export function AutopilotModal({ visible, onClose }) {
   const [cargoType, setCargoType] = useState(CARGO_TYPES[0].id);
   const [tons, setTons] = useState(10);
   const [assigningRoute, setAssigningRoute] = useState(null);
+  const lastPickToken = useRef(null);
 
-  useEffect(() => { if (visible) setPage('list'); }, [visible]);
+  // A fresh open (from Routes tab) lands on the saved-routes list; reopening
+  // as the tail end of a "pick on map" round-trip (pickResult present) must
+  // NOT reset the page, or the in-progress route builder would vanish from view.
+  useEffect(() => { if (visible && !pickResult) setPage('list'); }, [visible]);
+
+  // Apply a city tapped on the map back into whichever step requested it.
+  // Keyed on `token` (not the whole object) so this only fires once per pick,
+  // even though the modal stays mounted and re-receives the same prop shape.
+  useEffect(() => {
+    if (!pickResult || pickResult.token === lastPickToken.current) return;
+    lastPickToken.current = pickResult.token;
+    if (pickResult.step === 'from') setFromId(pickResult.cityId);
+    else if (pickResult.step === 'to') setToId(pickResult.cityId);
+    else if (pickResult.step && pickResult.step.startsWith('via:')) {
+      const idx = parseInt(pickResult.step.split(':')[1], 10);
+      setViaIds(v => v.map((x, j) => (j === idx ? pickResult.cityId : x)));
+    }
+  }, [pickResult]);
 
   const cityIds = [fromId, ...viaIds, toId].filter(Boolean);
   const preview = useMemo(() => (cityIds.length >= 2 ? previewCustomRoute(cityIds) : null), [fromId, toId, viaIds.join(',')]);
+
+  // Dots for every stop already chosen — sent to the map while a "pick on
+  // map" round-trip is in progress so the in-progress route stays visible.
+  const pickMarkersFor = (stepLabel) => {
+    const marks = [];
+    if (fromId) { const c = cityById(fromId); if (c) marks.push({ lat: c.lat, lng: c.lng, label: 'From', color: C.blue }); }
+    viaIds.forEach((vid, i) => { const c = vid && cityById(vid); if (c) marks.push({ lat: c.lat, lng: c.lng, label: `Via ${i + 1}`, color: C.amber }); });
+    if (toId) { const c = cityById(toId); if (c) marks.push({ lat: c.lat, lng: c.lng, label: 'To', color: C.green }); }
+    return marks;
+  };
 
   // PERF: skip the rest of the body (list filtering, JSX tree) while hidden —
   // this modal stays mounted once opened, so without this it kept doing that
@@ -783,7 +818,8 @@ export function AutopilotModal({ visible, onClose }) {
             <Text style={cs.section}>Route name (optional)</Text>
             <TextInput value={name} onChangeText={setName} placeholder="e.g. Rajkot – Jamnagar Loop" placeholderTextColor={C.faint} style={cs.input} />
             <Text style={cs.section}>From</Text>
-            <CitySearchRow placeholder="Search starting city..." valueLabel={fromId ? cityById(fromId)?.name : null} onPick={c => setFromId(c.id)} />
+            <CitySearchRow placeholder="Search starting city..." valueLabel={fromId ? cityById(fromId)?.name : null} onPick={c => setFromId(c.id)}
+              onMapPress={onPickOnMap ? () => onPickOnMap('from', pickMarkersFor(), 'the From city') : undefined} />
             {viaIds.map((vid, i) => (
               <View key={i}>
                 <Row style={{ justifyContent: 'space-between' }}>
@@ -793,13 +829,15 @@ export function AutopilotModal({ visible, onClose }) {
                   </Pressable>
                 </Row>
                 <CitySearchRow placeholder="Search via city..." valueLabel={vid ? cityById(vid)?.name : null}
-                  onPick={c => setViaIds(viaIds.map((v, j) => (j === i ? c.id : v)))} />
+                  onPick={c => setViaIds(viaIds.map((v, j) => (j === i ? c.id : v)))}
+                  onMapPress={onPickOnMap ? () => onPickOnMap(`via:${i}`, pickMarkersFor(), `Via stop ${i + 1}`) : undefined} />
               </View>
             ))}
             <Btn title="+ Add via stop" kind="soft" icon="plus" small
               style={{ alignSelf: 'flex-start', marginBottom: 14 }} onPress={() => setViaIds([...viaIds, null])} />
             <Text style={cs.section}>To</Text>
-            <CitySearchRow placeholder="Search destination city..." valueLabel={toId ? cityById(toId)?.name : null} onPick={c => setToId(c.id)} />
+            <CitySearchRow placeholder="Search destination city..." valueLabel={toId ? cityById(toId)?.name : null} onPick={c => setToId(c.id)}
+              onMapPress={onPickOnMap ? () => onPickOnMap('to', pickMarkersFor(), 'the To city') : undefined} />
 
             <Text style={cs.section}>Route colour</Text>
             <Row style={{ flexWrap: 'wrap', gap: 10, marginBottom: 4 }}>
@@ -1030,11 +1068,18 @@ export function AuctionsModal({ visible, onClose }) {
 // Manage button that opens the shared InsurancePlanSheet for just that
 // truck — kept off Truck Detail's own page so that page stays light.
 export function InsuranceModal({ visible, onClose }) {
+  const toast = useToast();
   const trucks = useGame(s => s.trucks);
+  const insureAllTrucks = useGame(s => s.insureAllTrucks);
   const [manageId, setManageId] = useState(null);
 
   if (!visible) return <Sheet visible={false} onClose={onClose} title="Cargo Insurance" height="88%"><View /></Sheet>;
   const insuredCount = trucks.filter(t => insurancePlanOf(t)).length;
+
+  const doInsureAll = (planId) => {
+    const r = insureAllTrucks(planId);
+    toast(r.ok ? `${INSURANCE_PLANS.find(p => p.id === planId).name} applied to ${r.count} truck${r.count === 1 ? '' : 's'}!` : r.err, r.ok ? 'success' : 'info');
+  };
 
   return (
     <Sheet visible={visible} onClose={onClose} title="Cargo Insurance" height="88%">
@@ -1046,6 +1091,17 @@ export function InsuranceModal({ visible, onClose }) {
           </Text>
         </Row>
       </Card>
+      {trucks.length > 0 && (
+        <Card style={{ marginBottom: 12 }}>
+          <Text style={[FONT.tiny, { fontWeight: '700', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.4 }]}>Insure All — whole fleet, one tap</Text>
+          <Row style={{ gap: 6 }}>
+            {INSURANCE_PLANS.map(plan => (
+              <Btn key={plan.id} title={plan.name.replace(' Cover', '')} icon={plan.icon} kind="soft" small
+                style={{ flex: 1 }} onPress={() => doInsureAll(plan.id)} />
+            ))}
+          </Row>
+        </Card>
+      )}
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
         {trucks.length === 0 ? (
           <Card style={{ alignItems: 'center', padding: 24 }}>
@@ -1344,6 +1400,20 @@ function InsurancePlanSheet({ visible, onClose, truckId }) {
                   <Text style={FONT.tiny}>{plan.desc}</Text>
                 </View>
               </Row>
+              <View style={{ marginTop: 10 }}>
+                {plan.covered.map((line, i) => (
+                  <Row key={`c${i}`} style={{ alignItems: 'flex-start', marginBottom: 4 }}>
+                    <Icon name="check-circle" size={13} color={C.green} style={{ marginTop: 1 }} />
+                    <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.text }]}>{line}</Text>
+                  </Row>
+                ))}
+                {plan.notCovered.map((line, i) => (
+                  <Row key={`n${i}`} style={{ alignItems: 'flex-start', marginBottom: 4 }}>
+                    <Icon name="close-circle-outline" size={13} color={C.faint} style={{ marginTop: 1 }} />
+                    <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.sub }]}>{line}</Text>
+                  </Row>
+                ))}
+              </View>
               <Row style={{ justifyContent: 'space-between', marginTop: 8, alignItems: 'center' }}>
                 <Text style={[FONT.h3, { fontSize: 16 }]}>{inr(monthly)}/mo</Text>
                 {active ? <Pill text="Active" color={C.green} bg={C.greenSoft} /> : (
