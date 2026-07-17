@@ -2177,10 +2177,10 @@ export const useGame = create(
           staff: s.staff.map(m => m.id === (t && t.driverId) ? {
             ...m,
             // Driver XP: distance-weighted, powers levels & perks (v2.4.0).
-            // Rate doubled in v10.19.0 — levels (and the license they unlock)
-            // used to take dozens of deliveries to reach; this gets a driver
-            // to Premium Heavy certified in well under ten trips.
-            xp: (m.xp || 0) + Math.round(d.route.roadKm / 4 + 40),
+            // Rate is 4x the original v2.4.0 baseline as of v10.20.0 — a
+            // fresh hire reaches Premium Heavy certified (level 2) in just
+            // a couple of short trips instead of dozens of deliveries.
+            xp: (m.xp || 0) + Math.round(d.route.roadKm / 2 + 80),
             hoursDriven: Math.round(((m.hoursDriven || 0) + drivingHours) * 10) / 10,
             sleepHours: Math.round(((m.sleepHours || 0) + sleepH) * 10) / 10,
             deliveries: (m.deliveries || 0) + 1,

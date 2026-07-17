@@ -1,10 +1,10 @@
 // Dashboard tab panels — Fleet / Routes / Staff / Economy / Marketing.
 // Each is a scrollable panel rendered inside a bottom sheet.
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, FlatList, Pressable, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, FlatList, Pressable, StyleSheet, TextInput } from 'react-native';
 import { C, FONT, RADIUS } from '../theme';
 import {
-  Card, Btn, IconBtn, Pill, statusMeta, Progress, Money, Stat, Row, Icon, useToast, relTime, GameSlider, Sheet, useEasterEggTap,
+  Card, Btn, IconBtn, Pill, statusMeta, Progress, Money, Stat, Row, Icon, useToast, relTime, GameSlider, Sheet, useEasterEggTap, smartSearch,
 } from '../components';
 import Svg from 'react-native-svg';
 import {
@@ -144,9 +144,9 @@ export function FleetTab({ onTruckPress, onBuyTruck, onOpenFleetLivery }) {
   const pledged = useMemo(() => pledgedTruckIds({ loans: loansForPledge }), [loansForPledge]);
   const hasLive = trucks.some(t => t.status === 'delivering' || t.status === 'building');
   const now = useNow(hasLive);
-  const [filter, setFilter] = useState('all');
+  const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
-  useEffect(() => { setPage(1); }, [filter]);
+  useEffect(() => { setPage(1); }, [query]);
 
   const counts = useMemo(() => {
     const c = { delivering: 0, parked: 0, building: 0, broken: 0 };
@@ -158,18 +158,16 @@ export function FleetTab({ onTruckPress, onBuyTruck, onOpenFleetLivery }) {
   const fleetAvgCond = trucks.length ? Math.round(trucks.reduce((a, t) => a + (t.condition == null ? 100 : t.condition), 0) / trucks.length) : 0;
   const fleetKm = trucks.reduce((a, t) => a + (t.km || 0), 0);
 
-  const filtered = useMemo(
-    () => (filter === 'all' ? trucks : trucks.filter(t => t.status === filter)),
-    [trucks, filter]
-  );
+  // Search replaces the old status filter chips — matches name/model/brand/
+  // status as text, and tonnage/speed/condition%/fuel% as numbers (so "45"
+  // with nothing exactly at 45t still surfaces the trucks around it).
+  const filtered = useMemo(() => trucks.filter(t => {
+    const model = modelById(t.modelId);
+    const meta = statusMeta[t.status] || statusMeta.parked;
+    const text = [t.customName, model?.name, model?.brand, meta.label].filter(Boolean).join(' ').toLowerCase();
+    return smartSearch(query, text, [model?.cargo, model?.speed, t.condition, t.fuelPct]);
+  }), [trucks, query]);
   const visible = filtered.slice(0, page * FLEET_PAGE);
-  const filterOpts = [
-    { key: 'all', label: 'All', count: trucks.length },
-    { key: 'delivering', label: 'Running', count: counts.delivering },
-    { key: 'parked', label: 'Parked', count: counts.parked },
-    { key: 'building', label: 'Building', count: counts.building },
-    { key: 'broken', label: 'Broken', count: counts.broken },
-  ];
 
   const renderTruck = ({ item: t }) => {
     const model = modelById(t.modelId);
@@ -290,7 +288,16 @@ export function FleetTab({ onTruckPress, onBuyTruck, onOpenFleetLivery }) {
               )}
             </Row>
           </Card>
-          <FilterChips options={filterOpts} value={filter} onChange={setFilter} />
+          <Row style={{ marginBottom: 10, borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.md, paddingHorizontal: 10 }}>
+            <Icon name="magnify" size={16} color={C.faint} />
+            <TextInput
+              value={query} onChangeText={setQuery} placeholder="Search by name, status, tonnage, condition…" placeholderTextColor={C.faint}
+              style={{ flex: 1, paddingVertical: 9, paddingHorizontal: 8, fontSize: 14, color: C.text }}
+            />
+            {query.length > 0 && (
+              <Pressable onPress={() => setQuery('')} hitSlop={6}><Icon name="close-circle" size={16} color={C.faint} /></Pressable>
+            )}
+          </Row>
         </View>
       }
       ListFooterComponent={<LoadMore shown={visible.length} total={filtered.length} onMore={() => setPage(p => p + 1)} />}
@@ -303,7 +310,7 @@ export function FleetTab({ onTruckPress, onBuyTruck, onOpenFleetLivery }) {
             action={<Btn title="Buy Truck" icon="plus" small onPress={() => onBuyTruck && onBuyTruck()} />}
           />
         ) : (
-          <EmptyState icon="truck-outline" title="None in this filter" sub="Try a different status filter above." />
+          <EmptyState icon="truck-outline" title="No matches" sub={`No trucks match "${query}".`} />
         )
       }
     />
@@ -767,52 +774,45 @@ export function StaffTab({ onOpenDriver }) {
   const promoteStaff = useGame(s => s.promoteStaff);
   const toast = useToast();
 
-  const [role, setRole] = useState('all');
+  const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
-  useEffect(() => { setPage(1); }, [role]);
+  useEffect(() => { setPage(1); }, [query]);
 
-  const [hireRole, setHireRole] = useState('all');
+  const [hireQuery, setHireQuery] = useState('');
   const [hireSort, setHireSort] = useState('skill');
 
-  // Managers are disabled for now (no gameplay use yet) — their filter chips
-  // and counts are commented out below; restore when managers get a purpose.
+  // Managers are disabled for now (no gameplay use yet).
   const counts = useMemo(() => ({
-    driver: staff.filter(x => x.role === 'driver').length,
-    mechanic: staff.filter(x => x.role === 'mechanic').length,
-    // manager: staff.filter(x => x.role === 'manager').length,
     salary: staff.reduce((a, x) => a + x.salary, 0),
   }), [staff]);
 
-  const roster = role === 'all' ? staff.filter(x => x.role !== 'manager') : staff.filter(x => x.role === role);
+  // Search replaces the old role filter chips — matches name/role/level as
+  // text, and driver level/skill/salary as numbers (numeric fallback range
+  // means "45" with nothing exactly at 45 skill still shows what's close).
+  const roster = useMemo(() => staff.filter(x => {
+    if (x.role === 'manager') return false;
+    const role = STAFF_ROLES.find(r => r.id === x.role);
+    const level = STAFF_LEVELS.find(l => l.id === x.level);
+    const text = [x.name, role?.name, level?.name, x.role === 'driver' ? `level ${driverLevel(x.xp)}` : ''].filter(Boolean).join(' ').toLowerCase();
+    return smartSearch(query, text, [x.skill, x.salary, x.role === 'driver' ? driverLevel(x.xp) : null]);
+  }), [staff, query]);
   const shown = roster.slice(0, page * STAFF_PAGE);
-  const roleOpts = [
-    { key: 'all', label: 'All', count: staff.filter(x => x.role !== 'manager').length },
-    { key: 'driver', label: 'Drivers', count: counts.driver },
-    { key: 'mechanic', label: 'Mechanics', count: counts.mechanic },
-    // { key: 'manager', label: 'Managers', count: counts.manager },
-  ];
 
-  const candCounts = useMemo(() => ({
-    driver: candidates.filter(x => x.role === 'driver').length,
-    mechanic: candidates.filter(x => x.role === 'mechanic').length,
-    // manager: candidates.filter(x => x.role === 'manager').length,
-  }), [candidates]);
-  const hireRoleOpts = [
-    { key: 'all', label: 'All', count: candidates.filter(x => x.role !== 'manager').length },
-    { key: 'driver', label: 'Drivers', count: candCounts.driver },
-    { key: 'mechanic', label: 'Mechanics', count: candCounts.mechanic },
-    // { key: 'manager', label: 'Managers', count: candCounts.manager },
-  ];
   const filteredCandidates = useMemo(() => {
     // managers filtered out while the role is disabled
-    const pool = candidates.filter(x => x.role !== 'manager');
-    const arr = hireRole === 'all' ? [...pool] : pool.filter(x => x.role === hireRole);
+    const arr = candidates.filter(x => {
+      if (x.role === 'manager') return false;
+      const role = STAFF_ROLES.find(r => r.id === x.role);
+      const level = STAFF_LEVELS.find(l => l.id === x.level);
+      const text = [x.name, role?.name, level?.name].filter(Boolean).join(' ').toLowerCase();
+      return smartSearch(hireQuery, text, [x.skill, x.salary, x.bonus]);
+    });
     if (hireSort === 'skill') arr.sort((a, b) => b.skill - a.skill);
     else if (hireSort === 'salary-asc') arr.sort((a, b) => a.salary - b.salary);
     else if (hireSort === 'salary-desc') arr.sort((a, b) => b.salary - a.salary);
     else if (hireSort === 'bonus') arr.sort((a, b) => a.bonus - b.bonus);
     return arr;
-  }, [candidates, hireRole, hireSort]);
+  }, [candidates, hireQuery, hireSort]);
 
   // Two screens like Fleet -> Buy Truck: default roster ("My Staff"), and a
   // dedicated Hire screen you switch into with the header button.
@@ -856,12 +856,21 @@ export function StaffTab({ onOpenDriver }) {
           </Row>
           <Btn title="Hire Staff" icon="account-plus" kind="blue" small style={{ marginTop: 10 }} onPress={() => setScreen('hire')} />
         </Card>
-        <FilterChips options={roleOpts} value={role} onChange={setRole} />
+        <Row style={{ marginBottom: 10, borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.md, paddingHorizontal: 10 }}>
+          <Icon name="magnify" size={16} color={C.faint} />
+          <TextInput
+            value={query} onChangeText={setQuery} placeholder="Search by name, role, level, skill…" placeholderTextColor={C.faint}
+            style={{ flex: 1, paddingVertical: 9, paddingHorizontal: 8, fontSize: 14, color: C.text }}
+          />
+          {query.length > 0 && (
+            <Pressable onPress={() => setQuery('')} hitSlop={6}><Icon name="close-circle" size={16} color={C.faint} /></Pressable>
+          )}
+        </Row>
         {staff.length === 0 ? (
           <EmptyState icon="account-group-outline" title="No staff yet" sub="Hire drivers and mechanics to grow your team."
             action={<Btn title="Hire Staff" icon="account-plus" small onPress={() => setScreen('hire')} />} />
         ) : roster.length === 0 ? (
-          <EmptyState icon="account-search-outline" title="None in this role" sub="Switch the filter or hire more staff." />
+          <EmptyState icon="account-search-outline" title="No matches" sub={`No staff match "${query}".`} />
         ) : (
           <>
             {shown.map(m => (
@@ -896,7 +905,16 @@ export function StaffTab({ onOpenDriver }) {
         </Row>
         <IconBtn name="refresh" onPress={() => { refreshCandidates(); toast && toast('New candidates available', 'info'); }} />
       </Row>
-      <FilterChips options={hireRoleOpts} value={hireRole} onChange={setHireRole} />
+      <Row style={{ marginBottom: 10, borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.md, paddingHorizontal: 10 }}>
+        <Icon name="magnify" size={16} color={C.faint} />
+        <TextInput
+          value={hireQuery} onChangeText={setHireQuery} placeholder="Search by name, role, level, skill, salary…" placeholderTextColor={C.faint}
+          style={{ flex: 1, paddingVertical: 9, paddingHorizontal: 8, fontSize: 14, color: C.text }}
+        />
+        {hireQuery.length > 0 && (
+          <Pressable onPress={() => setHireQuery('')} hitSlop={6}><Icon name="close-circle" size={16} color={C.faint} /></Pressable>
+        )}
+      </Row>
       <FilterChips
         options={[
           { key: 'skill', label: 'Sort: Skill' },
@@ -907,7 +925,7 @@ export function StaffTab({ onOpenDriver }) {
         value={hireSort} onChange={setHireSort}
       />
       {candidates.length > 0 && filteredCandidates.length === 0 ? (
-        <EmptyState icon="account-search-outline" title="None in this role" sub="Switch the filter to see other candidates." />
+        <EmptyState icon="account-search-outline" title="No matches" sub={`No candidates match "${hireQuery}".`} />
       ) : filteredCandidates.map(c => {
         const role = STAFF_ROLES.find(r => r.id === c.role);
         const level = STAFF_LEVELS.find(l => l.id === c.level);
