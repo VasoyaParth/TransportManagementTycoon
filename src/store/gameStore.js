@@ -544,9 +544,9 @@ export const companyXpForLevel = l => l * l * 1000;
 export const companyTitleOf = l => COMPANY_TITLES[Math.min(l, COMPANY_TITLES.length - 1)];
 
 // ---------- Weekly challenges ----------
-// 3 challenges per real ISO week, deterministic from the week id. Progress is
+// 5 challenges per real ISO week, deterministic from the week id. Progress is
 // measured against a stats snapshot taken when the week starts, each claim
-// pays gold + cash, and clearing all three pays a big jackpot on top.
+// pays gold + cash, and clearing all of them pays a big jackpot on top.
 const WEEKLY_POOL = [
   { key: 'deliveries', icon: 'package-variant-closed-check', label: n => `Complete ${n} deliveries`, targets: [8, 15, 25], gold: 20, cash: 500000 },
   { key: 'km', icon: 'highway', label: n => `Drive ${n.toLocaleString('en-IN')} km`, targets: [3000, 6000, 12000], gold: 20, cash: 500000 },
@@ -554,8 +554,11 @@ const WEEKLY_POOL = [
   { key: 'borders', icon: 'passport', label: n => `Cross ${n} border${n > 1 ? 's' : ''}`, targets: [1, 3, 6], gold: 30, cash: 800000 },
   { key: 'gamesPlayed', icon: 'dice-multiple', label: n => `Play ${n} mini-games`, targets: [10, 20, 30], gold: 15, cash: 300000 },
   { key: 'revenue', icon: 'cash-multiple', label: n => `Earn ${inr(n)} revenue`, targets: [2000000, 5000000, 12000000], gold: 25, cash: 700000 },
+  { key: 'campaigns', icon: 'bullhorn-variant', label: n => `Launch ${n} marketing campaign${n > 1 ? 's' : ''}`, targets: [1, 2, 4], gold: 18, cash: 400000 },
+  { key: 'promotions', icon: 'account-arrow-up', label: n => `Promote ${n} staff member${n > 1 ? 's' : ''}`, targets: [1, 2, 3], gold: 18, cash: 400000 },
 ];
 export const WEEKLY_JACKPOT = { gold: 100, cash: 2500000 };
+export const WEEKLY_CHALLENGE_COUNT = 5;
 function isoWeekId(d = new Date()) {
   const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
   const dayNum = (t.getUTCDay() + 6) % 7;
@@ -564,21 +567,46 @@ function isoWeekId(d = new Date()) {
   const week = 1 + Math.round(((t - firstThu) / 86400000 - 3 + ((firstThu.getUTCDay() + 6) % 7)) / 7);
   return `${t.getUTCFullYear()}-W${week}`;
 }
-export function buildWeekly(weekId, stats) {
-  let h = 0; for (let i = 0; i < weekId.length; i++) h = (h * 31 + weekId.charCodeAt(i)) >>> 0;
+function pickChallenges(seedId, pool, count, statKeys, stats) {
+  let h = 0; for (let i = 0; i < seedId.length; i++) h = (h * 31 + seedId.charCodeAt(i)) >>> 0;
   const picks = []; const used = new Set();
-  for (let i = 0; picks.length < 3 && i < 18; i++) {
+  for (let i = 0; picks.length < count && i < pool.length * 3; i++) {
     // Unsigned shifts only — a signed >> on a large hash goes negative and a
     // negative index here crashed the game on open (v2.4.0 hotfix).
-    const idx = (((h >>> (i * 2)) + i * 7) >>> 0) % WEEKLY_POOL.length;
+    const idx = (((h >>> (i * 2)) + i * 7) >>> 0) % pool.length;
     if (used.has(idx)) continue; used.add(idx);
-    const p = WEEKLY_POOL[idx];
+    const p = pool[idx];
     const target = p.targets[(h >>> (i + 5)) % 3];
     picks.push({ key: p.key, icon: p.icon, label: p.label(target), target, gold: p.gold, cash: p.cash });
   }
   const snap = {};
-  ['deliveries', 'km', 'contracts', 'borders', 'gamesPlayed', 'revenue'].forEach(k => { snap[k] = Math.floor(stats[k] || 0); });
-  return { id: weekId, challenges: picks, snapshot: snap, claimed: [], jackpotPaid: false };
+  statKeys.forEach(k => { snap[k] = Math.floor(stats[k] || 0); });
+  return { challenges: picks, snapshot: snap };
+}
+const WEEKLY_STAT_KEYS = ['deliveries', 'km', 'contracts', 'borders', 'gamesPlayed', 'revenue', 'campaigns', 'promotions'];
+export function buildWeekly(weekId, stats) {
+  const { challenges, snapshot } = pickChallenges(weekId, WEEKLY_POOL, WEEKLY_CHALLENGE_COUNT, WEEKLY_STAT_KEYS, stats);
+  return { id: weekId, challenges, snapshot, claimed: [], jackpotPaid: false };
+}
+
+// ---------- Daily challenges ----------
+// 3 lighter-weight challenges that reset every real calendar day — same
+// mechanics as weekly (snapshot progress, per-task claim, sweep jackpot),
+// smaller targets and payouts since they're meant to clear same-day.
+const DAILY_POOL = [
+  { key: 'deliveries', icon: 'package-variant-closed-check', label: n => `Complete ${n} deliver${n > 1 ? 'ies' : 'y'}`, targets: [2, 3, 5], gold: 5, cash: 100000 },
+  { key: 'km', icon: 'highway', label: n => `Drive ${n.toLocaleString('en-IN')} km`, targets: [500, 1000, 2000], gold: 5, cash: 100000 },
+  { key: 'contracts', icon: 'file-sign', label: n => `Finish ${n} contract${n > 1 ? 's' : ''}`, targets: [1, 2, 3], gold: 6, cash: 120000 },
+  { key: 'gamesPlayed', icon: 'dice-multiple', label: n => `Play ${n} mini-game${n > 1 ? 's' : ''}`, targets: [3, 5, 8], gold: 4, cash: 80000 },
+  { key: 'revenue', icon: 'cash-multiple', label: n => `Earn ${inr(n)} revenue`, targets: [300000, 700000, 1500000], gold: 6, cash: 150000 },
+];
+export const DAILY_JACKPOT = { gold: 20, cash: 400000 };
+export const DAILY_CHALLENGE_COUNT = 3;
+const DAILY_STAT_KEYS = ['deliveries', 'km', 'contracts', 'gamesPlayed', 'revenue'];
+function dailyDateId(d = new Date()) { return d.toDateString(); }
+export function buildDaily(dayId, stats) {
+  const { challenges, snapshot } = pickChallenges(dayId, DAILY_POOL, DAILY_CHALLENGE_COUNT, DAILY_STAT_KEYS, stats);
+  return { id: dayId, challenges, snapshot, claimed: [], jackpotPaid: false };
 }
 
 // ---------- 30-day login streak calendar (v3.0.0) ----------
@@ -835,6 +863,7 @@ const initialState = {
   lastWeatherEvolveAt: 0, // real ms of the last gentle weather-evolution step
   lastCompanyLevel: 0, // last company level a reward was paid for
   weekly: null, // this week's challenges {id, challenges, snapshot, claimed, jackpotPaid}
+  daily: null, // today's challenges {id, challenges, snapshot, claimed, jackpotPaid}
   updateGiftVersion: '', // last update-welcome-gift version already granted
   clockStart: 0, // real ms when day 1 hour 0 began
   lastSalaryDay: 0,
@@ -849,6 +878,7 @@ const initialState = {
     difficulty: 'normal', events: 'rare', tutorialSeen: false,
     musicVolume: 0.4, sfxVolume: 1, hapticIntensity: 'medium',
     finaleSeen: false, finaleModalShown: false, // Grand Finale gift + celebration screen, each one-time-ever
+    stockRemovalGiftClaimed: false, // one-time thank-you gift for the Stock Market's removal
     notif: { delivery: true, truck: true, fuel: true, daily: true },
   },
   easterEggs: { found: [] }, // ids of discovered hidden gems (persisted, one-time rewards)
@@ -1163,8 +1193,13 @@ export const useGame = create(
         // repossesses the cheapest pledged asset still standing.
         for (const ln of get().loans || []) {
           const sinceLast = day - (ln.lastEmiDay || 0);
-          if (sinceLast === LOAN_EMI_INTERVAL_DAYS - 1) {
+          // Fire the "due tomorrow" reminder once — this block used to re-run
+          // every 1s tick for the whole in-game day the condition stayed
+          // true, spamming dozens of identical notifications/toasts. Stamping
+          // remindedDay on the loan makes it a one-shot per due cycle.
+          if (sinceLast === LOAN_EMI_INTERVAL_DAYS - 1 && ln.remindedDay !== day) {
             get().notify('system', 'bank-clock', `EMI on ${ln.name} due tomorrow — ${inr(Math.min(ln.emi, ln.remaining))}.`);
+            set({ loans: get().loans.map(x => x.id === ln.id ? { ...x, remindedDay: day } : x) });
           }
           if (sinceLast < LOAN_EMI_INTERVAL_DAYS) continue;
           const cur = get();
@@ -1242,6 +1277,14 @@ export const useGame = create(
           if (!s.weekly || s.weekly.id !== wid) {
             set({ weekly: buildWeekly(wid, get().stats) });
             if (s.weekly) get().notify('system', 'calendar-week', 'New weekly challenges are live — big bonus for a clean sweep!');
+          }
+        }
+        // Daily challenges: roll a fresh set when the real calendar day changes.
+        {
+          const did = dailyDateId();
+          if (!s.daily || s.daily.id !== did) {
+            set({ daily: buildDaily(did, get().stats) });
+            if (s.daily) get().notify('system', 'calendar-today', 'New daily challenges are live!');
           }
         }
         // fresh contracts each day + flavor event
@@ -2520,6 +2563,60 @@ export const useGame = create(
         }
         play('coin', 1);
         return { ok: true, sweep };
+      },
+      dailyProgress() {
+        const s = get();
+        const d = s.daily;
+        if (!d) return [];
+        return d.challenges.map(ch => ({
+          ...ch,
+          progress: Math.max(0, get()._liveStat(ch.key) - (d.snapshot[ch.key] || 0)),
+          claimed: d.claimed.includes(ch.key),
+        }));
+      },
+      claimDaily(key) {
+        const s = get();
+        const d = s.daily;
+        if (!d) return { ok: false, err: 'No daily challenges yet' };
+        const ch = d.challenges.find(x => x.key === key);
+        if (!ch) return { ok: false, err: 'Unknown challenge' };
+        if (d.claimed.includes(key)) return { ok: false, err: 'Already claimed' };
+        const progress = get()._liveStat(key) - (d.snapshot[key] || 0);
+        if (progress < ch.target) return { ok: false, err: 'Not complete yet' };
+        const claimed = [...d.claimed, key];
+        const sweep = claimed.length === d.challenges.length && !d.jackpotPaid;
+        set({
+          gold: s.gold + ch.gold + (sweep ? DAILY_JACKPOT.gold : 0),
+          balance: s.balance + ch.cash + (sweep ? DAILY_JACKPOT.cash : 0),
+          daily: { ...d, claimed, jackpotPaid: d.jackpotPaid || sweep },
+        });
+        get().logLedger('bonus', 'calendar-today', `Daily challenge — ${ch.label}`, ch.cash);
+        if (sweep) {
+          get().logLedger('bonus', 'trophy-award', 'DAILY SWEEP — all challenges done!', DAILY_JACKPOT.cash);
+          get().notify('system', 'trophy-award', `DAILY SWEEP! All today's challenges done: bonus +${DAILY_JACKPOT.gold} Gold + ${inr(DAILY_JACKPOT.cash)}!`);
+        } else {
+          get().notify('system', 'calendar-today', `Daily challenge complete: +${ch.gold} Gold + ${inr(ch.cash)}.`);
+        }
+        play('coin', 1);
+        return { ok: true, sweep };
+      },
+
+      // One-time thank-you gift for removing the Stock Market feature —
+      // claimed manually from the Rewards tab, not auto-granted, so the
+      // player sees exactly why they got it.
+      claimStockRemovalGift() {
+        const s = get();
+        if (s.settings?.stockRemovalGiftClaimed) return { ok: false, err: 'Already claimed' };
+        const cashGift = 20000000, goldGift = 123;
+        set({
+          gold: s.gold + goldGift,
+          balance: s.balance + cashGift,
+          settings: { ...s.settings, stockRemovalGiftClaimed: true },
+        });
+        get().logLedger('bonus', 'gift', 'Stock Market removal — thank-you gift', cashGift);
+        get().notify('system', 'gift', `Thanks for bearing with us — the Stock Market has been removed. +${inr(cashGift)} + ${goldGift} Gold credited!`);
+        play('coin', 1);
+        return { ok: true };
       },
 
       // ---------- gold exchange ----------

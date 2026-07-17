@@ -12,7 +12,8 @@ import {
   ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, EASTER_EGGS,
   LOAN_PRODUCTS, creditScoreOf, DRIVER_PERKS, driverLevel, driverXpForLevel,
   CUSTOM_LOAN_MIN, customLoanMax, customLoanTerms,
-  companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, WEEKLY_JACKPOT,
+  companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, WEEKLY_JACKPOT, WEEKLY_CHALLENGE_COUNT,
+  DAILY_JACKPOT, DAILY_CHALLENGE_COUNT,
   STREAK_REWARDS, streakRewardFor,
   pledgedTruckIds, pledgedHubCityIds, collateralTotalValue, COLLATERAL_COVERAGE, MISSED_STREAK_FOR_REPO,
   LOAN_EMI_INTERVAL_DAYS,
@@ -1910,15 +1911,22 @@ export function RewardsTab({ onOpenGames }) {
   const weeklyProgress = useGame(s => s.weeklyProgress);
   const claimWeekly = useGame(s => s.claimWeekly);
   const weekly = useGame(s => s.weekly);
+  const dailyProgress = useGame(s => s.dailyProgress);
+  const claimDaily = useGame(s => s.claimDaily);
+  const daily = useGame(s => s.daily);
+  const claimStockRemovalGift = useGame(s => s.claimStockRemovalGift);
+  const giftClaimed = useGame(s => s.settings?.stockRemovalGiftClaimed);
   const toast = useToast();
   const xp = companyXP(state);
   const level = companyLevelOf(xp);
   const nextXp = companyXpForLevel(level + 1);
   const curXp = companyXpForLevel(level);
   const deliveriesActive = useGame(s => s.deliveries.length);
-  useNow(deliveriesActive > 0); // 1s re-render: weekly km/₹ tick LIVE while trucks drive
+  useNow(deliveriesActive > 0); // 1s re-render: weekly/daily km/₹ tick LIVE while trucks drive
   const weeklyList = weeklyProgress();
+  const dailyList = dailyProgress();
   const sweepDone = weekly && weekly.claimed.length === (weekly.challenges || []).length && weekly.challenges.length > 0;
+  const dailySweepDone = daily && daily.claimed.length === (daily.challenges || []).length && daily.challenges.length > 0;
 
   const streak = login.streak || 0;
   const todayReward = streakRewardFor(Math.max(streak, 1));
@@ -1931,6 +1939,25 @@ export function RewardsTab({ onOpenGames }) {
 
   return (
     <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
+      {/* ---- Stock Market removal thank-you gift (one-time claim) ---- */}
+      {!giftClaimed && (
+        <Card style={{ marginBottom: 12, backgroundColor: '#111827', borderColor: '#1F2937' }}>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <Row style={{ flex: 1 }}>
+              <View style={{ width: 46, height: 46, borderRadius: 23, backgroundColor: '#3B2F0B', alignItems: 'center', justifyContent: 'center' }}>
+                <Icon name="gift" size={24} color="#F4D35E" />
+              </View>
+              <View style={{ marginLeft: 10, flex: 1 }}>
+                <Text style={[FONT.h3, { color: '#F8FAFC' }]}>A thank-you for your patience</Text>
+                <Text style={[FONT.tiny, { color: '#94A3B8', marginTop: 2 }]}>The Stock Market's gone — here's ₹2 Crore + 123 Gold on us.</Text>
+              </View>
+            </Row>
+          </Row>
+          <Btn title="Claim ₹2,00,00,000 + 123 Gold" kind="green" icon="gift" style={{ marginTop: 12 }}
+            onPress={() => { const r = claimStockRemovalGift(); toast(r.ok ? 'Gift claimed!' : r.err, r.ok ? 'success' : 'error'); }} />
+        </Card>
+      )}
+
       {/* ---- Daily streak hero ---- */}
       <Card style={{ marginBottom: 12, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
         <Row style={{ justifyContent: 'space-between' }}>
@@ -1997,6 +2024,41 @@ export function RewardsTab({ onOpenGames }) {
         <Text style={[FONT.tiny, { marginTop: 6 }]}>Everything earns XP — revenue, deliveries, km, garages, trucks. Each level pays a one-time gold reward.</Text>
       </Card>
 
+      {/* ---- Daily challenges ---- */}
+      <SectionTitle icon="calendar-today" text={`Daily Challenges${daily ? ` — ${daily.claimed.length}/${daily.challenges.length}` : ''}`}
+        right={dailySweepDone ? <Pill text="SWEPT!" icon="trophy-award" color={C.gold} bg={C.amberSoft} /> : null} />
+      <Card style={{ marginBottom: 12 }}>
+        {dailyList.length === 0 ? (
+          <Text style={FONT.sub}>Today's challenges unlock on your next delivery day.</Text>
+        ) : dailyList.map((ch, i) => {
+          const done = ch.progress >= ch.target;
+          return (
+            <View key={ch.key} style={[{ paddingVertical: 10 }, i > 0 && st.divider]}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Row style={{ flex: 1, marginRight: 8 }}>
+                  <Icon name={ch.icon} size={18} color={ch.claimed ? C.green : done ? C.gold : C.sub} />
+                  <View style={{ marginLeft: 8, flex: 1 }}>
+                    <Text style={[FONT.body, { fontWeight: '700' }]} numberOfLines={1}>{ch.label}</Text>
+                    <Text style={FONT.tiny}>{Math.min(ch.progress, ch.target).toLocaleString('en-IN')} / {ch.target.toLocaleString('en-IN')} · pays +{ch.gold}G + {inrShort(ch.cash)}</Text>
+                  </View>
+                </Row>
+                {ch.claimed
+                  ? <Pill text="Claimed" icon="check-circle" color={C.green} bg={C.greenSoft} />
+                  : <Btn title={done ? 'Claim!' : '—'} kind={done ? 'green' : 'soft'} small disabled={!done}
+                      onPress={() => { const r = claimDaily(ch.key); toast(r.ok ? (r.sweep ? 'DAILY SWEEP! Bonus paid!' : 'Reward claimed!') : r.err, r.ok ? 'success' : 'error'); }} />}
+              </Row>
+              <Progress pct={Math.min(100, (ch.progress / ch.target) * 100)} color={ch.claimed ? C.green : C.blue} style={{ marginTop: 8 }} height={4} />
+            </View>
+          );
+        })}
+        <Row style={{ marginTop: 8, backgroundColor: C.amberSoft, borderRadius: RADIUS.md, padding: 10 }}>
+          <Icon name="trophy-award" size={16} color={C.gold} />
+          <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.text }]}>
+            Resets every calendar day. Clean sweep bonus: finish all {daily?.challenges?.length || DAILY_CHALLENGE_COUNT} today for an extra +{DAILY_JACKPOT.gold} Gold + {inrShort(DAILY_JACKPOT.cash)}!
+          </Text>
+        </Row>
+      </Card>
+
       {/* ---- Weekly challenges ---- */}
       <SectionTitle icon="calendar-week" text={`Weekly Challenges${weekly ? ` — ${weekly.claimed.length}/${weekly.challenges.length}` : ''}`}
         right={sweepDone ? <Pill text="SWEPT!" icon="trophy-award" color={C.gold} bg={C.amberSoft} /> : null} />
@@ -2027,7 +2089,7 @@ export function RewardsTab({ onOpenGames }) {
         <Row style={{ marginTop: 8, backgroundColor: C.amberSoft, borderRadius: RADIUS.md, padding: 10 }}>
           <Icon name="trophy-award" size={16} color={C.gold} />
           <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.text }]}>
-            Counts LIVE across the whole fleet — km and ₹ tick up while trucks are still driving. Clean sweep bonus: finish all 3 this week for an extra +{WEEKLY_JACKPOT.gold} Gold + {inrShort(WEEKLY_JACKPOT.cash)}!
+            Counts LIVE across the whole fleet — km and ₹ tick up while trucks are still driving. Clean sweep bonus: finish all {weekly?.challenges?.length || WEEKLY_CHALLENGE_COUNT} this week for an extra +{WEEKLY_JACKPOT.gold} Gold + {inrShort(WEEKLY_JACKPOT.cash)}!
           </Text>
         </Row>
       </Card>
