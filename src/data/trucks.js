@@ -401,6 +401,55 @@ export const TRUCK_MODELS = [
     desc: 'B-double monster — two full trailers behind 750 imported horses.',
     speed: 85, cargo: 42, tank: 600, eff: 2.6, range: 1560, maint: 14, price: 16500000, build: 3800,
   },
+  // ---- v10.14.0 showroom additions ----
+  {
+    id: 'tata-ace-compact', name: 'Tatrax Nova Compact', brand: 'Tatrax',
+    tier: 1, propulsion: 'diesel', rating: 3.9, icon: 'truck-delivery', shape: 'mini',
+    desc: 'Rock-bottom entry mini truck for a player’s very first delivery run.',
+    speed: 55, cargo: 0.75, tank: 25, eff: 17, range: 420, maint: 3, price: 380000, build: 200,
+  },
+  {
+    id: 'al-dost-ev', name: 'Veerraj Motors Buddy EV', brand: 'Veerraj Motors',
+    tier: 1, propulsion: 'electric', rating: 4.3, icon: 'lightning-bolt-circle', shape: 'mini',
+    desc: 'Silent electric mini truck — cheapest way into a zero-emission fleet.',
+    speed: 58, cargo: 1, battery: 24, range: 165, maint: 3, price: 950000, build: 320,
+  },
+  {
+    id: 'bharatbenz-1417x', name: 'BharatDrive 1417 Xtra', brand: 'BharatDrive',
+    tier: 2, propulsion: 'diesel', rating: 4.4, icon: 'truck-cargo-container', shape: 'rigid',
+    desc: 'Extra-payload rigid built for distributors who hate empty runs.',
+    speed: 80, cargo: 11, tank: 200, eff: 5.5, range: 1100, maint: 7, price: 3000000, build: 950,
+  },
+  {
+    id: 'eicher-pro-hybrid16', name: 'Rathee Edge Hybrid 1618', brand: 'Rathee Motors',
+    tier: 2, propulsion: 'hybrid', rating: 4.6, icon: 'leaf-circle-outline', shape: 'rigid',
+    desc: 'Diesel-electric mid-hauler that quietly slashes the fuel bill.',
+    speed: 82, cargo: 10, tank: 130, eff: 8.5, range: 1250, maint: 5, price: 3600000, build: 1000,
+  },
+  {
+    id: 'al-switch-16e', name: 'Voltra Volt 16E', brand: 'Voltra',
+    tier: 2, propulsion: 'electric', rating: 4.6, icon: 'lightning-bolt-circle', shape: 'box',
+    desc: 'Mid-tier electric box truck for clean, quiet regional distribution.',
+    speed: 78, cargo: 9, battery: 260, range: 280, maint: 3, price: 5200000, build: 1300,
+  },
+  {
+    id: 'scania-s650', name: 'Scanix S650', brand: 'Scanix',
+    tier: 3, propulsion: 'diesel', rating: 4.9, icon: 'truck-trailer', shape: 'semi',
+    desc: 'Flagship highway tractor — more horses and a plusher sleeper cab than the S500.',
+    speed: 96, cargo: 32, tank: 470, eff: 3.1, range: 1500, maint: 12, price: 13800000, build: 3300,
+  },
+  {
+    id: 'rathee-frontier-8850', name: 'Rathee Frontier 8850', brand: 'Rathee Motors',
+    tier: 3, propulsion: 'diesel', rating: 4.7, icon: 'truck-trailer', shape: 'conventional',
+    desc: 'Long-nose American-style hauler bred for cross-border mining corridors.',
+    speed: 84, cargo: 27, tank: 380, eff: 3.5, range: 1330, maint: 10, price: 6900000, build: 2100,
+  },
+  {
+    id: 'volvo-vh20-maxtrain', name: 'Voltra VH20 MaxTrain', brand: 'Voltra',
+    tier: 3, propulsion: 'diesel', rating: 5.0, icon: 'truck-trailer', shape: 'doubletrailer',
+    desc: 'The ultimate B-double — bigger engine, bigger tanks, bigger everything.',
+    speed: 87, cargo: 46, tank: 650, eff: 2.4, range: 1600, maint: 15, price: 18500000, build: 4200,
+  },
 ];
 
 // Truck livery colours for customization (id + hex + display name).
@@ -420,6 +469,27 @@ export const TRUCK_COLORS = [
 // Livery emblem choices for trucks (MaterialCommunityIcons).
 export const TRUCK_LOGOS = ['shield-star', 'crown', 'lightning-bolt', 'pine-tree', 'anchor',
   'diamond-stone', 'fire', 'leaf', 'star-circle', 'wave', 'mountain', 'flash'];
+
+// Vinyl/decal pattern painted over the body colour — a second customization
+// axis on top of flat colour (see truckArt.js's addPattern for the geometry).
+export const TRUCK_PATTERNS = [
+  { id: 'none', name: 'Solid', icon: 'square-rounded' },
+  { id: 'stripe', name: 'Racing Stripe', icon: 'road-variant' },
+  { id: 'dualstripe', name: 'Dual Stripe', icon: 'view-week' },
+  { id: 'flames', name: 'Flames', icon: 'fire' },
+  { id: 'camo', name: 'Camo', icon: 'pine-tree' },
+  { id: 'checker', name: 'Checkerboard', icon: 'checkerboard' },
+];
+
+// Cosmetic bolt-on mounted near the cab — purely visual, same free-preview/
+// paid-apply flow as colour and pattern (see truckArt.js's addBooster).
+export const TRUCK_BOOSTERS = [
+  { id: 'none', name: 'None', icon: 'close-circle-outline' },
+  { id: 'lightbar', name: 'Roof Light Bar', icon: 'lightbulb-on' },
+  { id: 'spoiler', name: 'Spoiler Kit', icon: 'align-horizontal-center' },
+  { id: 'stacks', name: 'Chrome Stacks', icon: 'weather-windy' },
+  { id: 'bullbar', name: 'Bull Bar', icon: 'shield-outline' },
+];
 
 // Trim/accent colour — the roof deflector, mirrors and windshield-adjacent
 // panels on the truck art. Separate axis from the body colour so two players

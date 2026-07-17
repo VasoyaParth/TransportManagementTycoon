@@ -327,7 +327,7 @@ export default function Onboarding({ onDone }) {
                 </Text>
               </Row>
             </Card>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingRight: 8 }}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ paddingRight: 8 }}>
               {STARTER_TRUCKS.map(m => {
                 const sel = truckId === m.id;
                 return (

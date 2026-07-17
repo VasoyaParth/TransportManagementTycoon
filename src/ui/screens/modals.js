@@ -7,13 +7,13 @@ import RNShare from 'react-native-share';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, CONVOY_SYMBOLS, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
 import { CITIES } from '../../data/cities';
 import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
-import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, TRUCK_COLORS, TRUCK_ACCENTS, TRUCK_LOGOS, CAMPAIGNS } from '../../data/trucks';
+import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, TRUCK_COLORS, TRUCK_ACCENTS, TRUCK_LOGOS, TRUCK_PATTERNS, TRUCK_BOOSTERS, CAMPAIGNS } from '../../data/trucks';
 import { HQ_TIERS, GARAGE_TIERS } from '../../data/buildings';
 import { inr, inrShort } from '../../engine/economy';
 import { APP_VERSION, checkForUpdate, fmtMB, cmpVer } from '../../net/updates';
@@ -28,18 +28,18 @@ import { BrandEmblem } from '../BrandLogo';
 // badge overlaid in the corner — both purely cosmetic, set via the Livery
 // modal, and rendered here so every place this badge appears (fleet list,
 // truck detail, livery preview) reflects a repaint instantly.
-function TruckArtBadge({ model, color, accent, logoIcon, size = 56, bg }) {
+function TruckArtBadge({ model, color, accent, logoIcon, pattern, booster, size = 56, bg }) {
   const bt = bodyTypeFor(model);
   const body = color || defaultBodyColor(model);
   const trim = accent || '#9DB2D6';
-  const { w, h } = truckShapes(bt, body, trim);
+  const { w, h } = truckShapes(bt, body, trim, { pattern, booster });
   const scale = (size - 8) / h;
   const badge = Math.max(16, Math.round(size * 0.28));
   return (
     <View style={{ width: size, height: size, borderRadius: 14, backgroundColor: bg || C.bgSoft,
       alignItems: 'center', justifyContent: 'center' }}>
       <Svg width={w * scale} height={size - 8} viewBox={`0 0 ${w} ${h}`}>
-        <TruckTopShapes type={bt} body={body} accent={trim} />
+        <TruckTopShapes type={bt} body={body} accent={trim} pattern={pattern} booster={booster} />
       </Svg>
       {logoIcon ? (
         <View style={{
@@ -58,11 +58,15 @@ function TruckArtBadge({ model, color, accent, logoIcon, size = 56, bg }) {
 // see TruckArtBadge above for the identical pattern applied to trucks.
 function BuildingArtBadge({ kind, color, tier, size = 56, bg }) {
   const { w, h } = buildingShapes(kind, color, tier);
-  const scale = (size - 8) / h;
+  // Fit BOTH dimensions inside the badge (garages grow wider with more bays
+  // while height stays fixed, so a height-only scale used to blow the art
+  // out past the rounded box on wide garages) — scale by the tighter axis.
+  const avail = size - 8;
+  const scale = Math.min(avail / w, avail / h);
   return (
     <View style={{ width: size, height: size, borderRadius: 14, backgroundColor: bg || C.bgSoft,
-      alignItems: 'center', justifyContent: 'center' }}>
-      <Svg width={w * scale} height={size - 8} viewBox={`0 0 ${w} ${h}`}>
+      alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+      <Svg width={w * scale} height={h * scale} viewBox={`0 0 ${w} ${h}`}>
         <BuildingTopShapes kind={kind} color={color} tier={tier} />
       </Svg>
     </View>
@@ -484,7 +488,7 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
           <>
             {/* Truck picker */}
             <Text style={cs.section}>Choose truck</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ paddingRight: 8 }}>
               {parked.map(t => {
                 const m = modelById(t.modelId);
                 const sel = t.id === truckId;
@@ -943,7 +947,7 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
       <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" removeClippedSubviews={false}>
         <Row style={{ marginBottom: 12 }}>
           <Pressable onPress={() => onCustomize && onCustomize(truck.id)}>
-            <TruckArtBadge model={m} color={truck.color} accent={truck.accentColor} logoIcon={truck.logoIcon} size={60} bg={meta.bg} />
+            <TruckArtBadge model={m} color={truck.color} accent={truck.accentColor} logoIcon={truck.logoIcon} pattern={truck.pattern} booster={truck.booster} size={60} bg={meta.bg} />
           </Pressable>
           <View style={{ marginLeft: 12, flex: 1 }}>
             <Text style={FONT.h2}>{truck.customName || m.name}</Text>
@@ -1009,7 +1013,7 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
         <Card style={{ marginTop: 10 }} onPress={() => onCustomize && onCustomize(truck.id)}>
           <Row style={{ justifyContent: 'space-between' }}>
             <Row style={{ flex: 1 }}>
-              <TruckArtBadge model={m} color={truck.color} accent={truck.accentColor} logoIcon={truck.logoIcon} size={44} bg={C.bgSoft} />
+              <TruckArtBadge model={m} color={truck.color} accent={truck.accentColor} logoIcon={truck.logoIcon} pattern={truck.pattern} booster={truck.booster} size={44} bg={C.bgSoft} />
               <View style={{ marginLeft: 10, flex: 1 }}>
                 <Text style={[FONT.h3]}>Customize Truck</Text>
                 <Text style={FONT.tiny}>Name, paint job & emblem — {LIVERY_COST} Gold per repaint</Text>
@@ -1056,20 +1060,26 @@ export function TruckCustomizeModal({ visible, onClose, truckId, onBack }) {
   const [draft, setDraft] = useState(null);
 
   useEffect(() => {
-    if (visible && truck) setDraft({ color: truck.color || null, accentColor: truck.accentColor || null, logoIcon: truck.logoIcon || null });
+    if (visible && truck) setDraft({
+      color: truck.color || null, accentColor: truck.accentColor || null, logoIcon: truck.logoIcon || null,
+      pattern: truck.pattern || 'none', booster: truck.booster || 'none',
+    });
   }, [visible, truckId]);
 
   if (!visible || !truck || !draft) return <Sheet visible={visible && !!truck} onClose={onClose} title="Customize Truck" height="50%"><View /></Sheet>;
   const m = modelById(truck.modelId);
   const accentNow = draft.accentColor || '#9DB2D6';
-  const dirty = draft.color !== (truck.color || null) || draft.accentColor !== (truck.accentColor || null) || draft.logoIcon !== (truck.logoIcon || null);
+  const dirty = draft.color !== (truck.color || null) || draft.accentColor !== (truck.accentColor || null) || draft.logoIcon !== (truck.logoIcon || null)
+    || draft.pattern !== (truck.pattern || 'none') || draft.booster !== (truck.booster || 'none');
 
   const randomize = () => {
     haptic('light'); play('tap', 0.4);
     const c = TRUCK_COLORS[Math.floor(Math.random() * TRUCK_COLORS.length)];
     const a = TRUCK_ACCENTS[Math.floor(Math.random() * TRUCK_ACCENTS.length)];
     const l = Math.random() < 0.8 ? TRUCK_LOGOS[Math.floor(Math.random() * TRUCK_LOGOS.length)] : null;
-    setDraft({ color: c.hex, accentColor: a.hex, logoIcon: l });
+    const p = TRUCK_PATTERNS[Math.floor(Math.random() * TRUCK_PATTERNS.length)].id;
+    const b = TRUCK_BOOSTERS[Math.floor(Math.random() * TRUCK_BOOSTERS.length)].id;
+    setDraft({ color: c.hex, accentColor: a.hex, logoIcon: l, pattern: p, booster: b });
   };
 
   const apply = () => {
@@ -1089,7 +1099,7 @@ export function TruckCustomizeModal({ visible, onClose, truckId, onBack }) {
 
         {/* Live preview — every tap below updates this instantly, for free */}
         <Card style={{ alignItems: 'center', paddingVertical: 20, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
-          <TruckArtBadge model={m} color={draft.color} accent={accentNow} logoIcon={draft.logoIcon} size={140} bg="transparent" />
+          <TruckArtBadge model={m} color={draft.color} accent={accentNow} logoIcon={draft.logoIcon} pattern={draft.pattern} booster={draft.booster} size={140} bg="transparent" />
           <Text style={[FONT.tiny, { color: '#94A3B8', marginTop: 10 }]}>Live preview — free to browse, {LIVERY_COST} Gold to apply</Text>
         </Card>
 
@@ -1138,6 +1148,36 @@ export function TruckCustomizeModal({ visible, onClose, truckId, onBack }) {
                 style={{ width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
                   borderWidth: 1, borderColor: sel ? C.blue : C.border, backgroundColor: sel ? C.blueSoft : '#fff' }}>
                 <Icon name={l} size={20} color={sel ? C.blue : C.sub} />
+              </Pressable>
+            );
+          })}
+        </Row>
+
+        <Text style={[FONT.tiny, { marginTop: 14 }]}>DESIGN PATTERN</Text>
+        <Row style={{ flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+          {TRUCK_PATTERNS.map(p => {
+            const sel = (draft.pattern || 'none') === p.id;
+            return (
+              <Pressable key={p.id} onPress={() => { haptic('light'); play('tap', 0.3); setDraft(d => ({ ...d, pattern: p.id })); }}
+                style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10,
+                  borderWidth: 1, borderColor: sel ? C.blue : C.border, backgroundColor: sel ? C.blueSoft : '#fff' }}>
+                <Icon name={p.icon} size={16} color={sel ? C.blue : C.sub} style={{ marginRight: 6 }} />
+                <Text style={{ fontSize: 12.5, fontWeight: '700', color: sel ? C.blue : C.sub }}>{p.name}</Text>
+              </Pressable>
+            );
+          })}
+        </Row>
+
+        <Text style={[FONT.tiny, { marginTop: 14 }]}>BOOSTER</Text>
+        <Row style={{ flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+          {TRUCK_BOOSTERS.map(b => {
+            const sel = (draft.booster || 'none') === b.id;
+            return (
+              <Pressable key={b.id} onPress={() => { haptic('light'); play('tap', 0.3); setDraft(d => ({ ...d, booster: b.id })); }}
+                style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10,
+                  borderWidth: 1, borderColor: sel ? C.blue : C.border, backgroundColor: sel ? C.blueSoft : '#fff' }}>
+                <Icon name={b.icon} size={16} color={sel ? C.blue : C.sub} style={{ marginRight: 6 }} />
+                <Text style={{ fontSize: 12.5, fontWeight: '700', color: sel ? C.blue : C.sub }}>{b.name}</Text>
               </Pressable>
             );
           })}
@@ -1212,7 +1252,7 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
           <Chip key={t} label={l} active={tier === t} onPress={() => { if (t === 0 && tier === 0) tapWindowShopperEgg(); setTier(t); }} />
         ))}
       </Row>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 10 }} contentContainerStyle={{ paddingRight: 8 }}>
         <Row style={{ gap: 6 }}>
           <Row style={{ marginRight: 2 }}><Icon name="sort" size={14} color={C.sub} /></Row>
           {SORTS.map(([k, l]) => (
@@ -1780,6 +1820,87 @@ function DiceGame({ toast }) {
   );
 }
 
+// Golden Convoy — 9 sealed shipping containers, pick 3. Two-of-a-kind pays
+// that symbol's value, three-of-a-kind pays triple; a miss still pays 1
+// consolation Gold. The board is dealt up front (playConvoy) but kept hidden
+// in local state — each tap flips just that container — and claimConvoy()
+// only runs once 3 picks are in, matching the reveal-then-notify pattern the
+// other games use.
+function ConvoyGame({ toast }) {
+  const playConvoy = useGame(s => s.playConvoy);
+  const claimConvoy = useGame(s => s.claimConvoy);
+  const games = useGame(s => s.games); // re-render on play
+  const gamesToday = useGame(s => s.gamesToday);
+  const left = gamesToday().convoyLeft;
+  const [board, setBoard] = useState(null); // hidden symbol ids, revealed only locally as tapped
+  const [picked, setPicked] = useState([]);
+  const [result, setResult] = useState(null);
+
+  const startRound = () => {
+    const r = playConvoy();
+    if (!r.ok) { toast(r.err, 'warn'); return; }
+    setBoard(r.board); setPicked([]); setResult(null);
+  };
+  const tap = (i) => {
+    if (!board || result || picked.includes(i) || picked.length >= 3) return;
+    haptic('light'); play('tap', 0.3);
+    const next = [...picked, i];
+    setPicked(next);
+    if (next.length === 3) {
+      const r = claimConvoy(next);
+      if (!r.ok) { toast(r.err, 'warn'); return; }
+      setResult(r);
+      haptic(r.reward > 1 ? 'success' : 'light');
+      if (r.reward > 1) play('coin', 0.8);
+      toast(r.matched >= 2 ? `Matched ${r.matched}× ${CONVOY_SYMBOLS.find(x => x.id === r.symbol)?.name}! +${r.reward} Gold` : `No match — +${r.reward} Gold consolation`, r.matched >= 2 ? 'success' : 'info');
+    }
+  };
+
+  return (
+    <View style={{ alignItems: 'center' }}>
+      <Text style={[FONT.sub, { textAlign: 'center', marginBottom: 4 }]}>
+        9 sealed containers just rolled in — pick 3. A pair pays its symbol's value, three-of-a-kind pays triple.
+      </Text>
+      <Text style={[FONT.tiny, { marginBottom: 14 }]}>{left} of {DAILY_PLAYS} free rounds left today</Text>
+      {board ? (
+        <Row style={{ flexWrap: 'wrap', justifyContent: 'center', gap: 8, width: 3 * 58 + 16 }}>
+          {board.map((symId, i) => {
+            const isPicked = picked.includes(i);
+            const sym = CONVOY_SYMBOLS.find(x => x.id === symId);
+            return (
+              <Pressable key={i} onPress={() => tap(i)} disabled={!isPicked && (result || picked.length >= 3)}
+                style={{
+                  width: 58, height: 58, borderRadius: 10, borderWidth: 2,
+                  borderColor: isPicked ? sym.color : C.border, backgroundColor: isPicked ? sym.color + '22' : C.bgSoft,
+                  alignItems: 'center', justifyContent: 'center', opacity: (result && !isPicked) ? 0.45 : 1,
+                }}>
+                <Icon name={isPicked ? sym.icon : 'package-variant-closed'} size={24} color={isPicked ? sym.color : C.faint} />
+              </Pressable>
+            );
+          })}
+        </Row>
+      ) : (
+        <View style={{ alignItems: 'center', paddingVertical: 18 }}>
+          <Icon name="truck-fast-outline" size={42} color={C.faint} />
+          <Text style={[FONT.sub, { marginTop: 8 }]}>Tap below to wave in the convoy.</Text>
+        </View>
+      )}
+      <View style={{ minHeight: 30, alignItems: 'center', marginTop: 12 }}>
+        {result ? (
+          <Text style={[FONT.h3, { color: result.reward > 1 ? C.green : C.sub }]}>
+            {result.matched >= 2 ? `Matched ${result.matched}× — ` : ''}+{result.reward} Gold
+          </Text>
+        ) : board && picked.length < 3 ? (
+          <Text style={FONT.tiny}>{3 - picked.length} more pick{3 - picked.length === 1 ? '' : 's'}…</Text>
+        ) : null}
+      </View>
+      <Btn title={!board ? 'Start round' : result ? 'New convoy' : 'Pick 3 containers above'} kind="green" icon="truck-fast"
+        style={{ marginTop: 8, alignSelf: 'stretch' }} disabled={(board && !result) || left <= 0} onPress={startRound} />
+      {left <= 0 ? <Text style={[FONT.tiny, { textAlign: 'center', marginTop: 6 }]}>Come back tomorrow for 10 more.</Text> : null}
+    </View>
+  );
+}
+
 function TollGateGame({ toast }) {
   const playTollGate = useGame(s => s.playTollGate);
   const revealGameResult = useGame(s => s.revealGameResult);
@@ -2019,7 +2140,7 @@ export function MiniGamesModal({ visible, onClose }) {
           <Pressable onPress={tapMidasEgg}><Text style={[FONT.h2, { color: C.gold }]}>{gold}</Text></Pressable>
         </Row>
       </Card>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 14 }}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0, marginBottom: 14 }} contentContainerStyle={{ paddingRight: 8 }}>
         <Row style={{ gap: 6 }}>
           <Chip label="Scratch Card" icon="ticket-confirmation" active={tab === 'scratch'} onPress={() => setTab('scratch')} />
           <Chip label="Lucky Spin" icon="rotate-right" active={tab === 'spin'} onPress={() => setTab('spin')} />
@@ -2027,12 +2148,13 @@ export function MiniGamesModal({ visible, onClose }) {
           <Chip label="Toll Gate" icon="highway" color={C.green} active={tab === 'toll'} onPress={() => setTab('toll')} />
           <Chip label="High-Stakes" icon="slot-machine-outline" color={C.red} active={tab === 'bet'} onPress={() => setTab('bet')} />
           <Chip label="Lucky Plate" icon="card-text" color={C.gold} active={tab === 'plate'} onPress={() => setTab('plate')} />
+          <Chip label="Golden Convoy" icon="truck-fast" color={C.amber} active={tab === 'convoy'} onPress={() => setTab('convoy')} />
         </Row>
       </ScrollView>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
         {tab === 'scratch' ? <ScratchGame toast={toast} /> : tab === 'spin' ? <SpinGame toast={toast} /> : tab === 'dice' ? <DiceGame toast={toast} />
           : tab === 'toll' ? <TollGateGame toast={toast} /> : tab === 'bet' ? <BetSlotGame toast={toast} />
-            : <PlateGame toast={toast} />}
+            : tab === 'convoy' ? <ConvoyGame toast={toast} /> : <PlateGame toast={toast} />}
       </ScrollView>
     </Sheet>
   );

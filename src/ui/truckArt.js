@@ -66,7 +66,7 @@ export function isNightHour(hour) { return hour >= 18 || hour < 6; }
 // frame. Key space is tiny (few silhouettes × few liveries), bounded anyway.
 const shapeCache = new Map();
 export function truckShapes(type, body, accent, opts = {}) {
-  const key = `${type}|${body}|${accent}|${opts.lights ? opts.lights.bulb : ''}`;
+  const key = `${type}|${body}|${accent}|${opts.lights ? opts.lights.bulb : ''}|${opts.pattern || ''}|${opts.booster || ''}`;
   const hit = shapeCache.get(key);
   if (hit) return hit;
   const out = buildTruckShapes(type, body, accent, opts);
@@ -104,9 +104,70 @@ function buildTruckShapes(type, body, accent, opts = {}) {
     const fill = lights ? lights.bulb : lamp;
     R(13, y, 3.8, 1.5, 0.7, fill); R(23.2, y, 3.8, 1.5, 0.7, fill);
   };
+  // Livery vinyl/pattern overlay, drawn on top of a body panel right after
+  // it's painted — every body type calls this with its own cargo-box/trailer
+  // rect (bx/by/bw/bh), so the decal always lines up with that panel however
+  // tall or short it is for this silhouette.
+  const pattern = opts.pattern && opts.pattern !== 'none' ? opts.pattern : null;
+  const addPattern = (bx, by, bw, bh) => {
+    if (!pattern) return;
+    if (pattern === 'stripe') {
+      R(bx + bw * 0.42, by, bw * 0.16, bh, 0, accent);
+    } else if (pattern === 'dualstripe') {
+      R(bx + bw * 0.24, by, bw * 0.12, bh, 0, accent);
+      R(bx + bw * 0.64, by, bw * 0.12, bh, 0, accent);
+    } else if (pattern === 'camo') {
+      const blot = shade(body, -0.16);
+      for (let i = 0; i < 6; i++) {
+        const cx = bx + bw * (0.22 + (i % 2) * 0.42);
+        const cy = by + bh * (0.12 + Math.floor(i / 2) * (bh > bw ? 0.32 : 0.5));
+        C_(cx, cy, bw * 0.18, i % 2 ? blot : accent);
+      }
+    } else if (pattern === 'flames') {
+      s.push({ k: 'path', fill: accent,
+        d: `M ${bx + 1} ${by + bh} L ${bx + bw * 0.3} ${by + bh * 0.5} L ${bx + bw * 0.16} ${by + bh * 0.28} `
+          + `L ${bx + bw * 0.46} ${by + bh * 0.04} L ${bx + bw * 0.38} ${by + bh * 0.36} L ${bx + bw * 0.58} ${by + bh * 0.14} `
+          + `L ${bx + bw * 0.5} ${by + bh * 0.46} L ${bx + bw * 0.78} ${by + bh * 0.32} L ${bx + bw * 0.62} ${by + bh * 0.66} `
+          + `L ${bx + bw - 1} ${by + bh} Z` });
+    } else if (pattern === 'checker') {
+      const cols = 2, rows = Math.max(2, Math.round(bh / (bw / cols)));
+      for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+        if ((r + c) % 2 === 0) continue;
+        R(bx + c * (bw / cols), by + r * (bh / rows), bw / cols, bh / rows, 0, accent);
+      }
+    }
+  };
+  // Cosmetic bolt-on ("booster") mounted near the cab — roof light bar, wing
+  // spoiler, chrome exhaust stacks or a front bull bar. Anchored off H (every
+  // body type's own canvas height, always known at finish()) rather than
+  // duplicated per-silhouette coordinates, since the cab always sits at the
+  // bottom of the canvas regardless of type.
+  const booster = opts.booster && opts.booster !== 'none' ? opts.booster : null;
+  const addBooster = (H) => {
+    if (!booster) return;
+    const roofY = Math.max(6, H - 17);
+    if (booster === 'lightbar') {
+      R(13.5, roofY - 3.4, 13, 1.7, 0.8, '#1C1F26');
+      for (let i = 0; i < 4; i++) C_(15.3 + i * 3.1, roofY - 2.5, 0.75, '#FFE9A8');
+    } else if (booster === 'spoiler') {
+      R(10.3, roofY - 3.2, 1.8, 4.6, 0.6, chrome);
+      R(27.9, roofY - 3.2, 1.8, 4.6, 0.6, chrome);
+      R(10, roofY - 4, 20, 1.5, 0.7, chrome);
+    } else if (booster === 'stacks') {
+      R(7.4, roofY - 1.2, 1.7, 8.5, 0.7, chrome);
+      R(30.9, roofY - 1.2, 1.7, 8.5, 0.7, chrome);
+      C_(8.25, roofY - 1.6, 1.15, '#E63946');
+      C_(31.75, roofY - 1.6, 1.15, '#E63946');
+    } else if (booster === 'bullbar') {
+      R(8.6, H - 1.6, 22.8, 1.8, 0.9, chrome);
+      R(8.6, H - 3.4, 1.4, 3.2, 0.6, chrome);
+      R(30, H - 3.4, 1.4, 3.2, 0.6, chrome);
+    }
+  };
   // Cartoon torch-style beam cones in front of both headlights; widens the
   // canvas height so map markers/viewBoxes include the beams.
   const finish = (H) => {
+    addBooster(H);
     if (!lights) return { w: 40, h: H, bodyH: H, shapes: s };
     const len = 14, y0 = lampY + 1.6, y1 = y0 + len;
     [14.9, 25.1].forEach(cx => {
@@ -124,6 +185,7 @@ function buildTruckShapes(type, body, accent, opts = {}) {
     wheel(8.8, 6.5); wheel(28.5, 6.5); wheel(8.8, 27); wheel(28.5, 27);
     R(12, 3, 16, 34, 2.5, darker);                            // chassis
     R(11, 2, 18, 20, 2.4, body, { stroke: '#fff', sw: 1.1 }); // bed walls
+    addPattern(11, 2, 18, 20);
     R(13.2, 4.2, 13.6, 15.6, 1.4, dark);                      // bed floor
     R(13.2, 8, 13.6, 0.9, 0, darker);                         // floor slats
     R(13.2, 12, 13.6, 0.9, 0, darker);
@@ -145,6 +207,7 @@ function buildTruckShapes(type, body, accent, opts = {}) {
     wheel(8.7, 36.5, 5); wheel(28.6, 36.5, 5);
     R(12.5, 28, 15, 6, 1, darker);                            // chassis gap
     R(10.4, 2, 19.2, 28, 2.6, body, { stroke: '#fff', sw: 1.1 }); // cargo box
+    addPattern(10.4, 2, 19.2, 28);
     R(19.6, 2.6, 0.8, 4.5, 0.3, darker);                      // rear door seam
     R(12, 8, 16, 0.9, 0, dark);                               // roof ribs
     R(12, 13, 16, 0.9, 0, dark);
@@ -168,6 +231,7 @@ function buildTruckShapes(type, body, accent, opts = {}) {
     wheel(8.6, 40.5, 5); wheel(28.7, 40.5, 5);                // drive axle
     wheel(8.6, 50.5, 5.4); wheel(28.7, 50.5, 5.4);            // steer axle
     R(10, 2, 20, 36, 2, body, { stroke: '#fff', sw: 1.1 });   // trailer
+    addPattern(10, 2, 20, 36);
     R(19.6, 2.6, 0.8, 5, 0.3, darker);                        // rear door seam
     R(11.8, 8, 16.4, 0.9, 0, dark);                           // roof ribs
     R(11.8, 13, 16.4, 0.9, 0, dark);
@@ -199,6 +263,7 @@ function buildTruckShapes(type, body, accent, opts = {}) {
     wheel(8.6, 50.5, 5.4); wheel(28.7, 50.5, 5.4);            // steer axle
     wheel(8.2, 62, 5.4); wheel(28.9, 62, 5.4);                // extra nose axle under the long hood
     R(10, 2, 20, 36, 2, body, { stroke: '#fff', sw: 1.1 });   // trailer
+    addPattern(10, 2, 20, 36);
     R(19.6, 2.6, 0.8, 5, 0.3, darker);                        // rear door seam
     R(11.8, 8, 16.4, 0.9, 0, dark);                           // roof ribs
     R(11.8, 13, 16.4, 0.9, 0, dark);
@@ -231,6 +296,7 @@ function buildTruckShapes(type, body, accent, opts = {}) {
     wheel(8.6, 3.5, 5); wheel(28.7, 3.5, 5);                  // rear trailer tandem
     wheel(8.6, 9.5, 5); wheel(28.7, 9.5, 5);
     R(10, 2, 20, 27, 2, body, { stroke: '#fff', sw: 1.1 });   // trailer 2 (rear)
+    addPattern(10, 2, 20, 27);
     R(19.6, 2.6, 0.8, 4, 0.3, darker);
     R(11.8, 7.5, 16.4, 0.9, 0, dark);
     R(11.8, 13, 16.4, 0.9, 0, dark);
@@ -241,6 +307,7 @@ function buildTruckShapes(type, body, accent, opts = {}) {
     C_(20, 37, 1.4, chrome);                                  // dolly hitch pin
     wheel(8.6, 35, 5); wheel(28.7, 35, 5);                    // dolly tandem
     R(10, 37.5, 20, 27, 2, body, { stroke: '#fff', sw: 1.1 }); // trailer 1 (front)
+    addPattern(10, 37.5, 20, 27);
     R(19.6, 38.1, 0.8, 4, 0.3, darker);
     R(11.8, 43, 16.4, 0.9, 0, dark);
     R(11.8, 48.5, 16.4, 0.9, 0, dark);
@@ -273,6 +340,7 @@ function buildTruckShapes(type, body, accent, opts = {}) {
   wheel(8.7, 42.5, 5.2); wheel(28.6, 42.5, 5.2);
   R(12.5, 33, 15, 5.5, 1, darker);                            // chassis gap
   R(10.2, 2, 19.6, 33, 2.6, body, { stroke: '#fff', sw: 1.1 }); // cargo body
+  addPattern(10.2, 2, 19.6, 33);
   R(19.6, 2.6, 0.8, 4.5, 0.3, darker);                        // rear door seam
   R(11.8, 8.5, 16.4, 0.9, 0, dark);                           // roof ribs
   R(11.8, 14, 16.4, 0.9, 0, dark);
@@ -292,8 +360,8 @@ function buildTruckShapes(type, body, accent, opts = {}) {
 // art's top-left; centre it yourself with translate(-20, -h/2).
 // React.memo + the shape cache above means a moving truck re-renders only its
 // parent transform per frame — the SVG subtree itself is completely stable.
-export const TruckTopShapes = React.memo(function TruckTopShapes({ type, body, accent, lights }) {
-  const { shapes } = truckShapes(type, body, accent, { lights });
+export const TruckTopShapes = React.memo(function TruckTopShapes({ type, body, accent, lights, pattern, booster }) {
+  const { shapes } = truckShapes(type, body, accent, { lights, pattern, booster });
   return (
     <G>
       {shapes.map((p, i) => p.k === 'rect'
