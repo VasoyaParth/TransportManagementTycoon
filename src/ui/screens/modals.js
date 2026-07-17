@@ -550,6 +550,7 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
             <DropdownPicker
               options={CARGO_TYPES.map(ct => ({ key: ct.id, label: ct.name }))}
               value={cargo} onChange={locked ? () => {} : setCargo}
+              hint={locked ? undefined : 'Tap to open the list, then pick a cargo type for this shipment.'}
             />
             {(() => {
               const ct = cargoById(cargo);
@@ -1509,7 +1510,8 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
           <Pressable onPress={() => setQuery('')} hitSlop={6}><Icon name="close-circle" size={16} color={C.faint} /></Pressable>
         )}
       </Row>
-      <DropdownPicker label="Sort" icon="sort" options={SORTS} value={sort} onChange={setSort} />
+      <DropdownPicker label="Sort" icon="sort" options={SORTS} value={sort} onChange={setSort}
+        hint="Tap to change how the truck list below is ordered." />
       <FlatList
         data={list.slice(0, page * 10)} keyExtractor={m => m.id} showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 30 }}
@@ -1790,6 +1792,7 @@ export function PowerupsModal({ visible, onClose, onOpenGames }) {
       <DropdownPicker
         options={[{ key: 'store', label: 'Power-Ups' }, { key: 'wallet', label: `Gold Wallet · ${gold}` }]}
         value={page} onChange={setPage}
+        hint="Switch between the Power-Ups store and your Gold Wallet."
       />
 
       {page === 'wallet' && (

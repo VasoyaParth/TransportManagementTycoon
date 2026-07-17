@@ -160,17 +160,19 @@ export function Pill({ text, color = C.blue, bg = C.blueSoft, icon }) {
 // of pills. Same job as a row of chips, scales cleanly to any option count,
 // and never has the "row too narrow, pills clipped" failure mode a chip row
 // does on a small screen.
-export function DropdownPicker({ label, icon, options, value, onChange, style, onHeaderPress }) {
+export function DropdownPicker({ label, icon, options, value, onChange, style, onHeaderPress, hint }) {
   const [open, setOpen] = useState(false);
   const current = options.find(o => o.key === value);
   return (
-    <View style={[{ marginBottom: 10 }, style]}>
+    // zIndex/elevation lift this above whatever comes after it in the layout —
+    // the options panel below is position:'absolute' so it floats OVER that
+    // content like a real dropdown menu, instead of pushing it down the screen.
+    <View style={[{ marginBottom: 10, zIndex: open ? 100 : 1, elevation: open ? 100 : 0 }, style]}>
       <Pressable onPress={() => { haptic('light'); onHeaderPress && onHeaderPress(); setOpen(o => !o); }}
         style={{
           flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-          paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: C.border,
-          borderRadius: open ? 0 : RADIUS.md, borderTopLeftRadius: RADIUS.md, borderTopRightRadius: RADIUS.md,
-          backgroundColor: '#fff',
+          paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: open ? C.blue : C.border,
+          borderRadius: RADIUS.md, backgroundColor: '#fff',
         }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
           {icon ? <Icon name={icon} size={15} color={C.sub} style={{ marginRight: 6 }} /> : null}
@@ -180,15 +182,20 @@ export function DropdownPicker({ label, icon, options, value, onChange, style, o
         </View>
         <Icon name={open ? 'chevron-up' : 'chevron-down'} size={16} color={C.faint} />
       </Pressable>
+      {hint ? <Text style={{ fontSize: 11, color: C.faint, marginTop: 4, marginLeft: 2 }}>{hint}</Text> : null}
       {open && (
-        <View style={{ borderWidth: 1, borderTopWidth: 0, borderColor: C.border, borderBottomLeftRadius: RADIUS.md, borderBottomRightRadius: RADIUS.md, backgroundColor: '#fff', overflow: 'hidden' }}>
-          {options.map(o => {
+        <View style={{
+          position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 4,
+          borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.md, backgroundColor: '#fff', overflow: 'hidden',
+          shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 12,
+        }}>
+          {options.map((o, i) => {
             const sel = o.key === value;
             return (
               <Pressable key={o.key} onPress={() => { haptic('light'); play('tap', 0.3); onChange(o.key); setOpen(false); }}
                 style={{
                   flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-                  paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: C.border,
+                  paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: C.border,
                   backgroundColor: sel ? C.blueSoft : '#fff',
                 }}>
                 <Text style={{ fontSize: 13, fontWeight: sel ? '700' : '500', color: sel ? C.blue : C.text }}>{o.label}</Text>
