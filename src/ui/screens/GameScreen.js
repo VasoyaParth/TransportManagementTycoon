@@ -322,7 +322,8 @@ export default function GameScreen() {
       />}
       {mounted('countries') && <CountriesModal visible={modal?.kind === 'countries'} onClose={() => setModal(null)} />}
       {mounted('games') && <MiniGamesModal visible={modal?.kind === 'games'} onClose={() => setModal(null)} />}
-      {mounted('buy') && <BuyTruckModal visible={modal?.kind === 'buy'} onClose={() => setModal(null)} />}
+      {mounted('buy') && <BuyTruckModal visible={modal?.kind === 'buy'} onClose={() => setModal(null)}
+        onOpenHQ={() => setModal({ kind: 'hubinfo', cityId: company?.hqCityId })} />}
       {mounted('contracts') && <ContractsModal visible={modal?.kind === 'contracts'} onClose={() => setModal(null)}
         onAccept={(c) => openNewDelivery(undefined, c.destCityId, c)} />}
       {mounted('powerups') && <PowerupsModal visible={modal?.kind === 'powerups'} onClose={() => setModal(null)} onOpenGames={() => setModal({ kind: 'games' })} />}
