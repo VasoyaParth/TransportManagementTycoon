@@ -12,7 +12,7 @@ import { FleetTab, RoutesTab, StaffTab, EconomyTab, MarketingTab, RewardsTab } f
 import {
   NewDeliveryModal, TruckDetailModal, BuyTruckModal, ContractsModal,
   PowerupsModal, NotificationsModal, SettingsModal, HubsModal, DriverDetailModal, CountriesModal, MiniGamesModal, HubInfoModal,
-  CompanyInsightsModal, NewsModal, PhotoModeModal, StockMarketModal, FinaleModal,
+  CompanyInsightsModal, NewsModal, PhotoModeModal, FinaleModal,
 } from './modals';
 import { haptic } from '../../engine/haptics';
 import Tutorial from './Tutorial';
@@ -242,9 +242,6 @@ export default function GameScreen() {
               <Pressable style={[st.actionBtn, { marginBottom: 8 }]} onPress={() => { haptic('light'); setModal({ kind: 'countries' }); }}>
                 <Icon name="earth" size={19} color={C.blue} />
               </Pressable>
-              <Pressable style={[st.actionBtn, { marginBottom: 8 }]} onPress={() => { haptic('light'); setModal({ kind: 'stocks' }); }}>
-                <Icon name="finance" size={19} color={C.green} />
-              </Pressable>
               <Pressable style={[st.actionBtn, { marginBottom: 8 }]} onPress={() => { haptic('light'); setModal({ kind: 'powerups' }); }}>
                 <Icon name="star-four-points" size={19} color={C.gold} />
               </Pressable>
@@ -337,7 +334,6 @@ export default function GameScreen() {
         onOpenPhotoMode={() => setModal({ kind: 'photomode' })} />}
       {mounted('photomode') && <PhotoModeModal visible={modal?.kind === 'photomode'} onClose={() => setModal(null)} />}
       {mounted('news') && <NewsModal visible={modal?.kind === 'news'} onClose={() => setModal(null)} />}
-      {mounted('stocks') && <StockMarketModal visible={modal?.kind === 'stocks'} onClose={() => setModal(null)} />}
       {mounted('finale') && <FinaleModal visible={modal?.kind === 'finale'} onClose={() => setModal(null)} />}
 
       {/* First-time guided tour */}

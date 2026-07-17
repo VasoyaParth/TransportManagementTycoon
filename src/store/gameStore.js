@@ -10,10 +10,6 @@ import { TRUCK_MODELS, CARGO_TYPES, CAMPAIGNS, POWERUPS, CONTRACT_FLAVORS } from
 import { COUNTRY_BY_CODE } from '../data/expansion';
 import { STAFF_NAMES, STAFF_LEVELS } from '../data/staffNames';
 import { CITIES } from '../data/cities';
-import {
-  generateStockPool, stockDailyStep, stockYearReturn, stockReturnOverDays, STOCK_SECTORS, STOCK_TIMEFRAMES,
-  liveJitterPct, liveStockPrice, isMarketOpen, fakeTradeFor, stockFundamentals, STOCKS_VERSION,
-} from '../data/stocks';
 import { computeRoute, planFuelStops, cityById } from '../engine/routing';
 import { cmpVer } from '../net/updates';
 import { deliveryEconomics, tripDurationSec, inr, REAL_SEC_PER_GAME_HOUR, ECON } from '../engine/economy';
@@ -318,11 +314,6 @@ export function creditScoreOf(credit) {
 // Every truck/garage currently pledged as collateral on ANY active loan —
 // used to badge them everywhere (Fleet list, truck detail, map) and to stop
 // the same asset being pledged twice.
-export {
-  stockYearReturn, stockReturnOverDays, STOCK_SECTORS, STOCK_TIMEFRAMES,
-  liveJitterPct, liveStockPrice, isMarketOpen, fakeTradeFor, stockFundamentals,
-};
-
 export function pledgedTruckIds(s) {
   const set = new Set();
   for (const ln of s.loans || []) for (const id of ln.collateral?.truckIds || []) set.add(id);
@@ -663,7 +654,6 @@ export const EASTER_EGGS = [
   { id: 'streak_freak', title: 'Streak Freak', hint: 'Worship the daily flame, eleven-fold.', where: 'Tap the streak flame in the Rewards tab 11 times fast.' },
   // v10.9.0 — a few final ones, including one for the other half of the team.
   { id: 'meet_jeel', title: 'Meet Jeel', hint: 'The other half of the team deserves a knock too.', where: 'Tap the Jeel Gajera developer card in Settings → About 8 times fast.' },
-  { id: 'market_watcher', title: 'Market Watcher', hint: 'Some people just like watching numbers tick.', where: 'Tap the "listed" count in the Stock Market\'s portfolio card 6 times fast.' },
   { id: 'donor', title: 'Big Heart', hint: 'Giving it all away, one tap at a time.', where: 'Tap the Charity Drive icon in the Bank sheet 5 times fast.' },
 ];
 const EASTER_EGG_REWARD = { cash: 1000000, gold: 15 }; // ₹10 lakhs + 15 Gold, per egg, one-time
@@ -725,15 +715,7 @@ export const ACHIEVEMENTS = [
     desc: 'Best daily-login streak reached.', levels: [3, 7, 14, 30, 90] },
   { id: 'big_spender', title: 'Big Spender', icon: 'gold', unit: 'gold',
     desc: 'Gold spent on power-ups and repairs.', levels: [25, 100, 400, 1200, 4000] },
-  // v10.9.0 — tracks fed by the new Stock Market / collateral loans / Charity Drive.
-  { id: 'market_mogul', title: 'Market Mogul', icon: 'finance', unit: '₹',
-    desc: 'Stock portfolio value held at one time.', levels: [100000, 1000000, 10000000, 50000000, 200000000] },
-  { id: 'diversified', title: 'Diversified', icon: 'chart-donut', unit: 'companies',
-    desc: 'Distinct companies held in your portfolio at once.', levels: [1, 3, 6, 10, 15] },
-  { id: 'day_trader', title: 'Day Trader', icon: 'swap-horizontal-bold', unit: 'trades',
-    desc: 'Stock buy/sell orders filled, lifetime.', levels: [1, 10, 50, 200, 500] },
-  { id: 'ipo_founder', title: 'IPO Founder', icon: 'rocket-launch', unit: 'IPOs',
-    desc: 'Companies you personally founded and listed.', levels: [1, 2, 3, 5, 8] },
+  // v10.9.0 — tracks fed by collateral loans / Charity Drive.
   { id: 'philanthropist', title: 'Philanthropist', icon: 'hand-heart', unit: '₹',
     desc: 'Cash donated through the Charity Drive, lifetime.', levels: [100000, 1000000, 10000000, 50000000, 200000000] },
   { id: 'collateral_king', title: 'Collateral King', icon: 'bank', unit: 'loans',
@@ -766,13 +748,6 @@ export function achievementValue(s, id) {
     case 'mechanic_bff': return s.stats.mechanicCalls || 0;
     case 'daily_devotee': return Math.max(s.login?.bestStreak || 0, s.login?.streak || 0);
     case 'big_spender': return s.stats.goldSpent || 0;
-    case 'market_mogul': return Object.entries(s.portfolio || {}).reduce((a, [id, pos]) => {
-      const st = (s.stocks || []).find(x => x.id === id);
-      return a + (st ? pos.shares * st.price : 0);
-    }, 0);
-    case 'diversified': return Object.keys(s.portfolio || {}).length;
-    case 'day_trader': return s.stats.stockTrades || 0;
-    case 'ipo_founder': return (s.stocks || []).filter(x => x.founder === 'player').length;
     case 'philanthropist': return s.stats.donated || 0;
     case 'collateral_king': return s.stats.loansTaken || 0;
     default: return 0;
@@ -855,11 +830,6 @@ const initialState = {
   ledger: [], // day-wise money book: {id, ts, day, kind, icon, label, amount} — newest first, capped
   loans: [], // active bank loans: {id, productId, name, principal, remaining, emi, months, paidMonths, lastEmiDay}
   credit: { paid: 0, missed: 0 }, // EMI track record → credit score
-  stocks: [], // listed companies: {id, name, sector, price, vol, drift, history, founder}
-  portfolio: {}, // stockId -> {shares, avgCost}
-  lastStockDay: 0,
-  stocksVersion: 0, // bump target for the fixed shared roster — see STOCKS_VERSION migration
-  pendingOrders: [], // buy/sell orders placed while the market was closed — auto-fill on next open
   weather: [], // today's active weather zones (regenerated each game day)
   weatherDay: 0,
   lastWeatherEvolveAt: 0, // real ms of the last gentle weather-evolution step
@@ -959,10 +929,6 @@ export const useGame = create(
           unlockedCountries: ['IN'],
           contracts: randomContracts(1),
           candidates: randomCandidates(),
-          stocks: generateStockPool(),
-          portfolio: {},
-          lastStockDay: 0,
-          stocksVersion: STOCKS_VERSION,
           notifications: [makeNotification('system', 'rocket-launch',
             `${name} is live! Your first ${model.name} is being built at ${hq.name}.`)],
         });
@@ -1096,9 +1062,8 @@ export const useGame = create(
             'UPDATE 3.0.0 IS HERE — the biggest one ever! 17 new countries across two horizons: Thailand to the Philippines & Indonesia in the east, Saudi Arabia to Kenya & Ethiopia in the west. Welcome gift: +₹2.5 Crore + 300 Gold. Thank you for building your empire with us!');
           play('coin', 1);
         }
-        // ---- v10.9.0 Grand Finale gift: the Stock Market goes live, and
-        // this is the final major content release. Deliberately on its OWN
-        // flag (settings.finaleSeen) instead of chaining onto
+        // ---- v10.9.0 Grand Finale gift: the final major content release.
+        // Deliberately on its OWN flag (settings.finaleSeen) instead of chaining onto
         // updateGiftVersion — every company (brand new or returning) gets
         // this celebration exactly once, since it's the send-off moment,
         // not a "you missed an old update" backfill.
@@ -1108,9 +1073,9 @@ export const useGame = create(
             settings: { ...gcur.settings, finaleSeen: true },
             gold: gcur.gold + 500, balance: gcur.balance + 50000000,
           });
-          get().logLedger('bonus', 'party-popper', 'v10.9.0 Grand Finale gift — Stock Market is live!', 50000000);
+          get().logLedger('bonus', 'party-popper', 'v10.9.0 Grand Finale gift', 50000000);
           get().notify('system', 'party-popper',
-            'CONGRATULATIONS — TRUCK EMPIRE TYCOON v10.9.0 IS HERE! The Stock Market has opened: 80 fixed companies to trade, a live ticker, candlestick charts, and your own IPO to launch once you\'ve earned it. This is our final grand release — thank you for building this empire with us. +₹5 Crore + 500 Gold to celebrate!');
+            'CONGRATULATIONS — TRUCK EMPIRE TYCOON v10.9.0 IS HERE! This is our final grand release — thank you for building this empire with us. +₹5 Crore + 500 Gold to celebrate!');
           play('coin', 1);
         }
         // ---- v2.4.0 daily/periodic systems ----
@@ -1277,56 +1242,6 @@ export const useGame = create(
           if (!s.weekly || s.weekly.id !== wid) {
             set({ weekly: buildWeekly(wid, get().stats) });
             if (s.weekly) get().notify('system', 'calendar-week', 'New weekly challenges are live — big bonus for a clean sweep!');
-          }
-        }
-        // Stock market migration: any save on an older stocksVersion (either
-        // pre-dating the feature entirely, with stocks=[], or created before
-        // the roster became a fixed shared list) gets moved onto the current
-        // fixed roster — every player ends up with the SAME company names,
-        // sectors and starting/backstory prices. Any shares already held are
-        // refunded at their last-known value (fair cash-out, since the old
-        // stock ids no longer exist) rather than silently vanishing.
-        if ((s.stocksVersion || 0) < STOCKS_VERSION) {
-          const cur = get();
-          let refund = 0;
-          for (const [stockId, pos] of Object.entries(cur.portfolio || {})) {
-            const old = (cur.stocks || []).find(x => x.id === stockId);
-            if (old) refund += pos.shares * old.price;
-          }
-          set({
-            stocks: generateStockPool(),
-            portfolio: {},
-            lastStockDay: 0,
-            stocksVersion: STOCKS_VERSION,
-            balance: cur.balance + refund,
-          });
-          if (refund > 0) {
-            get().logLedger('stock', 'bank-check', 'Stock market re-listed — old holdings cashed out', refund);
-            get().notify('system', 'bank-check', `The exchange re-listed under a shared, fixed company roster — your old holdings were cashed out for ${inr(refund)}.`);
-          } else {
-            get().notify('system', 'finance', 'The Stock Market now runs a fixed, shared company roster — same companies for every player.');
-          }
-        }
-        // Stock market: once per game day, every listed company takes one
-        // random-walk price step (see stockDailyStep) — cheap since it only
-        // runs on day rollover, not every tick, even with a large listing.
-        if (day > (s.lastStockDay || 0) && (get().stocks || []).length) {
-          const updated = get().stocks.map(st => stockDailyStep(st, day));
-          set({ stocks: updated, lastStockDay: day });
-        }
-        // Queued orders (placed while the market was closed) fill the
-        // moment it opens — checked every tick since "open" is a real-clock
-        // window, not a game-day event. Each fill uses whatever the price
-        // is right now, exactly like a real broker's queued order.
-        if (isMarketOpen() && (get().pendingOrders || []).length) {
-          const orders = get().pendingOrders;
-          set({ pendingOrders: [] });
-          for (const o of orders) {
-            const st = (get().stocks || []).find(x => x.id === o.stockId);
-            const r = o.kind === 'buy' ? get()._executeBuy(o.stockId, o.shares) : get()._executeSell(o.stockId, o.shares);
-            if (r.ok) get().notify('system', o.kind === 'buy' ? 'trending-up' : 'trending-down',
-              `Market's open — your queued order to ${o.kind} ${o.shares} × ${st?.name || 'a company'} just filled.`);
-            else get().notify('system', 'alert-circle-outline', `Queued ${o.kind} order for ${st?.name || 'a company'} couldn't fill: ${r.err}`);
           }
         }
         // fresh contracts each day + flavor event
@@ -2543,128 +2458,6 @@ export const useGame = create(
         get().logLedger('donation', 'hand-heart', 'Gold donated to charity', 0);
         get().notify('system', 'hand-heart', `Donated ${amt} Gold to charity.`);
         return { ok: true };
-      },
-
-      // ---------- stock market ----------
-      // Buying/selling carries a small spread (the "market maker's cut") so
-      // day-trading in and out isn't free money — it's a real cost of entry.
-      // Public buy/sell check real trading hours first — outside 9:15 AM to
-      // 3:30 PM the order can't fill immediately (real exchanges don't run
-      // 24/7 either), so it's queued and auto-executed the next time the
-      // market opens (see the pendingOrders processing in dailyTick), same
-      // as a real broker's after-hours/GTT order would behave.
-      buyStock(stockId, shares) {
-        const n = Math.max(0, Math.floor(shares));
-        if (!n) return { ok: false, err: 'Pick at least 1 share' };
-        if (!isMarketOpen()) {
-          const order = { id: uid('ord'), kind: 'buy', stockId, shares: n, queuedAt: Date.now() };
-          set({ pendingOrders: [...(get().pendingOrders || []), order] });
-          get().notify('system', 'clock-outline', `Market's closed — your order to buy ${n} shares is queued for the next open (9:15 AM).`);
-          return { ok: true, queued: true };
-        }
-        return get()._executeBuy(stockId, n);
-      },
-      sellStock(stockId, shares) {
-        const n = Math.max(0, Math.floor(shares));
-        if (!n) return { ok: false, err: 'Pick at least 1 share' };
-        if (!isMarketOpen()) {
-          const order = { id: uid('ord'), kind: 'sell', stockId, shares: n, queuedAt: Date.now() };
-          set({ pendingOrders: [...(get().pendingOrders || []), order] });
-          get().notify('system', 'clock-outline', `Market's closed — your order to sell ${n} shares is queued for the next open (9:15 AM).`);
-          return { ok: true, queued: true };
-        }
-        return get()._executeSell(stockId, n);
-      },
-      // Core execution — used directly when the market's open, and by the
-      // pendingOrders processor once it reopens.
-      _executeBuy(stockId, n) {
-        const s = get();
-        const st = (s.stocks || []).find(x => x.id === stockId);
-        if (!st) return { ok: false, err: 'Company not found' };
-        const cost = Math.round(n * st.price * 1.005);
-        if (s.balance < cost) return { ok: false, err: `Need ${inr(cost)} to buy ${n} shares` };
-        const pos = s.portfolio?.[stockId] || { shares: 0, avgCost: 0 };
-        const totalShares = pos.shares + n;
-        const avgCost = (pos.avgCost * pos.shares + cost) / totalShares;
-        set({
-          balance: s.balance - cost,
-          portfolio: { ...s.portfolio, [stockId]: { shares: totalShares, avgCost } },
-          stats: { ...s.stats, stockTrades: (s.stats.stockTrades || 0) + 1 },
-        });
-        get().logLedger('stock', 'trending-up', `Bought ${n} × ${st.name}`, -cost);
-        return { ok: true, cost };
-      },
-      _executeSell(stockId, n) {
-        const s = get();
-        const st = (s.stocks || []).find(x => x.id === stockId);
-        if (!st) return { ok: false, err: 'Company not found' };
-        const pos = s.portfolio?.[stockId];
-        if (!pos || pos.shares < n) return { ok: false, err: `You only hold ${pos?.shares || 0} shares` };
-        const proceeds = Math.round(n * st.price * 0.995);
-        const remaining = pos.shares - n;
-        const nextPortfolio = { ...s.portfolio };
-        if (remaining <= 0) delete nextPortfolio[stockId];
-        else nextPortfolio[stockId] = { ...pos, shares: remaining };
-        set({ balance: s.balance + proceeds, portfolio: nextPortfolio, stats: { ...s.stats, stockTrades: (s.stats.stockTrades || 0) + 1 } });
-        get().logLedger('stock', 'trending-down', `Sold ${n} × ${st.name}`, proceeds);
-        return { ok: true, proceeds };
-      },
-      // Founding your own IPO needs a proven track record first — real
-      // distance driven, real revenue booked, real delivery volume — so it
-      // reads as "you earned the right to list", not a cash-code shortcut.
-      ipoRequirements() {
-        const s = get();
-        const req = { km: 50000, revenue: 25000000, deliveries: 20 };
-        return {
-          ...req,
-          have: { km: Math.floor(s.stats.km), revenue: Math.floor(s.stats.revenue), deliveries: s.stats.deliveries },
-          met: s.stats.km >= req.km && s.stats.revenue >= req.revenue && s.stats.deliveries >= req.deliveries,
-        };
-      },
-      // Every founded company tracks its own `founderShares` (the original
-      // grant) alongside the live portfolio position, so post-launch we can
-      // show exactly how many of those founder shares have been sold off and
-      // how much real profit that's realized — a proper "my IPO" dashboard,
-      // not just another line in the main list.
-      launchStock() {
-        const s = get();
-        const { met } = get().ipoRequirements();
-        if (!met) return { ok: false, err: 'You don’t meet the IPO listing requirements yet' };
-        const listingFee = 5000000;
-        if (s.balance < listingFee) return { ok: false, err: `Need ${inr(listingFee)} listing fee` };
-        const [fresh] = generateStockPool(1, Math.random);
-        const founderShares = 5000;
-        const stock = {
-          ...fresh, name: `${s.company?.name || 'Founder'} ${fresh.name.split(' ').slice(1).join(' ')}`,
-          founder: 'player', founderShares, listingFee,
-        };
-        set({
-          balance: s.balance - listingFee,
-          stocks: [...(s.stocks || []), stock],
-          portfolio: { ...s.portfolio, [stock.id]: { shares: founderShares, avgCost: 0 } },
-        });
-        get().logLedger('stock', 'rocket-launch', `IPO listed · ${stock.name}`, -listingFee);
-        get().notify('system', 'rocket-launch', `${stock.name} just listed on the exchange — you hold ${founderShares.toLocaleString()} founder shares!`);
-        return { ok: true, stock };
-      },
-      // Founder-IPO dashboard data: for every company you personally listed,
-      // how many founder shares are left, how many you've sold, and the real
-      // cash profit extracted from those sales (tracked via the ledger, so
-      // it reflects the ACTUAL sell prices at the time, not an estimate).
-      myIpoInsights() {
-        const s = get();
-        const founded = (s.stocks || []).filter(st => st.founder === 'player');
-        return founded.map(st => {
-          const pos = s.portfolio?.[st.id];
-          const held = pos?.shares || 0;
-          const sold = Math.max(0, (st.founderShares || 0) - held);
-          // Sum every individual sell entry for this company — each one
-          // already recorded its own real proceeds at the time of the sale.
-          const proceeds = (s.ledger || [])
-            .filter(e => e.kind === 'stock' && e.label.startsWith('Sold ') && e.label.endsWith(`× ${st.name}`))
-            .reduce((a, e) => a + e.amount, 0);
-          return { stock: st, founderShares: st.founderShares || 0, held, sold, currentValue: held * st.price, proceeds };
-        });
       },
 
       // ---------- fuel market ----------
