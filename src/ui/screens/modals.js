@@ -7,7 +7,7 @@ import RNShare from 'react-native-share';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST_MIN, LIVERY_COST_MAX, liveryCostFor, FLEET_LIVERY_DISCOUNT, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, CONVOY_SYMBOLS, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST_MIN, LIVERY_COST_MAX, liveryCostFor, FLEET_LIVERY_DISCOUNT, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, CONVOY_SYMBOLS, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds, LICENSE_TIERS, licenseRequiredFor, licenseHeldBy } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
@@ -420,6 +420,7 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
   const trucks = useGame(s => s.trucks);
   const startDelivery = useGame(s => s.startDelivery);
   const previewDelivery = useGame(s => s.previewDelivery);
+  const truckLicenseStatus = useGame(s => s.truckLicenseStatus);
   const pricing = useGame(s => s.pricing);
   const unlockedCountries = useGame(s => s.unlockedCountries || ['IN']);
   const parked = trucks.filter(t => t.status === 'parked');
@@ -470,6 +471,7 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
   }, [truckId, dest, cargo, clampTons]);
 
   const destCity = dest ? cityById(dest) : null;
+  const licenseStatus = truckId ? truckLicenseStatus(truckId) : null;
 
   const confirm = () => {
     const r = startDelivery(truckId, dest, cargo, clampTons, contract?.id);
@@ -653,8 +655,17 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
               </Card>
             )}
 
+            {licenseStatus && !licenseStatus.qualified && (
+              <Row style={{ marginTop: 12, backgroundColor: C.redSoft, borderRadius: RADIUS.md, padding: 10 }}>
+                <Icon name={licenseStatus.license.icon} size={16} color={C.red} />
+                <Text style={[FONT.tiny, { marginLeft: 8, flex: 1, color: C.text }]}>
+                  {licenseStatus.license.name} required — needs a level {licenseStatus.license.minDriverLevel}+ driver
+                  {licenseStatus.driver ? ` (${licenseStatus.driver.name} is level ${driverLevel(licenseStatus.driver.xp)})` : ' (no driver available)'}. Level one up on smaller trucks first.
+                </Text>
+              </Row>
+            )}
             <Btn title="Start Delivery" kind="green" icon="truck-fast" style={{ marginTop: 14, marginBottom: 30 }}
-              disabled={!preview || !!preview.err} onPress={confirm} />
+              disabled={!preview || !!preview.err || (licenseStatus && !licenseStatus.qualified)} onPress={confirm} />
           </>
         )}
       </ScrollView>
@@ -927,11 +938,13 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
   const [confirmSell, setConfirmSell] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   useEffect(() => { if (!visible) { setConfirmSell(false); setHistoryOpen(false); } }, [visible]);
+  const truckLicenseStatus = useGame(s => s.truckLicenseStatus);
   const truck = trucks.find(t => t.id === truckId);
   if (!visible || !truck) return <Sheet visible={visible && !!truck} onClose={onClose} title="Truck" height="50%"><View /></Sheet>;
   // Everything below renders ONCE per open (plus on real state changes) —
   // no per-second tick here; live data lives inside <TruckLivePanel/>.
   const m = modelById(truck.modelId);
+  const licenseStatus = truckLicenseStatus(truck.id);
   const meta = statusMeta[truck.status];
   const mechDisc = useGame.getState().mechDiscount();
   const fee = Math.round(m.price * 0.04 * (1 - mechDisc));
@@ -982,10 +995,26 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
           )}
         </Card>
 
+        {licenseStatus && !licenseStatus.qualified && truck.status === 'parked' && (
+          <Card style={{ marginTop: 10, borderColor: C.amber, backgroundColor: C.amberSoft }}>
+            <Row>
+              <Icon name={licenseStatus.license.icon} size={16} color={C.amber} />
+              <Text style={[FONT.tiny, { marginLeft: 8, flex: 1, color: C.text }]}>
+                {licenseStatus.license.name} required to drive this truck — level {licenseStatus.license.minDriverLevel}+ needed
+                {licenseStatus.driver ? ` (${licenseStatus.driver.name} is level ${driverLevel(licenseStatus.driver.xp)})` : ' (no driver on staff yet)'}.
+              </Text>
+            </Row>
+          </Card>
+        )}
+
         <Card style={{ marginTop: 10 }}>
           <Text style={[FONT.h3, { marginBottom: 4 }]}>Specifications</Text>
           <SpecRow icon="speedometer" label="Top speed" value={`${m.speed} km/h`} />
           <SpecRow icon="weight" label="Cargo capacity" value={`${m.cargo} t`} />
+          {licenseStatus?.license.minDriverLevel > 0 && (
+            <SpecRow icon={licenseStatus.license.icon} label="Requires"
+              value={`${licenseStatus.license.name} (Lv.${licenseStatus.license.minDriverLevel}+)`} />
+          )}
           {m.propulsion === 'electric'
             ? <SpecRow icon="battery-high" label="Battery" value={`${m.battery} kWh`} />
             : <SpecRow icon="fuel" label="Fuel tank" value={`${m.tank} L`} />}
@@ -1497,6 +1526,7 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
           const deal = truckDealFor(m.id, day);
           const price = dealPriceFor(m, day);
           const afford = balance >= price;
+          const license = licenseRequiredFor(m.cargo);
           return (
             <Card style={{ marginBottom: 10, borderColor: deal > 0 ? C.green : C.border }}>
               {deal > 0 && (
@@ -1509,7 +1539,10 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
                 <View style={{ marginLeft: 12, flex: 1 }}>
                   <Text style={FONT.h3}>{m.name}</Text>
                   <Text style={FONT.tiny}>{m.brand}</Text>
-                  <Row style={{ marginTop: 4, gap: 6 }}><Pill text={pm.label} icon={pm.icon} color={pm.color} bg={pm.bg} /><Stars rating={m.rating} size={11} /></Row>
+                  <Row style={{ marginTop: 4, gap: 6, flexWrap: 'wrap' }}>
+                    <Pill text={pm.label} icon={pm.icon} color={pm.color} bg={pm.bg} /><Stars rating={m.rating} size={11} />
+                    {license.minDriverLevel > 0 && <Pill text={`Needs Lv.${license.minDriverLevel}+ driver`} icon={license.icon} color={C.amber} bg={C.amberSoft} />}
+                  </Row>
                 </View>
               </Row>
               <Row style={{ justifyContent: 'space-between', marginTop: 10 }}>

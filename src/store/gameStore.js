@@ -430,6 +430,30 @@ export const driverLevel = xp => Math.min(10, Math.floor(Math.sqrt((xp || 0) / 2
 export const driverXpForLevel = l => l * l * 250;
 export const driverPerkIds = m => { const l = driverLevel(m?.xp); return DRIVER_PERKS.filter(p => p.level <= l).map(p => p.id); };
 
+// ---------- Heavy Vehicle Licensing (v10.18.0) ----------
+// Real commercial licensing, mirrored: the bigger the truck, the more
+// experienced the driver behind the wheel has to be. Gated purely by cargo
+// tonnage against the driver's level (see driverLevel above), checked once
+// at startDelivery() — this is what actually stops a fresh hire from being
+// handed the keys to a 250-tonne mega-hauler on day one.
+export const LICENSE_TIERS = [
+  { id: 'standard', name: 'Standard License', minCargo: 0, minDriverLevel: 0, icon: 'card-account-details-outline' },
+  { id: 'heavy', name: 'Heavy Vehicle License', minCargo: 20, minDriverLevel: 4, icon: 'card-account-details' },
+  { id: 'superheavy', name: 'Super-Heavy License', minCargo: 80, minDriverLevel: 7, icon: 'card-account-details-star' },
+];
+export function licenseRequiredFor(cargo) {
+  let req = LICENSE_TIERS[0];
+  for (const tier of LICENSE_TIERS) if ((cargo || 0) >= tier.minCargo) req = tier;
+  return req;
+}
+// Highest license tier a driver currently qualifies for, by level.
+export function licenseHeldBy(xp) {
+  const lvl = driverLevel(xp);
+  let held = LICENSE_TIERS[0];
+  for (const tier of LICENSE_TIERS) if (lvl >= tier.minDriverLevel) held = tier;
+  return held;
+}
+
 // ---------- Regional weather ----------
 // Real weather only where it actually happens: each game day a deterministic
 // hash picks 3–5 zones from a plausibility catalog (snow in the Himalayas &
@@ -1984,16 +2008,44 @@ export const useGame = create(
         };
       },
 
+      // Whether this truck's assigned (or best available) driver meets its
+      // licensing requirement — lets the UI warn BEFORE the player taps
+      // Start, instead of only failing inside startDelivery() itself.
+      truckLicenseStatus(truckId) {
+        const s = get();
+        const t = s.trucks.find(x => x.id === truckId);
+        if (!t) return null;
+        const model = modelById(t.modelId);
+        const license = licenseRequiredFor(model?.cargo);
+        const assigned = s.staff.find(x => x.id === t.driverId && x.role === 'driver');
+        const bestFree = s.staff.filter(x => x.role === 'driver' && (!x.truckId || x.truckId === truckId))
+          .slice().sort((a, b) => driverLevel(b.xp) - driverLevel(a.xp))[0];
+        const driver = assigned || bestFree || null;
+        const qualified = license.minDriverLevel === 0 || (!!driver && driverLevel(driver.xp) >= license.minDriverLevel);
+        return { license, driver, qualified };
+      },
+
       startDelivery(truckId, toCityId, cargoType, cargoTons, contractId = null) {
         const s = get();
         const t = s.trucks.find(x => x.id === truckId);
         if (!t || t.status !== 'parked') return { ok: false, err: 'Truck is not available' };
-        // A driver is required. Use the one already assigned, else grab any free driver.
+        const model = modelById(t.modelId);
+        const license = licenseRequiredFor(model?.cargo);
+        // A driver is required. Use the one already assigned, else grab the
+        // most experienced free driver — picking by level first means an
+        // auto-assign quietly satisfies a license requirement whenever a
+        // qualified driver is actually available, instead of failing on
+        // whichever free driver happened to be first in the list.
         let driverId = t.driverId;
-        if (!driverId || !s.staff.some(x => x.id === driverId && x.role === 'driver')) {
-          const free = s.staff.find(x => x.role === 'driver' && (!x.truckId || x.truckId === truckId));
-          if (!free) return { ok: false, err: 'No available driver — hire or free up a driver first' };
-          driverId = free.id;
+        let driver = s.staff.find(x => x.id === driverId && x.role === 'driver');
+        if (!driver) {
+          const free = s.staff.filter(x => x.role === 'driver' && (!x.truckId || x.truckId === truckId));
+          if (!free.length) return { ok: false, err: 'No available driver — hire or free up a driver first' };
+          driver = free.slice().sort((a, b) => driverLevel(b.xp) - driverLevel(a.xp))[0];
+          driverId = driver.id;
+        }
+        if (license.minDriverLevel > 0 && driverLevel(driver.xp) < license.minDriverLevel) {
+          return { ok: false, err: `${license.name} required for this truck — driver level ${license.minDriverLevel}+ needed (${driver.name} is level ${driverLevel(driver.xp)}). Train up a driver on smaller runs first.` };
         }
         const p = get().previewDelivery(truckId, toCityId, cargoType, cargoTons);
         if (p.err) return { ok: false, err: p.err };

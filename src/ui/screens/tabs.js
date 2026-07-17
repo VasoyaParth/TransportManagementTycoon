@@ -10,7 +10,7 @@ import Svg from 'react-native-svg';
 import {
   useGame, modelById, cargoById, GAME_HOUR_MS, staffMood,
   ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, EASTER_EGGS,
-  LOAN_PRODUCTS, creditScoreOf, DRIVER_PERKS, driverLevel, driverXpForLevel,
+  LOAN_PRODUCTS, creditScoreOf, DRIVER_PERKS, driverLevel, driverXpForLevel, licenseHeldBy,
   CUSTOM_LOAN_MIN, customLoanMax, customLoanTerms,
   companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, WEEKLY_JACKPOT, WEEKLY_CHALLENGE_COUNT, QUEST_CHAIN,
   DAILY_JACKPOT, DAILY_CHALLENGE_COUNT,
@@ -639,7 +639,10 @@ function StaffCard({ member, trucks, onAssign, onFire, onOpen, onPromote }) {
                 <Pill text={mood.label} icon={mood.icon} color={mood.color} bg={mood.color + '22'} />
               ); })()}
               {member.role === 'driver' ? (
-                <Pill text={`Lv ${driverLevel(member.xp)}`} icon="star" color={C.gold} bg={C.amberSoft} />
+                <>
+                  <Pill text={`Lv ${driverLevel(member.xp)}`} icon="star" color={C.gold} bg={C.amberSoft} />
+                  <Pill text={licenseHeldBy(member.xp).name} icon={licenseHeldBy(member.xp).icon} color={C.blue} bg={C.blueSoft} />
+                </>
               ) : null}
               {(member.promoBoostUntil || 0) > Date.now() ? (
                 <Pill text="2× promo" icon="rocket-launch" color={C.gold} bg={C.amberSoft} />
