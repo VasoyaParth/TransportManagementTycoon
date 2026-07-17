@@ -2613,25 +2613,32 @@ export function NotificationsModal({ visible, onClose }) {
   const clearAllNotifications = useGame(s => s.clearAllNotifications);
   const settings = useGame(s => s.settings);
   const saveSettings = useGame(s => s.saveSettings);
-  const [filter, setFilter] = useState('all');
+  const [query, setQuery] = useState('');
   const [shownCount, setShownCount] = useState(NOTIF_PAGE);
   const [confirmClear, setConfirmClear] = useState(false);
   const tapInboxEgg = useEasterEggTap('inbox_zero', 5);
-  useEffect(() => { if (visible) setShownCount(NOTIF_PAGE); }, [visible, filter]);
+  useEffect(() => { if (visible) setShownCount(NOTIF_PAGE); }, [visible, query]);
   useEffect(() => { if (!visible) setConfirmClear(false); }, [visible]);
-  const list = notifications.filter(n => filter === 'all' || (filter === 'delivery' ? n.type === 'delivery' : n.type !== 'delivery'));
+  // Search replaces the old All/Deliveries/System filter chips — matches the
+  // message text plus the category ("delivery" or "system"), so typing
+  // either category name still narrows the list the same way the chips did.
+  const list = notifications.filter(n => smartSearch(query, `${n.message} ${n.type === 'delivery' ? 'delivery' : 'system'}`.toLowerCase(), []));
   const shown = list.slice(0, shownCount);
   const hidden = list.length - shown.length;
   const snoozed = settings.notifSnoozeUntil > Date.now();
   return (
     <Sheet visible={visible} onClose={onClose} title="Notifications" height="82%">
       <Row style={{ justifyContent: 'space-between', marginBottom: 6 }}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }}
-          contentContainerStyle={{ flexDirection: 'row', alignItems: 'center' }}>
-          <Chip label="All" active={filter === 'all'} onPress={() => setFilter('all')} style={{ marginRight: 6 }} />
-          <Chip label="Deliveries" active={filter === 'delivery'} onPress={() => setFilter('delivery')} style={{ marginRight: 6 }} />
-          <Chip label="System" active={filter === 'system'} onPress={() => setFilter('system')} />
-        </ScrollView>
+        <Row style={{ flex: 1, marginRight: 8, borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.md, paddingHorizontal: 10 }}>
+          <Pressable onPress={tapInboxEgg} hitSlop={6}><Icon name="magnify" size={16} color={C.faint} /></Pressable>
+          <TextInput
+            value={query} onChangeText={setQuery} placeholder="Search notifications or 'delivery'/'system'…" placeholderTextColor={C.faint}
+            style={{ flex: 1, paddingVertical: 9, paddingHorizontal: 8, fontSize: 14, color: C.text }}
+          />
+          {query.length > 0 && (
+            <Pressable onPress={() => setQuery('')} hitSlop={6}><Icon name="close-circle" size={16} color={C.faint} /></Pressable>
+          )}
+        </Row>
         <Row>
           <Btn title="Mark all read" kind="ghost" small onPress={() => { tapInboxEgg(); markAllRead(); }} />
           {list.length > 0 && (
@@ -2652,7 +2659,7 @@ export function NotificationsModal({ visible, onClose }) {
         data={shown} keyExtractor={n => n.id} showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 30 }}
         initialNumToRender={NOTIF_PAGE} windowSize={5}
-        ListEmptyComponent={<View style={{ alignItems: 'center', padding: 30 }}><Icon name="bell-sleep-outline" size={30} color={C.faint} /><Text style={[FONT.sub, { marginTop: 6 }]}>Nothing yet.</Text></View>}
+        ListEmptyComponent={<View style={{ alignItems: 'center', padding: 30 }}><Icon name="bell-sleep-outline" size={30} color={C.faint} /><Text style={[FONT.sub, { marginTop: 6 }]}>{notifications.length === 0 ? 'Nothing yet.' : `No notifications match "${query}".`}</Text></View>}
         ListFooterComponent={hidden > 0 ? (
           <Pressable onPress={() => setShownCount(c => c + 15)}
             style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12 }}>
