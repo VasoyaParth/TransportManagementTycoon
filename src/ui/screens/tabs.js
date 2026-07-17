@@ -377,7 +377,7 @@ function HistoryEntry({ h, expanded, onToggle }) {
   );
 }
 
-export function RoutesTab({ onTrack, onNewDelivery }) {
+export function RoutesTab({ onTrack, onNewDelivery, onOpenAutopilot }) {
   const deliveries = useGame(s => s.deliveries);
   const history = useGame(s => s.history);
   const trucks = useGame(s => s.trucks);
@@ -444,6 +444,8 @@ export function RoutesTab({ onTrack, onNewDelivery }) {
           <View style={{ alignItems: 'center' }}><Text style={[FONT.body, { fontWeight: '800', color: '#F8FAFC' }]}>{Math.round(stats.km).toLocaleString('en-IN')}</Text><Text style={[FONT.tiny, { color: '#64748B' }]}>km driven</Text></View>
         </Row>
       </Card>
+
+      <Btn title="Autopilot — custom routes" icon="steering" kind="soft" style={{ marginBottom: 12 }} onPress={onOpenAutopilot} />
 
       {/* ---- View switch ---- */}
       <DropdownPicker
@@ -1426,7 +1428,7 @@ function BankSheet({ visible, onClose }) {
   );
 }
 
-export function EconomyTab() {
+export function EconomyTab({ onOpenInsurance, onOpenAuctions }) {
   const balance = useGame(s => s.balance);
   const gold = useGame(s => s.gold);
   const stats = useGame(s => s.stats);
@@ -1512,6 +1514,14 @@ export function EconomyTab() {
           </View>
           <View style={{ flex: 1 }}>
             <Btn title={loans.length ? `Bank (${loans.length})` : 'Bank & Loans'} icon="bank" kind="green" small onPress={() => setBankOpen(true)} />
+          </View>
+        </Row>
+        <Row style={{ marginTop: 8, gap: 8 }}>
+          <View style={{ flex: 1 }}>
+            <Btn title="Cargo Insurance" icon="shield-car" kind="soft" small onPress={onOpenInsurance} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Btn title="Truck Auctions" icon="gavel" kind="soft" small onPress={onOpenAuctions} />
           </View>
         </Row>
       </Card>
