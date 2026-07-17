@@ -13,7 +13,7 @@ import {
   NewDeliveryModal, TruckDetailModal, TruckCustomizeModal, BuyTruckModal, ContractsModal,
   PowerupsModal, NotificationsModal, SettingsModal, HubsModal, DriverDetailModal, CountriesModal, MiniGamesModal, HubInfoModal,
   BuildingCustomizeModal, CompanyInsightsModal, NewsModal, PhotoModeModal, FinaleModal, FleetLiveryModal, IndustryRankingsModal,
-  AutopilotModal, AuctionsModal,
+  AutopilotModal, AuctionsModal, InsuranceModal,
 } from './modals';
 import { haptic } from '../../engine/haptics';
 import Tutorial from './Tutorial';
@@ -260,6 +260,9 @@ export default function GameScreen() {
               <Pressable style={[st.actionBtn, { marginBottom: 8 }]} onPress={() => { haptic('light'); setModal({ kind: 'auctions' }); }}>
                 <Icon name="gavel" size={19} color={C.text} />
               </Pressable>
+              <Pressable style={[st.actionBtn, { marginBottom: 8 }]} onPress={() => { haptic('light'); setModal({ kind: 'insurance' }); }}>
+                <Icon name="shield-car" size={19} color={C.green} />
+              </Pressable>
             </ScrollView>
           </Animated.View>
           <Pressable style={[st.actionBtn, drawerOpen && { backgroundColor: C.blueSoft, borderColor: C.blue }]} onPress={toggleDrawer}>
@@ -360,6 +363,7 @@ export default function GameScreen() {
       {mounted('rankings') && <IndustryRankingsModal visible={modal?.kind === 'rankings'} onClose={() => setModal(null)} />}
       {mounted('autopilot') && <AutopilotModal visible={modal?.kind === 'autopilot'} onClose={() => setModal(null)} />}
       {mounted('auctions') && <AuctionsModal visible={modal?.kind === 'auctions'} onClose={() => setModal(null)} />}
+      {mounted('insurance') && <InsuranceModal visible={modal?.kind === 'insurance'} onClose={() => setModal(null)} />}
       {mounted('countries') && <CountriesModal visible={modal?.kind === 'countries'} onClose={() => setModal(null)} />}
       {mounted('games') && <MiniGamesModal visible={modal?.kind === 'games'} onClose={() => setModal(null)} />}
       {mounted('buy') && <BuyTruckModal visible={modal?.kind === 'buy'} onClose={() => setModal(null)}

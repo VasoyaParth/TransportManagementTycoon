@@ -31,11 +31,27 @@ const CONTRACT_REFRESH_MIN_MS = 2 * 3600 * 1000;
 const CONTRACT_REFRESH_MAX_MS = 4 * 3600 * 1000;
 const nextRefreshDelay = () =>
   CONTRACT_REFRESH_MIN_MS + Math.random() * (CONTRACT_REFRESH_MAX_MS - CONTRACT_REFRESH_MIN_MS);
-// Cargo Insurance: flat monthly premium (charged alongside salaries), a %
-// of the truck's list price. In exchange, most of an incident's cash loss
-// (theft, accident, weather...) is recovered instead of eaten in full.
-export const INSURANCE_PREMIUM_PCT = 0.008; // 0.8% of price per month
-export const INSURANCE_RECOVERY = 0.85; // fraction of the incident penalty covered
+// Cargo Insurance: pick a plan per truck. Each plan charges a flat monthly
+// premium (a % of the truck's list price, billed alongside salaries) and in
+// exchange covers a fraction of on-road incident cash losses (theft,
+// accident, weather...) plus a discount on the repair bill if the truck
+// breaks down entirely. Higher tiers cost more but cover more.
+export const INSURANCE_PLANS = [
+  { id: 'basic', name: 'Basic Cover', icon: 'shield-outline', pctOfPrice: 0.006, incidentRecovery: 0.6, repairDiscount: 0,
+    desc: 'Cheapest option — recovers 60% of incident cash losses. No help with a full breakdown repair bill.' },
+  { id: 'standard', name: 'Standard Cover', icon: 'shield-half-full', pctOfPrice: 0.012, incidentRecovery: 0.85, repairDiscount: 0.5,
+    desc: 'Recovers 85% of incident losses, plus half off the repair bill if the truck breaks down.' },
+  { id: 'premium', name: 'Premium Cover', icon: 'shield-check', pctOfPrice: 0.02, incidentRecovery: 1.0, repairDiscount: 1.0,
+    desc: 'Full incident recovery and free repairs on a full breakdown — total peace of mind.' },
+];
+// Old saves stored a plain `insured: true` boolean (pre-v10.25.0) — this
+// treats that as equivalent to the Basic plan so nobody's cover silently
+// vanishes on upgrade, without needing a one-shot migration pass.
+export function insurancePlanOf(truck) {
+  if (!truck) return null;
+  const id = truck.insurancePlan || (truck.insured ? 'basic' : null);
+  return id ? INSURANCE_PLANS.find(p => p.id === id) || null : null;
+}
 // Driver Academy: pay cash + take a driver off the road for real hours,
 // come back with a lump XP bonus — buying XP with time instead of km.
 export const ACADEMY_TIERS = [
@@ -1192,7 +1208,10 @@ export const useGame = create(
         if (day - s.lastSalaryDay >= SALARY_EVERY_DAYS) {
           const salaries = s.staff.reduce((a, x) => a + x.salary, 0);
           const upkeep = (s.hubs || []).filter(h => !h.hq).reduce((a, h) => a + (h.maint || hubMaintForCity(cityById(h.cityId))), 0);
-          const premiums = s.trucks.filter(t => t.insured).reduce((a, t) => a + Math.round(modelById(t.modelId).price * INSURANCE_PREMIUM_PCT), 0);
+          const premiums = s.trucks.reduce((a, t) => {
+            const plan = insurancePlanOf(t);
+            return plan ? a + Math.round(modelById(t.modelId).price * plan.pctOfPrice) : a;
+          }, 0);
           const total = salaries + upkeep + premiums;
           if (total > 0) {
             set({ balance: s.balance - total, lastSalaryDay: day });
@@ -1584,8 +1603,9 @@ export const useGame = create(
         const delaySec = Math.round(meta.delayMin + Math.random() * (meta.delayMax - meta.delayMin));
         const penaltyPct = meta.penaltyMin + Math.random() * (meta.penaltyMax - meta.penaltyMin);
         const rawPenalty = Math.round((d.econ.gross || d.econ.net || 0) * penaltyPct);
-        // Cargo Insurance: an insured truck recovers most of the cash loss.
-        const insuredCovered = t.insured ? Math.round(rawPenalty * INSURANCE_RECOVERY) : 0;
+        // Cargo Insurance: an insured truck recovers a plan-dependent slice of the cash loss.
+        const plan = insurancePlanOf(t);
+        const insuredCovered = plan ? Math.round(rawPenalty * plan.incidentRecovery) : 0;
         const penalty = Math.min(s.balance, rawPenalty - insuredCovered);
         const incident = { type, startedAt: now, resolveAt: now + delaySec * 1000, penalty, mechanicCalled: false };
         set({
@@ -1654,7 +1674,9 @@ export const useGame = create(
         const total = byHub.reduce((a, h) => a + h.capacity, 0);
         return { total, used: (s.trucks || []).length, byHub };
       },
-      buyTruck(modelId) {
+      // insurancePlanId is an optional add-on picked at purchase time (see
+      // the Buy Truck confirm step) — the truck is born already covered.
+      buyTruck(modelId, insurancePlanId = null) {
         const s = get();
         const model = modelById(modelId);
         if (!model) return { ok: false, err: 'Unknown model' };
@@ -1665,6 +1687,7 @@ export const useGame = create(
         // Daily showroom deal: today's discounted price is the real price.
         const day = get().gameDay().day;
         const price = dealPriceFor(model, day);
+        const plan = insurancePlanId ? INSURANCE_PLANS.find(p => p.id === insurancePlanId) : null;
         if (s.balance < price) return { ok: false, err: 'Insufficient funds' };
         const hq = cityById(s.company.hqCityId);
         const truck = {
@@ -1672,10 +1695,11 @@ export const useGame = create(
           lat: hq.lat, lng: hq.lng, cityId: hq.id, fuelPct: 100,
           buildEndsAt: Date.now() + model.build * 1000, buildTotalSec: model.build,
           km: 0, deliveries: 0, driverId: null, condition: 100,
+          insurancePlan: plan ? plan.id : null,
         };
         set({ balance: s.balance - price, trucks: [...s.trucks, truck] });
         get().logLedger('truck', 'truck', `Bought ${model.name}${price < model.price ? ' (deal!)' : ''}`, -price);
-        get().notify('truck', 'factory', `${model.name} ordered — building at HQ (${model.build}s).`);
+        get().notify('truck', 'factory', `${model.name} ordered — building at HQ (${model.build}s).${plan ? ` Insured on ${plan.name}.` : ''}`);
         {
           const hqCity = cityById(s.company?.hqCityId);
           const f = flavor('truckReady', { truck: model.name, city: hqCity ? hqCity.name : 'HQ' });
@@ -1704,10 +1728,13 @@ export const useGame = create(
           set({ gold: s.gold - 15, stats: { ...s.stats, goldSpent: (s.stats.goldSpent || 0) + 15 } });
         } else {
           if (!hasMechanic) return { ok: false, err: 'Hire a mechanic to repair trucks (or use 15 Gold)' };
-          // Mechanic skill trims the bill (see mechDiscount).
-          const fee = Math.round(modelById(t.modelId).price * 0.04 * (1 - get().mechDiscount()));
+          // Mechanic skill trims the bill (see mechDiscount); Cargo Insurance
+          // (Standard/Premium plans) trims it further, or waives it entirely.
+          const plan = insurancePlanOf(t);
+          const insDiscount = plan ? plan.repairDiscount : 0;
+          const fee = Math.round(modelById(t.modelId).price * 0.04 * (1 - get().mechDiscount()) * (1 - insDiscount));
           if (s.balance < fee) return { ok: false, err: 'Insufficient funds for repair' };
-          set({ balance: s.balance - fee });
+          if (fee > 0) set({ balance: s.balance - fee });
           get().logLedger('repair', 'wrench-check', `Repair · ${t.customName || modelById(t.modelId).name}`, -fee);
         }
         set({ trucks: get().trucks.map(x => x.id === truckId ? { ...x, status: 'parked' } : x) });
@@ -1739,20 +1766,26 @@ export const useGame = create(
         return { ok: true, cost };
       },
 
-      // Cargo Insurance: opt a truck in for a flat monthly premium (charged
-      // with salaries in dailyTick); in exchange, INSURANCE_RECOVERY of any
-      // on-road incident's cash loss is covered instead of eaten in full.
-      insureTruck(truckId) {
+      // Cargo Insurance: opt a truck into one of INSURANCE_PLANS. A flat
+      // monthly premium is charged alongside salaries (dailyTick); in
+      // exchange, the plan's incidentRecovery share of any on-road incident's
+      // cash loss is covered, plus repairDiscount off a breakdown repair bill.
+      // Set/change/upgrade this truck's insurance plan. Same call handles a
+      // fresh purchase and a plan switch — just pass the new planId.
+      insureTruck(truckId, planId) {
         const s = get();
         const t = s.trucks.find(x => x.id === truckId);
         if (!t) return { ok: false, err: 'Truck not found' };
-        if (t.insured) return { ok: false, err: 'Already insured' };
-        set({ trucks: s.trucks.map(x => x.id === truckId ? { ...x, insured: true } : x) });
-        get().notify('system', 'shield-car', `${t.customName || modelById(t.modelId).name} is now insured — most incident losses will be covered.`);
+        const plan = INSURANCE_PLANS.find(p => p.id === planId);
+        if (!plan) return { ok: false, err: 'Unknown insurance plan' };
+        const current = insurancePlanOf(t)?.id;
+        if (current === planId) return { ok: false, err: `Already on ${plan.name}` };
+        set({ trucks: s.trucks.map(x => x.id === truckId ? { ...x, insurancePlan: planId, insured: undefined } : x) });
+        get().notify('system', plan.icon, `${t.customName || modelById(t.modelId).name} is now on ${plan.name}.`);
         return { ok: true };
       },
       cancelInsurance(truckId) {
-        set({ trucks: get().trucks.map(x => x.id === truckId ? { ...x, insured: false } : x) });
+        set({ trucks: get().trucks.map(x => x.id === truckId ? { ...x, insurancePlan: null, insured: undefined } : x) });
         return { ok: true };
       },
 

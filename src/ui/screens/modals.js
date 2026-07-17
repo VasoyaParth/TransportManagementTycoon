@@ -7,7 +7,7 @@ import RNShare from 'react-native-share';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider, smartSearch, DropdownPicker } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST_MIN, LIVERY_COST_MAX, liveryCostFor, FLEET_LIVERY_DISCOUNT, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds, licenseRequiredFor, INSURANCE_PREMIUM_PCT, INSURANCE_RECOVERY, ACADEMY_TIERS } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST_MIN, LIVERY_COST_MAX, liveryCostFor, FLEET_LIVERY_DISCOUNT, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds, licenseRequiredFor, INSURANCE_PLANS, insurancePlanOf, ACADEMY_TIERS } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
@@ -988,6 +988,51 @@ export function AuctionsModal({ visible, onClose }) {
   );
 }
 
+// ============ Cargo Insurance — overview page ============
+// Every truck, one row each, with its current plan (or "Not insured") and a
+// Manage button that opens the shared InsurancePlanSheet for just that
+// truck — kept off Truck Detail's own page so that page stays light.
+export function InsuranceModal({ visible, onClose }) {
+  const trucks = useGame(s => s.trucks);
+  const [manageId, setManageId] = useState(null);
+  const insuredCount = trucks.filter(t => insurancePlanOf(t)).length;
+
+  return (
+    <Sheet visible={visible} onClose={onClose} title="Cargo Insurance" height="88%">
+      <Card style={{ marginBottom: 12, backgroundColor: C.bgSoft }}>
+        <Row>
+          <Icon name="shield-car" size={16} color={C.blue} />
+          <Text style={[FONT.tiny, { marginLeft: 8, flex: 1, color: C.text }]}>
+            {insuredCount} of {trucks.length} truck{trucks.length === 1 ? '' : 's'} insured. Tap a truck below to buy, switch, or cancel its plan.
+          </Text>
+        </Row>
+      </Card>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+        {trucks.length === 0 ? (
+          <Card style={{ alignItems: 'center', padding: 24 }}>
+            <Icon name="truck-outline" size={34} color={C.faint} />
+            <Text style={[FONT.body, { marginTop: 8, textAlign: 'center' }]}>No trucks yet.</Text>
+          </Card>
+        ) : trucks.map(t => {
+          const m = modelById(t.modelId);
+          const plan = insurancePlanOf(t);
+          return (
+            <Pressable key={t.id} onPress={() => setManageId(t.id)} style={[cs.resRow, { marginBottom: 8 }]}>
+              <Icon name={m.icon} size={20} color={plan ? C.green : C.sub} />
+              <View style={{ marginLeft: 9, flex: 1 }}>
+                <Text style={[FONT.body, { fontWeight: '700' }]}>{t.customName || m.name}</Text>
+                <Text style={FONT.tiny}>{plan ? plan.name : 'Not insured'}</Text>
+              </View>
+              {plan ? <Pill text={plan.name} color={C.green} bg={C.greenSoft} /> : <Btn title="Insure" kind="green" small onPress={() => setManageId(t.id)} />}
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+      <InsurancePlanSheet visible={!!manageId} onClose={() => setManageId(null)} truckId={manageId} />
+    </Sheet>
+  );
+}
+
 function RoutePreview({ points }) {
   const W = 300, H = 110, pad = 10;
   if (!points || points.length < 2) return null;
@@ -1233,6 +1278,54 @@ function TruckHistorySheet({ visible, onClose, log }) {
   );
 }
 
+// Shared plan-picker for a single truck's Cargo Insurance — nested inside
+// whichever Sheet opens it (Truck Detail, or the standalone Insurance
+// overview page), so the plan comparison UI lives in exactly one place.
+function InsurancePlanSheet({ visible, onClose, truckId }) {
+  const toast = useToast();
+  const trucks = useGame(s => s.trucks);
+  const insureTruck = useGame(s => s.insureTruck);
+  const cancelInsurance = useGame(s => s.cancelInsurance);
+  const truck = trucks.find(t => t.id === truckId);
+  if (!truck) return <Sheet visible={visible} onClose={onClose} title="Insurance" height="40%"><View /></Sheet>;
+  const m = modelById(truck.modelId);
+  const currentPlan = insurancePlanOf(truck);
+  return (
+    <Sheet visible={visible} onClose={onClose} title={`Insurance — ${truck.customName || m.name}`} height="72%">
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+        {INSURANCE_PLANS.map(plan => {
+          const active = currentPlan?.id === plan.id;
+          const monthly = Math.round(m.price * plan.pctOfPrice);
+          return (
+            <Card key={plan.id} style={{ marginBottom: 10, borderColor: active ? C.green : C.border, backgroundColor: active ? C.greenSoft : '#fff' }}>
+              <Row>
+                <Icon name={plan.icon} size={20} color={active ? C.green : C.sub} />
+                <View style={{ marginLeft: 9, flex: 1 }}>
+                  <Text style={[FONT.body, { fontWeight: '800' }]}>{plan.name}</Text>
+                  <Text style={FONT.tiny}>{plan.desc}</Text>
+                </View>
+              </Row>
+              <Row style={{ justifyContent: 'space-between', marginTop: 8, alignItems: 'center' }}>
+                <Text style={[FONT.h3, { fontSize: 16 }]}>{inr(monthly)}/mo</Text>
+                {active ? <Pill text="Active" color={C.green} bg={C.greenSoft} /> : (
+                  <Btn title="Select" kind="green" small onPress={() => {
+                    const r = insureTruck(truck.id, plan.id);
+                    toast(r.ok ? `Switched to ${plan.name}!` : r.err, r.ok ? 'success' : 'error');
+                  }} />
+                )}
+              </Row>
+            </Card>
+          );
+        })}
+        {currentPlan && (
+          <Btn title="Cancel Insurance" kind="soft" icon="close-circle-outline" style={{ marginTop: 6 }}
+            onPress={() => { cancelInsurance(truck.id); toast('Insurance cancelled', 'info'); }} />
+        )}
+      </ScrollView>
+    </Sheet>
+  );
+}
+
 export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onShowOnMap, onCustomize }) {
   const toast = useToast();
   const trucks = useGame(s => s.trucks);
@@ -1240,11 +1333,10 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
   const serviceTruck = useGame(s => s.serviceTruck);
   const sellTruck = useGame(s => s.sellTruck);
   const truckResale = useGame(s => s.truckResale);
-  const insureTruck = useGame(s => s.insureTruck);
-  const cancelInsurance = useGame(s => s.cancelInsurance);
   const [confirmSell, setConfirmSell] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  useEffect(() => { if (!visible) { setConfirmSell(false); setHistoryOpen(false); } }, [visible]);
+  const [insOpen, setInsOpen] = useState(false);
+  useEffect(() => { if (!visible) { setConfirmSell(false); setHistoryOpen(false); setInsOpen(false); } }, [visible]);
   const truckLicenseStatus = useGame(s => s.truckLicenseStatus);
   const truck = trucks.find(t => t.id === truckId);
   if (!visible || !truck) return <Sheet visible={visible && !!truck} onClose={onClose} title="Truck" height="50%"><View /></Sheet>;
@@ -1302,26 +1394,23 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
           )}
         </Card>
 
-        <Card style={{ marginTop: 10 }}>
-          <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-            <Row style={{ flex: 1, marginRight: 8 }}>
-              <Icon name="shield-car" size={16} color={truck.insured ? C.green : C.sub} />
-              <View style={{ marginLeft: 8, flex: 1 }}>
-                <Text style={[FONT.body, { fontWeight: '700' }]}>Cargo Insurance</Text>
-                <Text style={FONT.tiny}>
-                  {truck.insured
-                    ? `Insured — ${Math.round(INSURANCE_RECOVERY * 100)}% of incident losses covered`
-                    : `${inr(Math.round(m.price * INSURANCE_PREMIUM_PCT))}/mo — recovers most theft/accident/weather losses`}
-                </Text>
-              </View>
-            </Row>
-            <Btn title={truck.insured ? 'Cancel' : 'Insure'} kind={truck.insured ? 'soft' : 'green'} small
-              onPress={() => {
-                const r = truck.insured ? cancelInsurance(truck.id) : insureTruck(truck.id);
-                toast(r.ok ? (truck.insured ? 'Insurance cancelled' : 'Insured!') : r.err, r.ok ? 'success' : 'error');
-              }} />
-          </Row>
-        </Card>
+        {(() => {
+          const plan = insurancePlanOf(truck);
+          return (
+            <Card style={{ marginTop: 10 }}>
+              <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+                <Row style={{ flex: 1, marginRight: 8 }}>
+                  <Icon name="shield-car" size={16} color={plan ? C.green : C.sub} />
+                  <Text style={[FONT.body, { fontWeight: '700', marginLeft: 8 }]}>
+                    {plan ? `Insured — ${plan.name}` : 'Not insured'}
+                  </Text>
+                </Row>
+                <Btn title="Manage" kind="soft" small onPress={() => setInsOpen(true)} />
+              </Row>
+            </Card>
+          );
+        })()}
+        <InsurancePlanSheet visible={insOpen} onClose={() => setInsOpen(false)} truckId={truck.id} />
 
         {licenseStatus && !licenseStatus.qualified && truck.status === 'parked' && (
           <Card style={{ marginTop: 10, borderColor: C.amber, backgroundColor: C.amberSoft }}>
@@ -1793,10 +1882,12 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1); // showroom loads 10 trucks at a time
   const [confirmModel, setConfirmModel] = useState(null); // full-detail confirm sheet before buying
+  const [buyInsurancePlan, setBuyInsurancePlan] = useState(null); // optional add-on chosen at confirm time
   const gameDay = useGame(st => st.gameDay);
   const day = gameDay().day;
   useEffect(() => { setPage(1); }, [sort, query]);
   useEffect(() => { if (!visible) setConfirmModel(null); }, [visible]);
+  useEffect(() => { setBuyInsurancePlan(null); }, [confirmModel?.id]);
   const tapWindowShopperEgg = useEasterEggTap('window_shopper', 8);
   const SORTS = [
     { key: 'default', label: 'Default' },
@@ -1822,7 +1913,7 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
     return sorted;
   }, [sort, query]);
   const buy = (m) => {
-    const r = buyTruck(m.id);
+    const r = buyTruck(m.id, buyInsurancePlan);
     if (r.ok) { toast(`${m.name} ordered — building at HQ`, 'success'); setConfirmModel(null); }
     else toast(r.err, 'error');
   };
@@ -1938,6 +2029,13 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
                 <SpecRow icon="wrench" label="Maintenance" value={`₹${m.maint}/km`} />
                 <SpecRow icon="factory" label="Build time" value={`${Math.round(m.build / 60)} min at HQ`} />
               </Card>
+              <SectionTitle icon="shield-car" text="Cargo Insurance (optional)" />
+              <DropdownPicker
+                options={[{ key: 'none', label: 'No insurance' }, ...INSURANCE_PLANS.map(p => ({ key: p.id, label: `${p.name} — ${inr(Math.round(m.price * p.pctOfPrice))}/mo` }))]}
+                value={buyInsurancePlan || 'none'} onChange={k => setBuyInsurancePlan(k === 'none' ? null : k)}
+                hint="Add cover now so the truck is protected from day one — you can always change or cancel it later."
+                style={{ marginBottom: 12 }}
+              />
               <Card style={{ marginBottom: 12, backgroundColor: C.bgSoft }}>
                 <Row style={{ justifyContent: 'space-between' }}>
                   <Text style={FONT.body}>Price today</Text>
@@ -1951,6 +2049,7 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
                   <Text style={[FONT.tiny, { fontWeight: '800', color: afford ? C.text : C.red }]}>{inrShort(balance - price)}</Text>
                 </Row>
                 {deal > 0 ? <Text style={[FONT.tiny, { marginTop: 6, color: C.green }]}>Deals rotate every game day — this one is gone tomorrow.</Text> : null}
+                {buyInsurancePlan ? <Text style={[FONT.tiny, { marginTop: 6, color: C.green }]}>Insured on {INSURANCE_PLANS.find(p => p.id === buyInsurancePlan)?.name} from day one.</Text> : null}
               </Card>
               <Btn title={atCapacity ? 'Fleet full' : afford ? `Confirm — buy for ${inrShort(price)}` : 'Insufficient funds'}
                 kind={afford && !atCapacity ? 'green' : 'soft'} icon="cart-check" disabled={!afford || atCapacity} onPress={() => buy(m)} />
