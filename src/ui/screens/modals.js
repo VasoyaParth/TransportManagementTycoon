@@ -14,11 +14,13 @@ import { cityById, suggestDestinations, routeCities } from '../../engine/routing
 import { CITIES } from '../../data/cities';
 import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
 import { TRUCK_MODELS, CARGO_TYPES, POWERUPS, CONTRACT_FLAVORS, LOGOS, AVATARS, TRUCK_COLORS, TRUCK_ACCENTS, TRUCK_LOGOS, CAMPAIGNS } from '../../data/trucks';
+import { HQ_TIERS, GARAGE_TIERS } from '../../data/buildings';
 import { inr, inrShort } from '../../engine/economy';
 import { APP_VERSION, checkForUpdate, fmtMB, cmpVer } from '../../net/updates';
 import { exportBackup, parseBackup, readAutoBackup, pickBackupFile } from '../../engine/backup';
 import { COUNTRIES, COUNTRY_BY_CODE } from '../../data/expansion';
 import { TruckTopShapes, truckShapes, bodyTypeFor, defaultBodyColor } from '../truckArt';
+import { BuildingTopShapes, buildingShapes, DEFAULT_HQ_COLOR, DEFAULT_GARAGE_COLOR } from '../buildingArt';
 import { BrandEmblem } from '../BrandLogo';
 
 // Same top-down truck artwork as the map, framed for list/detail cards.
@@ -48,6 +50,21 @@ function TruckArtBadge({ model, color, accent, logoIcon, size = 56, bg }) {
           <Icon name={logoIcon} size={badge * 0.6} color={trim} />
         </View>
       ) : null}
+    </View>
+  );
+}
+
+// Same shared top-down art as the map's HQ/garage markers, framed for cards —
+// see TruckArtBadge above for the identical pattern applied to trucks.
+function BuildingArtBadge({ kind, color, tier, size = 56, bg }) {
+  const { w, h } = buildingShapes(kind, color, tier);
+  const scale = (size - 8) / h;
+  return (
+    <View style={{ width: size, height: size, borderRadius: 14, backgroundColor: bg || C.bgSoft,
+      alignItems: 'center', justifyContent: 'center' }}>
+      <Svg width={w * scale} height={size - 8} viewBox={`0 0 ${w} ${h}`}>
+        <BuildingTopShapes kind={kind} color={color} tier={tier} />
+      </Svg>
     </View>
   );
 }
@@ -3100,9 +3117,8 @@ export function HubsModal({ visible, onClose, onShowOnMap }) {
             <Card key={h.cityId} style={{ marginBottom: 8 }}>
               <Row style={{ justifyContent: 'space-between' }}>
                 <Row style={{ flex: 1 }}>
-                  <View style={[cs.heroIcon, { width: 40, height: 40, backgroundColor: h.hq ? C.blueSoft : C.bgSoft }]}>
-                    <Icon name={h.hq ? 'office-building-marker' : 'garage-variant'} size={22} color={h.hq ? C.blue : C.text} />
-                  </View>
+                  <BuildingArtBadge kind={h.hq ? 'hq' : 'garage'} color={h.color}
+                    tier={(h.hq ? HQ_TIERS : GARAGE_TIERS)[h.tier || 0]} size={40} bg={h.hq ? C.blueSoft : C.bgSoft} />
                   <View style={{ marginLeft: 10, flex: 1 }}>
                     <Text style={[FONT.body, { fontWeight: '800' }]}>{h.name}</Text>
                     <Text style={FONT.tiny}>{c ? `${c.name}, ${c.state}` : ''}</Text>
@@ -3188,7 +3204,7 @@ export function HubsModal({ visible, onClose, onShowOnMap }) {
 // One modal for both: HQ shows the whole company picture (network, monthly
 // bills incl. electricity, fleet ops); a garage shows its own books and lets
 // you operate the trucks parked there — refuel, dispatch, fast-travel in.
-export function HubInfoModal({ visible, onClose, cityId, onNewDelivery, onOpenTruck }) {
+export function HubInfoModal({ visible, onClose, cityId, onNewDelivery, onOpenTruck, onCustomize }) {
   const toast = useToast();
   const tapHqHomeEgg = useEasterEggTap('hq_home', 5);
   const hubs = useGame(s => s.hubs || []);
@@ -3207,6 +3223,9 @@ export function HubInfoModal({ visible, onClose, cityId, onNewDelivery, onOpenTr
   if (!hub || !city) return <Sheet visible={visible} onClose={onClose} title="Garage" height="40%"><View /></Sheet>;
 
   const isHQ = !!hub.hq;
+  const buildingTiers = isHQ ? HQ_TIERS : GARAGE_TIERS;
+  const buildingTier = buildingTiers[hub.tier || 0] || buildingTiers[0];
+  const nextTier = buildingTiers[(hub.tier || 0) + 1];
   const here = trucks.filter(t => t.cityId === cityId);
   const parked = here.filter(t => t.status === 'parked');
   const delivering = trucks.filter(t => t.status === 'delivering' && deliveries.some(d => d.truckId === t.id && (d.fromCityId === cityId || d.toCityId === cityId)));
@@ -3228,10 +3247,9 @@ export function HubInfoModal({ visible, onClose, cityId, onNewDelivery, onOpenTr
         {/* Hero */}
         <Card style={{ marginBottom: 12, backgroundColor: isHQ ? '#0F172A' : C.bgSoft, borderColor: isHQ ? '#1E293B' : C.border }}>
           <Row>
-            <Pressable onPress={() => { if (isHQ) tapHqHomeEgg(); }}>
-              <View style={[cs.heroIcon, { width: 52, height: 52, backgroundColor: isHQ ? '#1E293B' : C.blueSoft }]}>
-                <Icon name={isHQ ? 'office-building-marker' : 'garage-variant'} size={28} color={isHQ ? '#5B8DF0' : C.blue} />
-              </View>
+            <Pressable onPress={() => { if (isHQ) tapHqHomeEgg(); onCustomize && onCustomize(cityId); }}>
+              <BuildingArtBadge kind={isHQ ? 'hq' : 'garage'} color={hub.color} tier={buildingTier} size={52}
+                bg={isHQ ? '#1E293B' : C.blueSoft} />
             </Pressable>
             <View style={{ marginLeft: 12, flex: 1 }}>
               <Text style={[FONT.h2, isHQ && { color: '#F8FAFC' }]}>{isHQ ? company?.name : hub.name}</Text>
@@ -3240,6 +3258,20 @@ export function HubInfoModal({ visible, onClose, cityId, onNewDelivery, onOpenTr
               </Text>
             </View>
             <Pill text={isHQ ? 'HQ' : 'Garage'} color={isHQ ? '#5B8DF0' : C.blue} bg={isHQ ? '#1E293B' : C.blueSoft} />
+          </Row>
+        </Card>
+
+        {/* Customize — livery + tier upgrade, same pattern as Customize Truck */}
+        <Card style={{ marginBottom: 12 }} onPress={() => onCustomize && onCustomize(cityId)}>
+          <Row style={{ justifyContent: 'space-between' }}>
+            <Row style={{ flex: 1 }}>
+              <BuildingArtBadge kind={isHQ ? 'hq' : 'garage'} color={hub.color} tier={buildingTier} size={44} bg={C.bgSoft} />
+              <View style={{ marginLeft: 10, flex: 1 }}>
+                <Text style={FONT.h3}>Customize {isHQ ? 'HQ' : 'Garage'}</Text>
+                <Text style={FONT.tiny}>{buildingTier.name}{nextTier ? ` · upgrade to ${nextTier.name} available` : ' · top tier'}</Text>
+              </View>
+            </Row>
+            <Icon name="chevron-right" size={20} color={C.faint} />
           </Row>
         </Card>
 
@@ -3346,6 +3378,118 @@ export function HubInfoModal({ visible, onClose, cityId, onNewDelivery, onOpenTr
               );
             })}
           </View>
+        )}
+      </ScrollView>
+    </Sheet>
+  );
+}
+
+// ============ Building Customize (HQ + Garage) ============
+// Opened from the "Customize HQ/Garage" row in HubInfoModal — same building
+// (HQ or a purchased garage) either way, told apart by hub.hq. Colour uses
+// the same free-preview/paid-apply pattern as TruckCustomizeModal; tier
+// upgrades are a bigger commitment (real cash, one tier at a time) so they
+// commit immediately, like buying a truck or a garage.
+export function BuildingCustomizeModal({ visible, onClose, cityId, onBack }) {
+  const toast = useToast();
+  const hubs = useGame(s => s.hubs || []);
+  const balance = useGame(s => s.balance);
+  const gold = useGame(s => s.gold);
+  const upgradeHub = useGame(s => s.upgradeHub);
+  const paintHub = useGame(s => s.paintHub);
+  const hub = hubs.find(h => h.cityId === cityId);
+  const [draftColor, setDraftColor] = useState(undefined);
+
+  useEffect(() => {
+    if (visible && hub) setDraftColor(hub.color || null);
+  }, [visible, cityId]);
+
+  if (!visible || !hub || draftColor === undefined) {
+    return <Sheet visible={visible && !!hub} onClose={onClose} title="Customize" height="50%"><View /></Sheet>;
+  }
+  const isHQ = !!hub.hq;
+  const kind = isHQ ? 'hq' : 'garage';
+  const tiers = isHQ ? HQ_TIERS : GARAGE_TIERS;
+  const curIdx = hub.tier || 0;
+  const curTier = tiers[curIdx] || tiers[0];
+  const nextTier = tiers[curIdx + 1];
+  const dirty = draftColor !== (hub.color || null);
+  const label = isHQ ? 'Headquarters' : hub.name;
+  const defaultColor = isHQ ? DEFAULT_HQ_COLOR : DEFAULT_GARAGE_COLOR;
+
+  const apply = () => {
+    const r = paintHub(cityId, draftColor);
+    toast(r.ok ? 'New paint job applied!' : r.err, r.ok ? 'success' : 'error');
+  };
+  const upgrade = () => {
+    const r = upgradeHub(cityId);
+    toast(r.ok ? `Upgraded to ${nextTier?.name}!` : r.err, r.ok ? 'success' : 'error');
+  };
+
+  return (
+    <Sheet visible={visible} onClose={onClose} title={`Customize ${isHQ ? 'HQ' : 'Garage'}`} height="92%">
+      <ScrollView showsVerticalScrollIndicator={false}>
+        {onBack && (
+          <Pressable onPress={onBack} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }} hitSlop={6}>
+            <Icon name="chevron-left" size={18} color={C.sub} />
+            <Text style={[FONT.sub, { marginLeft: 2 }]}>Back to {label}</Text>
+          </Pressable>
+        )}
+
+        {/* Live preview — paint updates instantly, for free; the building's
+            actual current tier is always shown (tier upgrades commit right away) */}
+        <Card style={{ alignItems: 'center', paddingVertical: 20, backgroundColor: '#0F172A', borderColor: '#1E293B' }}>
+          <BuildingArtBadge kind={kind} color={draftColor} tier={curTier} size={140} bg="transparent" />
+          <Text style={[FONT.tiny, { color: '#94A3B8', marginTop: 10 }]}>{curTier.name} — live preview, {LIVERY_COST} Gold to apply a new colour</Text>
+        </Card>
+
+        <Text style={[FONT.tiny, { marginTop: 14 }]}>PAINT COLOUR</Text>
+        <Row style={{ flexWrap: 'wrap', gap: 8, marginTop: 6 }}>
+          {TRUCK_COLORS.map(c => {
+            const sel = (draftColor || defaultColor) === c.hex;
+            return (
+              <Pressable key={c.id} onPress={() => { haptic('light'); play('tap', 0.3); setDraftColor(c.hex); }}
+                style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: c.hex,
+                  borderWidth: sel ? 3 : 1, borderColor: sel ? C.text : C.border, alignItems: 'center', justifyContent: 'center' }}>
+                {sel ? <Icon name="check" size={16} color="#fff" /> : null}
+              </Pressable>
+            );
+          })}
+        </Row>
+        <Btn
+          title={dirty ? `Apply Paint · ${LIVERY_COST} Gold` : 'No changes yet'}
+          kind={dirty ? 'green' : 'soft'} icon="palette" disabled={!dirty}
+          style={{ marginTop: 12 }}
+          onPress={apply}
+        />
+
+        <Text style={[FONT.tiny, { marginTop: 20 }]}>{isHQ ? 'HEADQUARTERS' : 'GARAGE'} TIER</Text>
+        {tiers.map((t, i) => {
+          const reached = i <= curIdx;
+          const isNext = i === curIdx + 1;
+          return (
+            <Card key={t.id} style={{ marginTop: 8, opacity: reached || isNext ? 1 : 0.55,
+              borderColor: reached ? C.green : isNext ? C.blue : C.border }}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Row style={{ flex: 1 }}>
+                  <Icon name={reached ? 'check-circle' : isNext ? 'arrow-up-bold-circle-outline' : 'lock-outline'}
+                    size={18} color={reached ? C.green : isNext ? C.blue : C.faint} />
+                  <View style={{ marginLeft: 8, flex: 1 }}>
+                    <Text style={[FONT.body, { fontWeight: '700' }]}>{t.name}</Text>
+                    <Text style={FONT.tiny}>
+                      {isHQ ? `${t.floors} floors` : `${t.bays} service bays`}{t.cost > 0 ? ` · ${inr(t.cost)}` : ' · starting tier'}
+                    </Text>
+                  </View>
+                </Row>
+                {isNext && (
+                  <Btn title="Upgrade" kind={balance >= t.cost ? 'blue' : 'soft'} small disabled={balance < t.cost} onPress={upgrade} />
+                )}
+              </Row>
+            </Card>
+          );
+        })}
+        {!nextTier && (
+          <Text style={[FONT.tiny, { marginTop: 10, textAlign: 'center' }]}>Already at the top tier — nothing bigger to build.</Text>
         )}
       </ScrollView>
     </Sheet>

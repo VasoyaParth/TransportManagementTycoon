@@ -12,10 +12,8 @@ export function buildLeafletHtml(initial) {
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <style>
   html,body,#map{margin:0;height:100%;width:100%;background:#EEF1F4;font-family:-apple-system,Roboto,sans-serif}
-  .hq-marker{width:44px;height:48px;filter:drop-shadow(0 3px 5px rgba(0,0,0,.3))}
-  .hq-marker svg{width:44px;height:48px}
-  .hub-marker{width:30px;height:26px;filter:drop-shadow(0 2px 4px rgba(0,0,0,.25))}
-  .hub-marker svg{width:30px;height:26px}
+  .hq-marker{filter:drop-shadow(0 3px 5px rgba(0,0,0,.3))}
+  .hub-marker{filter:drop-shadow(0 2px 4px rgba(0,0,0,.25))}
   .truck3d{transition:transform .3s linear}
   .city-dot{width:8px;height:8px;border-radius:50%;background:#8792A0;border:1.5px solid #fff}
   .city-dot.big{width:12px;height:12px;background:#5C6470}
@@ -61,27 +59,49 @@ function truck3d(color,accent,heading){
    +'<rect x="4" y="29" width="4" height="8" rx="2" fill="#181B20"/><rect x="32" y="29" width="4" height="8" rx="2" fill="#181B20"/>'
    +'</svg></div>';
 }
-// Big HQ office tower (same visual language as the offline map: blue tower,
-// windows, amber flag) — a real building icon, not a circle badge.
-function hqSvg(){return '<svg viewBox="0 0 44 48">'
-  +'<rect x="21" y="2" width="2" height="10" fill="#0B0F14"/>'
-  +'<path d="M23 2 L33 5.5 L23 9 Z" fill="#D97706"/>'
-  +'<path d="M30 44 L30 14 L38 9 L38 39 Z" fill="#1E4FB8"/>'
-  +'<path d="M6 14 L30 14 L38 9 L14 9 Z" fill="#5B8DF0"/>'
-  +'<rect x="6" y="14" width="24" height="30" fill="#2563EB"/>'
-  +'<rect x="9" y="18" width="5" height="5" fill="#DCE7FA"/><rect x="16" y="18" width="5" height="5" fill="#DCE7FA"/><rect x="23" y="18" width="5" height="5" fill="#DCE7FA"/>'
-  +'<rect x="9" y="26" width="5" height="5" fill="#DCE7FA"/><rect x="16" y="26" width="5" height="5" fill="#DCE7FA"/><rect x="23" y="26" width="5" height="5" fill="#DCE7FA"/>'
-  +'<rect x="9" y="34" width="5" height="5" fill="#DCE7FA"/><rect x="16" y="34" width="5" height="5" fill="#DCE7FA"/><rect x="23" y="34" width="5" height="5" fill="#DCE7FA"/>'
-  +'<rect x="14" y="40" width="8" height="4" fill="#DCE7FA"/>'
-  +'</svg>';}
-// Small garage building for purchased hubs.
-function hubSvg(){return '<svg viewBox="0 0 30 26">'
-  +'<path d="M25 24 L25 8 L29 5 L29 21 Z" fill="#464C56"/>'
-  +'<path d="M3 8 L25 8 L29 5 L7 5 Z" fill="#767E8A"/>'
-  +'<rect x="3" y="8" width="22" height="16" fill="#5C6470"/>'
-  +'<rect x="7" y="13" width="14" height="11" rx="1" fill="#E7E9EE"/>'
-  +'<rect x="7" y="16" width="14" height="1.4" fill="#B9BFC9"/><rect x="7" y="19.5" width="14" height="1.4" fill="#B9BFC9"/>'
-  +'</svg>';}
+// Big HQ office tower (same visual language as the offline map: coloured
+// tower, windows, amber flag) — a real building icon, not a circle badge.
+// color is the player's paint job (customizable — see Customize HQ);
+// floors grows with the HQ's upgrade tier so a bigger HQ is visibly
+// bigger, not just a number on a screen. Mirrors buildingArt.js on the RN
+// side — kept hand-in-sync since a WebView string can't import RN modules,
+// same split the truck art already lives with (see truck3d() above).
+function hqSvg(color,floors){
+  color=color||'#2563EB'; floors=floors||3;
+  var dark=shade(color,-0.3), light=shade(color,0.25), glass='#DCE7FA';
+  var W=44, floorH=8, y0=14, faceH=floors*floorH+4, H=y0+faceH+4;
+  var s='<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">'
+    +'<rect x="21" y="2" width="2" height="'+(y0-2)+'" fill="#0B0F14"/>'
+    +'<path d="M23 2 L33 5.5 L23 9 Z" fill="#D97706"/>'
+    +'<path d="M30 '+H+' L30 '+y0+' L38 '+(y0-5)+' L38 '+(H-5)+' Z" fill="'+dark+'"/>'
+    +'<path d="M6 '+y0+' L30 '+y0+' L38 '+(y0-5)+' L14 '+(y0-5)+' Z" fill="'+light+'"/>'
+    +'<rect x="6" y="'+y0+'" width="24" height="'+faceH+'" fill="'+color+'"/>';
+  for(var f=0;f<floors;f++){
+    var wy=y0+4+f*floorH;
+    for(var c=0;c<3;c++) s+='<rect x="'+(9+c*7)+'" y="'+wy+'" width="5" height="5" fill="'+glass+'"/>';
+  }
+  s+='<rect x="14" y="'+(H-4)+'" width="8" height="4" fill="'+glass+'"/></svg>';
+  return s;
+}
+// Small garage building for purchased hubs. bays grows with the garage's
+// upgrade tier — more service doors, visibly wider.
+function hubSvg(color,bays){
+  color=color||'#5C6470'; bays=bays||2;
+  var dark=shade(color,-0.3), light=shade(color,0.2), glass='#E7E9EE';
+  var W=16+bays*12, H=26;
+  var s='<svg width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'">'
+    +'<path d="M'+(W-5)+' '+(H-2)+' L'+(W-5)+' 8 L'+(W-1)+' 5 L'+(W-1)+' '+(H-5)+' Z" fill="'+dark+'"/>'
+    +'<path d="M3 8 L'+(W-5)+' 8 L'+(W-1)+' 5 L7 5 Z" fill="'+light+'"/>'
+    +'<rect x="3" y="8" width="'+(W-8)+'" height="'+(H-8)+'" fill="'+color+'"/>';
+  for(var b=0;b<bays;b++){
+    var bx=6+b*12;
+    s+='<rect x="'+bx+'" y="13" width="9" height="'+(H-13)+'" rx="1" fill="'+glass+'"/>'
+      +'<rect x="'+bx+'" y="15.5" width="9" height="1.4" fill="#B9BFC9"/>'
+      +'<rect x="'+bx+'" y="19" width="9" height="1.4" fill="#B9BFC9"/>';
+  }
+  s+='</svg>';
+  return s;
+}
 
 function boot(){
   var DATA = ${data};
@@ -104,12 +124,22 @@ function boot(){
 
   // (zf() below is hoisted — shared marker zoom factor for HQ/hubs/trucks.)
 
+  // Tier ladders mirror data/buildings.js HQ_TIERS[n].floors / GARAGE_TIERS[n].bays —
+  // hand-synced (see the hqSvg/hubSvg comment above for why).
+  var HQ_TIER_FLOORS=[3,4,5,6], GARAGE_TIER_BAYS=[2,3,4];
+
   // HQ — big building tower icon, anchored at its base, scaled with zoom.
+  // Colour/tier are customizable in-game (Customize HQ) and pushed live via
+  // window.setHQ, same live-update pattern as trucks/hubs.
+  var hqStyle=DATA.hqStyle||{color:null,tier:0};
   function plotHQ(){
     var k=zf();
+    var floors=HQ_TIER_FLOORS[hqStyle.tier||0]||3;
+    var svg=hqSvg(hqStyle.color,floors);
+    var faceH=floors*8+4, H=14+faceH+4, W=44;
     var icon=L.divIcon({className:'',
-      html:'<div class="hq-marker" style="transform:scale('+k+');transform-origin:22px 44px">'+hqSvg()+'</div>',
-      iconSize:[44,48],iconAnchor:[22,44]});
+      html:'<div class="hq-marker" style="transform:scale('+k+');transform-origin:'+(W/2)+'px '+H+'px">'+svg+'</div>',
+      iconSize:[W,H],iconAnchor:[W/2,H]});
     if(hqMarker){ hqMarker.setIcon(icon); }
     else {
       hqMarker=L.marker([DATA.hq.lat,DATA.hq.lng],{icon:icon,zIndexOffset:1000}).addTo(map)
@@ -118,8 +148,10 @@ function boot(){
     }
   }
   plotHQ();
+  window.setHQ=function(style){ hqStyle=style||hqStyle; plotHQ(); };
 
   // Purchased garages/hubs — distinct small garage buildings, live-updatable.
+  // Each hub carries its own colour/tier (h.color/h.tier), same idea as HQ.
   var hubLayer=L.layerGroup().addTo(map), lastHubs=DATA.hubs||[];
   function plotHubs(hubs){
     lastHubs=hubs||lastHubs;
@@ -127,9 +159,12 @@ function boot(){
     var k=zf();
     (lastHubs||[]).forEach(function(h){
       if(h.hq) return;
+      var bays=GARAGE_TIER_BAYS[h.tier||0]||2;
+      var svg=hubSvg(h.color,bays);
+      var W=16+bays*12, H=26;
       var hm=L.marker([h.lat,h.lng],{icon:L.divIcon({className:'',
-        html:'<div class="hub-marker" style="transform:scale('+k+');transform-origin:15px 24px">'+hubSvg()+'</div>',
-        iconSize:[30,26],iconAnchor:[15,24]}),zIndexOffset:900})
+        html:'<div class="hub-marker" style="transform:scale('+k+');transform-origin:'+(W/2)+'px '+(H-2)+'px">'+svg+'</div>',
+        iconSize:[W,H],iconAnchor:[W/2,H-2]}),zIndexOffset:900})
         .bindTooltip('<b>'+h.name+'</b><br><small>Garage — tap for details</small>',{direction:'top'});
       hm.on('click',function(){ post({type:'hubTap',cityId:h.cityId}); });
       hubLayer.addLayer(hm);
