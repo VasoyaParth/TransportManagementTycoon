@@ -1961,9 +1961,11 @@ function TierDots({ reached, total }) {
 export function RewardsTab({ onOpenGames }) {
   const login = useGame(s => s.login || { streak: 0, lastDay: '' });
   const gold = useGame(s => s.gold);
-  const state = useGame(s => s);
-  const unlocked = state.achievements?.unlocked || {};
-  const found = state.easterEggs?.found || [];
+  // Narrow selectors — this used to be `useGame(s => s)`, subscribing to the
+  // whole store, so this tab (mounted whenever "Rewards" is open) re-rendered
+  // on literally any state change anywhere in the app.
+  const unlocked = useGame(s => s.achievements?.unlocked || {});
+  const found = useGame(s => s.easterEggs?.found || []);
   const tapStreakEgg = useEasterEggTap('streak_freak', 11);
   const [showAll, setShowAll] = useState(false);
   const weeklyProgress = useGame(s => s.weeklyProgress);

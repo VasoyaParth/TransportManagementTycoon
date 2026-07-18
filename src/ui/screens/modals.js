@@ -964,7 +964,10 @@ export function AuctionsModal({ visible, onClose }) {
   const sellToAuction = useGame(s => s.sellToAuction);
   const truckResale = useGame(s => s.truckResale);
   const [page, setPage] = useState('buy');
-  useTick(visible, 1000); // live countdowns + bot-bid ticks while the sheet is open
+  // Only the Buy/Live Bidding page has anything time-based (countdowns) to
+  // refresh every second — no need to force a re-render while the Sell page
+  // is showing, or while the sheet is closed.
+  useTick(visible && page === 'buy', 1000);
 
   if (!visible) return <Sheet visible={false} onClose={onClose} title="Truck Auctions" height="88%"><View /></Sheet>;
   const sellable = trucks.filter(t => t.status === 'parked' || t.status === 'broken');
@@ -1139,15 +1142,27 @@ export function InsuranceModal({ visible, onClose }) {
           </Card>
         ) : trucks.map(t => {
           const m = modelById(t.modelId);
+          const pm = propMeta[m.propulsion];
           const plan = insurancePlanOf(t);
+          const condition = Math.round(t.condition == null ? 100 : t.condition);
+          const conditionColor = condition >= 70 ? C.green : condition >= 40 ? C.amber : C.red;
           return (
-            <Pressable key={t.id} onPress={() => setManageId(t.id)} style={[cs.resRow, { marginBottom: 8 }]}>
-              <Icon name={m.icon} size={20} color={plan ? C.green : C.sub} />
-              <View style={{ marginLeft: 9, flex: 1 }}>
-                <Text style={[FONT.body, { fontWeight: '700' }]}>{t.customName || m.name}</Text>
-                <Text style={FONT.tiny}>{plan ? plan.name : 'Not insured'}</Text>
-              </View>
-              {plan ? <Pill text={plan.name} color={C.green} bg={C.greenSoft} /> : <Btn title="Insure" kind="green" small onPress={() => setManageId(t.id)} />}
+            <Pressable key={t.id} onPress={() => setManageId(t.id)}>
+              <Card style={{ marginBottom: 10, borderColor: plan ? C.green : C.border }}>
+                <Row>
+                  <TruckArtBadge model={m} color={t.color} accent={t.accentColor} logoIcon={t.logoIcon}
+                    pattern={t.pattern} booster={t.booster} rimColor={t.rimColor} size={56} bg={pm.bg} />
+                  <View style={{ marginLeft: 10, flex: 1 }}>
+                    <Text style={[FONT.body, { fontWeight: '800' }]}>{t.customName || m.name}</Text>
+                    <Text style={FONT.tiny}>{m.brand} · {condition}% condition</Text>
+                    <Row style={{ marginTop: 4 }}>
+                      {plan ? <Pill text={plan.name} icon={plan.icon} color={C.green} bg={C.greenSoft} /> : <Pill text="Not insured" icon="shield-off-outline" color={C.sub} bg={C.bgSoft} />}
+                    </Row>
+                  </View>
+                  {!plan && <Btn title="Insure" kind="green" small onPress={() => setManageId(t.id)} />}
+                </Row>
+                <Progress pct={condition} color={conditionColor} style={{ marginTop: 10 }} />
+              </Card>
             </Pressable>
           );
         })}
@@ -1413,9 +1428,18 @@ function InsurancePlanSheet({ visible, onClose, truckId }) {
   const truck = trucks.find(t => t.id === truckId);
   if (!truck) return <Sheet visible={visible} onClose={onClose} title="Insurance" height="40%"><View /></Sheet>;
   const m = modelById(truck.modelId);
+  const pm = propMeta[m.propulsion];
   const currentPlan = insurancePlanOf(truck);
   return (
     <Sheet visible={visible} onClose={onClose} title={`Insurance — ${truck.customName || m.name}`} height="72%">
+      <Row style={{ marginBottom: 12 }}>
+        <TruckArtBadge model={m} color={truck.color} accent={truck.accentColor} logoIcon={truck.logoIcon}
+          pattern={truck.pattern} booster={truck.booster} rimColor={truck.rimColor} size={52} bg={pm.bg} />
+        <View style={{ marginLeft: 10, flex: 1 }}>
+          <Text style={[FONT.body, { fontWeight: '800' }]}>{truck.customName || m.name}</Text>
+          <Text style={FONT.tiny}>{m.brand}</Text>
+        </View>
+      </Row>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
         {INSURANCE_PLANS.map(plan => {
           const active = currentPlan?.id === plan.id;
@@ -4689,20 +4713,30 @@ function PMStatTile({ icon, label, value, color, theme }) {
 }
 export function PhotoModeModal({ visible, onClose }) {
   const toast = useToast();
-  const state = useGame(s => s);
+  // Narrow selectors — this used to be `useGame(s => s)`, subscribing to the
+  // whole store, so it re-rendered on literally any state change anywhere
+  // in the app while this sheet was mounted. Only these slices are read below.
+  const company = useGame(s => s.company);
+  const trucks = useGame(s => s.trucks);
+  const staff = useGame(s => s.staff);
+  const stats = useGame(s => s.stats);
+  const hubs = useGame(s => s.hubs);
+  const history = useGame(s => s.history || []);
+  const easterEggs = useGame(s => s.easterEggs);
+  const achievements = useGame(s => s.achievements);
+  const unlockedCountries = useGame(s => s.unlockedCountries);
   const [mode, setMode] = useState('dark'); // 'dark' | 'light' card theme
   const [capturing, setCapturing] = useState(false);
   const shotRef = useRef(null);
   useEffect(() => { if (!visible) setCapturing(false); }, [visible]);
   if (!visible) return <Sheet visible={false} onClose={onClose} title="Photo Mode" height="90%"><View /></Sheet>;
-  const company = state.company;
+  const state = { company, trucks, staff, stats, hubs, history, easterEggs, achievements, unlockedCountries };
   if (!company) return <Sheet visible={visible} onClose={onClose} title="Photo Mode" height="40%"><View /></Sheet>;
   const t = PM_THEMES[mode];
   const hq = cityById(company.hqCityId);
   const xp = companyXP(state);
   const level = companyLevelOf(xp);
   const ageDays = Math.max(1, Math.round((Date.now() - company.createdAt) / 86400000));
-  const history = state.history || [];
   const longest = history.length ? [...history].sort((a, b) => b.km - a.km)[0] : null;
   const bestTrip = history.length ? [...history].sort((a, b) => b.net - a.net)[0] : null;
   const gemsFound = (state.easterEggs?.found || []).length;

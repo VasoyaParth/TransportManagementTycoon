@@ -1883,6 +1883,13 @@ export const useGame = create(
         const session = s.auctionSession;
         if (!session || !session.listings.length) return;
         const now = Date.now();
+        // Cheap early-out: most of the 12h session most ticks have nothing
+        // due at all (bot bids and close times are sparse), so skip the
+        // fleetCapacity() call and the full listings rebuild unless
+        // something is actually ready to apply this second.
+        const anyDue = session.listings.some(l => !l.closed
+          && ((l.appliedCount < l.schedule.length && l.schedule[l.appliedCount].ts <= now) || l.endsAt <= now));
+        if (!anyDue) return;
         let changed = false;
         let cashDelta = 0;
         const newTrucks = [];
