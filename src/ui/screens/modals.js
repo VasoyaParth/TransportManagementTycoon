@@ -7,7 +7,7 @@ import RNShare from 'react-native-share';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider, smartSearch, DropdownPicker, StatusTabs } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST_MIN, LIVERY_COST_MAX, liveryCostFor, FLEET_LIVERY_DISCOUNT, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds, licenseRequiredFor, INSURANCE_PLANS, insurancePlanOf, ACADEMY_TIERS } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST_MIN, LIVERY_COST_MAX, liveryCostFor, FLEET_LIVERY_DISCOUNT, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds, INSURANCE_PLANS, insurancePlanOf, ACADEMY_TIERS } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
@@ -416,7 +416,6 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
   const trucks = useGame(s => s.trucks);
   const startDelivery = useGame(s => s.startDelivery);
   const previewDelivery = useGame(s => s.previewDelivery);
-  const truckLicenseStatus = useGame(s => s.truckLicenseStatus);
   const pricing = useGame(s => s.pricing);
   const unlockedCountries = useGame(s => s.unlockedCountries || ['IN']);
   const parked = trucks.filter(t => t.status === 'parked');
@@ -468,7 +467,6 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
 
   if (!visible) return <Sheet visible={false} onClose={onClose} title="New Delivery" height="88%"><View /></Sheet>;
   const destCity = dest ? cityById(dest) : null;
-  const licenseStatus = truckId ? truckLicenseStatus(truckId) : null;
 
   const confirm = () => {
     const r = startDelivery(truckId, dest, cargo, clampTons, contract?.id);
@@ -661,17 +659,8 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
               </Card>
             )}
 
-            {licenseStatus && !licenseStatus.qualified && (
-              <Row style={{ marginTop: 12, backgroundColor: C.redSoft, borderRadius: RADIUS.md, padding: 10 }}>
-                <Icon name={licenseStatus.license.icon} size={16} color={C.red} />
-                <Text style={[FONT.tiny, { marginLeft: 8, flex: 1, color: C.text }]}>
-                  {licenseStatus.license.name} required — needs a level {licenseStatus.license.minDriverLevel}+ driver
-                  {licenseStatus.driver ? ` (${licenseStatus.driver.name} is level ${driverLevel(licenseStatus.driver.xp)})` : ' (no driver available)'}. Level one up on smaller trucks first.
-                </Text>
-              </Row>
-            )}
             <Btn title="Start Delivery" kind="green" icon="truck-fast" style={{ marginTop: 14, marginBottom: 30 }}
-              disabled={!preview || !!preview.err || (licenseStatus && !licenseStatus.qualified)} onPress={confirm} />
+              disabled={!preview || !!preview.err} onPress={confirm} />
           </>
         )}
       </ScrollView>
@@ -957,38 +946,61 @@ export function AutopilotModal({ visible, onClose, onPickOnMap, pickResult }) {
 // bidding-war bonus over the normal trade-in resale value.
 export function AuctionsModal({ visible, onClose }) {
   const toast = useToast();
-  const auctionListings = useGame(s => s.auctionListings || []);
+  const auctionSession = useGame(s => s.auctionSession || { startedAt: 0, listings: [] });
   const trucks = useGame(s => s.trucks);
-  const buyAuctionListing = useGame(s => s.buyAuctionListing);
+  const placeBid = useGame(s => s.placeBid);
+  const minAuctionBid = useGame(s => s.minAuctionBid);
   const sellToAuction = useGame(s => s.sellToAuction);
   const truckResale = useGame(s => s.truckResale);
   const [page, setPage] = useState('buy');
+  useTick(visible, 1000); // live countdowns + bot-bid ticks while the sheet is open
 
   if (!visible) return <Sheet visible={false} onClose={onClose} title="Truck Auctions" height="88%"><View /></Sheet>;
   const sellable = trucks.filter(t => t.status === 'parked' || t.status === 'broken');
+  const listings = auctionSession.listings || [];
+  const open = listings.filter(l => !l.closed);
+  const sessionLeftSec = Math.max(0, (auctionSession.startedAt + 12 * 3600 * 1000 - Date.now()) / 1000);
 
   return (
     <Sheet visible={visible} onClose={onClose} title="Truck Auctions" height="88%">
       <DropdownPicker
         icon="gavel"
-        options={[{ key: 'buy', label: `This Week's Stock (${auctionListings.length})` }, { key: 'sell', label: 'Sell a Truck' }]}
+        options={[{ key: 'buy', label: `Live Bidding (${open.length})` }, { key: 'sell', label: 'Sell a Truck' }]}
         value={page} onChange={setPage}
-        hint="Switch between buying this week's used stock and auctioning off one of your own trucks."
+        hint="Switch between bidding on this session's used stock and auctioning off one of your own trucks."
       />
+      {page === 'buy' && (
+        <Card style={{ marginBottom: 10, backgroundColor: C.bgSoft }}>
+          <Row>
+            <Icon name="timer-sand" size={16} color={C.blue} />
+            <Text style={[FONT.tiny, { marginLeft: 8, flex: 1, color: C.text }]}>
+              This session resets in {fmtDur(sessionLeftSec)} — bots keep bidding on every listing until its own close time. Outbid them before it shuts.
+            </Text>
+          </Row>
+        </Card>
+      )}
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
         {page === 'buy' ? (
-          auctionListings.length === 0 ? (
+          listings.length === 0 ? (
             <Card style={{ alignItems: 'center', padding: 24 }}>
               <Icon name="gavel" size={34} color={C.faint} />
-              <Text style={[FONT.body, { marginTop: 8, textAlign: 'center' }]}>No stock right now — check back when a fresh batch rolls in.</Text>
+              <Text style={[FONT.body, { marginTop: 8, textAlign: 'center' }]}>No stock right now — check back when a fresh session opens.</Text>
             </Card>
-          ) : auctionListings.map(l => {
+          ) : listings.map(l => {
             const m = modelById(l.modelId);
             const pm = propMeta[m.propulsion];
             const conditionColor = l.condition >= 70 ? C.green : l.condition >= 40 ? C.amber : C.red;
-            const discountPct = Math.round((1 - l.price / m.price) * 100);
+            const closed = l.closed || l.endsAt <= Date.now();
+            const youLead = !closed && l.currentBidder === 'you';
+            const minBid = minAuctionBid(l);
+            const timeLeft = Math.max(0, (l.endsAt - Date.now()) / 1000);
             return (
-              <Card key={l.id} style={{ marginBottom: 10 }}>
+              <Card key={l.id} style={{ marginBottom: 10, borderColor: youLead ? C.green : C.border }}>
+                {closed && (
+                  <View style={{ position: 'absolute', top: -1, right: 12, backgroundColor: l.currentBidder === 'you' ? C.green : C.faint, borderBottomLeftRadius: 8, borderBottomRightRadius: 8, paddingHorizontal: 8, paddingVertical: 3 }}>
+                    <Text style={{ color: '#fff', fontWeight: '900', fontSize: 10 }}>{l.currentBidder === 'you' ? 'YOU WON' : 'CLOSED'}</Text>
+                  </View>
+                )}
                 <Row>
                   <TruckArtBadge model={m} size={64} bg={pm.bg} />
                   <View style={{ marginLeft: 10, flex: 1 }}>
@@ -1012,14 +1024,20 @@ export function AuctionsModal({ visible, onClose }) {
                 </View>
                 <Row style={{ justifyContent: 'space-between', marginTop: 10, alignItems: 'center' }}>
                   <View>
-                    <Text style={[FONT.tiny, { textDecorationLine: 'line-through', color: C.faint }]}>{inr(m.price)} new</Text>
-                    <Text style={[FONT.h3, { color: C.green }]}>{inr(l.price)}{discountPct > 0 ? ` (-${discountPct}%)` : ''}</Text>
+                    <Text style={FONT.tiny}>{l.bidCount || 0} bid{l.bidCount === 1 ? '' : 's'} · high bidder: {l.currentBidder === 'you' ? 'You' : l.currentBidder === 'bot' ? 'Another buyer' : 'None yet'}</Text>
+                    <Text style={[FONT.h3, { color: youLead ? C.green : C.text }]}>{inr(l.currentBid)}</Text>
                   </View>
-                  <Btn title="Buy" kind="green" onPress={() => {
-                    const r = buyAuctionListing(l.id);
-                    toast(r.ok ? 'Truck won — parked at HQ!' : r.err, r.ok ? 'success' : 'error');
-                  }} />
+                  {!closed && (
+                    <Text style={[FONT.tiny, { color: timeLeft < 300 ? C.red : C.faint, fontWeight: '700' }]}>{fmtDur(timeLeft)} left</Text>
+                  )}
                 </Row>
+                {!closed && (
+                  <Btn title={youLead ? `Raise to ${inr(minBid)}` : `Bid ${inr(minBid)}`} kind={youLead ? 'soft' : 'green'} style={{ marginTop: 10 }}
+                    onPress={() => {
+                      const r = placeBid(l.id, minBid);
+                      toast(r.ok ? `Bid placed — you're leading at ${inr(minBid)}!` : r.err, r.ok ? 'success' : 'error');
+                    }} />
+                )}
               </Card>
             );
           })
@@ -1446,13 +1464,11 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
   const [historyOpen, setHistoryOpen] = useState(false);
   const [insOpen, setInsOpen] = useState(false);
   useEffect(() => { if (!visible) { setConfirmSell(false); setHistoryOpen(false); setInsOpen(false); } }, [visible]);
-  const truckLicenseStatus = useGame(s => s.truckLicenseStatus);
   const truck = trucks.find(t => t.id === truckId);
   if (!visible || !truck) return <Sheet visible={visible && !!truck} onClose={onClose} title="Truck" height="50%"><View /></Sheet>;
   // Everything below renders ONCE per open (plus on real state changes) —
   // no per-second tick here; live data lives inside <TruckLivePanel/>.
   const m = modelById(truck.modelId);
-  const licenseStatus = truckLicenseStatus(truck.id);
   const meta = statusMeta[truck.status];
   const mechDisc = useGame.getState().mechDiscount();
   const fee = Math.round(m.price * 0.04 * (1 - mechDisc));
@@ -1521,18 +1537,6 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
         })()}
         <InsurancePlanSheet visible={insOpen} onClose={() => setInsOpen(false)} truckId={truck.id} />
 
-        {licenseStatus && !licenseStatus.qualified && truck.status === 'parked' && (
-          <Card style={{ marginTop: 10, borderColor: C.amber, backgroundColor: C.amberSoft }}>
-            <Row>
-              <Icon name={licenseStatus.license.icon} size={16} color={C.amber} />
-              <Text style={[FONT.tiny, { marginLeft: 8, flex: 1, color: C.text }]}>
-                {licenseStatus.license.name} required to drive this truck — level {licenseStatus.license.minDriverLevel}+ needed
-                {licenseStatus.driver ? ` (${licenseStatus.driver.name} is level ${driverLevel(licenseStatus.driver.xp)})` : ' (no driver on staff yet)'}.
-              </Text>
-            </Row>
-          </Card>
-        )}
-
         {truck.autopilot && (() => {
           const route = useGame.getState().customRoutes.find(r => r.id === truck.autopilot.routeId);
           return (
@@ -1554,10 +1558,6 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
           <Text style={[FONT.h3, { marginBottom: 4 }]}>Specifications</Text>
           <SpecRow icon="speedometer" label="Top speed" value={`${m.speed} km/h`} />
           <SpecRow icon="weight" label="Cargo capacity" value={`${m.cargo} t`} />
-          {licenseStatus?.license.minDriverLevel > 0 && (
-            <SpecRow icon={licenseStatus.license.icon} label="Requires"
-              value={`${licenseStatus.license.name} (Lv.${licenseStatus.license.minDriverLevel}+)`} />
-          )}
           {m.propulsion === 'electric'
             ? <SpecRow icon="battery-high" label="Battery" value={`${m.battery} kWh`} />
             : <SpecRow icon="fuel" label="Fuel tank" value={`${m.tank} L`} />}
@@ -2069,7 +2069,6 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
           const deal = truckDealFor(m.id, day);
           const price = dealPriceFor(m, day);
           const afford = balance >= price;
-          const license = licenseRequiredFor(m.cargo);
           return (
             <Card style={{ marginBottom: 10, borderColor: deal > 0 ? C.green : C.border }}>
               {deal > 0 && (
@@ -2084,7 +2083,6 @@ export function BuyTruckModal({ visible, onClose, onOpenHQ }) {
                   <Text style={FONT.tiny}>{m.brand}</Text>
                   <Row style={{ marginTop: 4, gap: 6, flexWrap: 'wrap' }}>
                     <Pill text={pm.label} icon={pm.icon} color={pm.color} bg={pm.bg} /><Stars rating={m.rating} size={11} />
-                    {license.minDriverLevel > 0 && <Pill text={`Needs Lv.${license.minDriverLevel}+ driver`} icon={license.icon} color={C.amber} bg={C.amberSoft} />}
                   </Row>
                 </View>
               </Row>
