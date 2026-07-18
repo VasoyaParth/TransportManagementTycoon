@@ -6,7 +6,7 @@ import ViewShot from 'react-native-view-shot';
 import RNShare from 'react-native-share';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
-import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider, smartSearch, DropdownPicker } from '../components';
+import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider, smartSearch, DropdownPicker, StatusTabs } from '../components';
 import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST_MIN, LIVERY_COST_MAX, liveryCostFor, FLEET_LIVERY_DISCOUNT, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds, licenseRequiredFor, INSURANCE_PLANS, insurancePlanOf, ACADEMY_TIERS } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
@@ -3203,26 +3203,38 @@ export function NotificationsModal({ visible, onClose }) {
   const settings = useGame(s => s.settings);
   const saveSettings = useGame(s => s.saveSettings);
   const [query, setQuery] = useState('');
+  const [catFilter, setCatFilter] = useState('all'); // all | unread | delivery | truck | system
   const [shownCount, setShownCount] = useState(NOTIF_PAGE);
   const [confirmClear, setConfirmClear] = useState(false);
   const tapInboxEgg = useEasterEggTap('inbox_zero', 5);
-  useEffect(() => { if (visible) setShownCount(NOTIF_PAGE); }, [visible, query]);
+  useEffect(() => { if (visible) setShownCount(NOTIF_PAGE); }, [visible, query, catFilter]);
   useEffect(() => { if (!visible) setConfirmClear(false); }, [visible]);
   if (!visible) return <Sheet visible={false} onClose={onClose} title="Notifications" height="82%"><View /></Sheet>;
-  // Search replaces the old All/Deliveries/System filter chips — matches the
-  // message text plus the category ("delivery" or "system"), so typing
-  // either category name still narrows the list the same way the chips did.
-  const list = notifications.filter(n => smartSearch(query, `${n.message} ${n.type === 'delivery' ? 'delivery' : 'system'}`.toLowerCase(), []));
+  // Tabs pick the bucket (Unread/Delivery/Truck/System); search narrows
+  // further within it — matches the message text plus the category name.
+  const catTabs = [
+    { key: 'all', label: 'All', count: notifications.length },
+    { key: 'unread', label: 'Unread', count: notifications.filter(n => !n.read).length },
+    { key: 'delivery', label: 'Delivery', count: notifications.filter(n => n.type === 'delivery').length },
+    { key: 'truck', label: 'Truck', count: notifications.filter(n => n.type === 'truck').length },
+    { key: 'system', label: 'System', count: notifications.filter(n => n.type === 'system').length },
+  ];
+  const list = notifications.filter(n => {
+    if (catFilter === 'unread' && n.read) return false;
+    if ((catFilter === 'delivery' || catFilter === 'truck' || catFilter === 'system') && n.type !== catFilter) return false;
+    return smartSearch(query, `${n.message} ${n.type}`.toLowerCase(), []);
+  });
   const shown = list.slice(0, shownCount);
   const hidden = list.length - shown.length;
   const snoozed = settings.notifSnoozeUntil > Date.now();
   return (
     <Sheet visible={visible} onClose={onClose} title="Notifications" height="82%">
+      {notifications.length > 0 && <StatusTabs tabs={catTabs} value={catFilter} onChange={setCatFilter} />}
       <Row style={{ justifyContent: 'space-between', marginBottom: 6 }}>
         <Row style={{ flex: 1, marginRight: 8, borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.md, paddingHorizontal: 10 }}>
           <Pressable onPress={tapInboxEgg} hitSlop={6}><Icon name="magnify" size={16} color={C.faint} /></Pressable>
           <TextInput
-            value={query} onChangeText={setQuery} placeholder="Search notifications or 'delivery'/'system'…" placeholderTextColor={C.faint}
+            value={query} onChangeText={setQuery} placeholder="Search notifications…" placeholderTextColor={C.faint}
             style={{ flex: 1, paddingVertical: 9, paddingHorizontal: 8, fontSize: 14, color: C.text }}
           />
           {query.length > 0 && (
@@ -3249,7 +3261,7 @@ export function NotificationsModal({ visible, onClose }) {
         data={shown} keyExtractor={n => n.id} showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 30 }}
         initialNumToRender={NOTIF_PAGE} windowSize={5}
-        ListEmptyComponent={<View style={{ alignItems: 'center', padding: 30 }}><Icon name="bell-sleep-outline" size={30} color={C.faint} /><Text style={[FONT.sub, { marginTop: 6 }]}>{notifications.length === 0 ? 'Nothing yet.' : `No notifications match "${query}".`}</Text></View>}
+        ListEmptyComponent={<View style={{ alignItems: 'center', padding: 30 }}><Icon name="bell-sleep-outline" size={30} color={C.faint} /><Text style={[FONT.sub, { marginTop: 6 }]}>{notifications.length === 0 ? 'Nothing yet.' : query ? `No notifications match "${query}".` : 'Nothing in this filter.'}</Text></View>}
         ListFooterComponent={hidden > 0 ? (
           <Pressable onPress={() => setShownCount(c => c + 15)}
             style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12 }}>

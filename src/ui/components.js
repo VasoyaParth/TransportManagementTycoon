@@ -241,6 +241,39 @@ export function DropdownPicker({ label, icon, options, value, onChange, style, o
   );
 }
 
+// Horizontal count-tab strip — e.g. "All (12)  Parked (4)  Delivering (6)".
+// Pairs with a search box (search narrows further within whichever tab is
+// active) rather than replacing it — tabs answer "which bucket", search
+// answers "which one in that bucket". flexGrow:0 on the ScrollView + a
+// per-item marginRight (not a Row+gap) — that combo is what keeps every
+// pill full-size instead of shrinking to fit (see the chip shrink bug fix).
+export function StatusTabs({ tabs, value, onChange, style }) {
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[{ flexGrow: 0, marginBottom: 10 }, style]}
+      contentContainerStyle={{ paddingRight: 8 }}>
+      {tabs.map(t => {
+        const active = t.key === value;
+        return (
+          <Pressable key={t.key} onPress={() => { haptic('light'); onChange(t.key); }}
+            style={{
+              flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 7,
+              borderRadius: 20, borderWidth: 1, borderColor: active ? C.blue : C.border,
+              backgroundColor: active ? C.blueSoft : '#fff', marginRight: 8,
+            }}>
+            <Text style={{ fontSize: 13, fontWeight: '700', color: active ? C.blue : C.text }}>{t.label}</Text>
+            <View style={{
+              marginLeft: 6, minWidth: 19, paddingHorizontal: 5, height: 19, borderRadius: 10,
+              alignItems: 'center', justifyContent: 'center', backgroundColor: active ? C.blue : C.bgSoft,
+            }}>
+              <Text style={{ fontSize: 10.5, fontWeight: '800', color: active ? '#fff' : C.sub }}>{t.count}</Text>
+            </View>
+          </Pressable>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
 export const statusMeta = {
   parked: { label: 'Parked', color: C.blue, bg: C.blueSoft, icon: 'parking' },
   delivering: { label: 'On Delivery', color: C.green, bg: C.greenSoft, icon: 'truck-fast' },
