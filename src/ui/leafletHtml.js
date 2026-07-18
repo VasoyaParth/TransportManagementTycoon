@@ -335,12 +335,34 @@ function boot(){
     });
     routeLines[r.id]=arr;
   }
-  var corridorLines={};
+  // Discovered corridors ("every route ever driven") — OFF by default so the
+  // map only shows currently-running deliveries, not a permanent overlay of
+  // every past route (that overlay only grows over a save and was a real
+  // source of map lag). Coordinates are always remembered (cheap, no DOM
+  // cost); the actual Leaflet polyline is only built while corridorsOn.
+  var corridorsOn=false, corridorLayer=L.layerGroup();
+  var corridorData={}, corridorLines={};
   function setCorridor(c){
-    if(corridorLines[c.id]) return; // static once drawn
-    var coords=c.points.map(function(p){return [p.lat,p.lng];});
-    corridorLines[c.id]=L.polyline(coords,{color:'#2563EB',weight:3,opacity:.22}).addTo(map);
+    if(corridorData[c.id]) return; // static once recorded
+    corridorData[c.id]=c.points.map(function(p){return [p.lat,p.lng];});
+    if(corridorsOn) drawCorridor(c.id);
   }
+  function drawCorridor(id){
+    if(corridorLines[id]) return;
+    corridorLines[id]=L.polyline(corridorData[id],{color:'#2563EB',weight:3,opacity:.22}).addTo(corridorLayer);
+  }
+  window.toggleCorridors=function(){
+    corridorsOn=!corridorsOn;
+    if(corridorsOn){
+      corridorLayer.addTo(map);
+      Object.keys(corridorData).forEach(drawCorridor);
+    } else {
+      corridorLayer.clearLayers();
+      corridorLines={};
+      map.removeLayer(corridorLayer);
+    }
+    return corridorsOn;
+  };
   // Saved Autopilot custom routes — each drawn in its own colour, dashed so
   // they read distinctly from a live delivery's solid route line. Redrawn
   // wholesale on every call (cheap: a handful of routes, not per-second).
@@ -377,10 +399,8 @@ function boot(){
     var liveR={};
     (s.routes||[]).forEach(function(r){ liveR[r.id]=1; setRoute(r); });
     Object.keys(routeLines).forEach(function(id){ if(!liveR[id]){ routeLines[id].forEach(function(l){map.removeLayer(l);}); delete routeLines[id]; }});
-    // Discovered corridors stay highlighted.
-    var liveC={};
-    (s.corridors||[]).forEach(function(c){ liveC[c.id]=1; setCorridor(c); });
-    Object.keys(corridorLines).forEach(function(id){ if(!liveC[id]){ map.removeLayer(corridorLines[id]); delete corridorLines[id]; }});
+    // Discovered corridors — recorded always, drawn only while corridorsOn.
+    (s.corridors||[]).forEach(setCorridor);
   };
   // Regional weather overlays (v2.4.0) — drawn ONLY where a zone is active
   // today: translucent circle in the kind's colour + a small SVG badge.
