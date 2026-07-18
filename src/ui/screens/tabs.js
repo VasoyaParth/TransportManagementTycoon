@@ -1963,9 +1963,20 @@ export function RewardsTab({ onOpenGames }) {
   const gold = useGame(s => s.gold);
   // Narrow selectors — this used to be `useGame(s => s)`, subscribing to the
   // whole store, so this tab (mounted whenever "Rewards" is open) re-rendered
-  // on literally any state change anywhere in the app.
+  // on literally any state change anywhere in the app. companyXP() and
+  // achievementValue() both take a full state-shaped object, so every slice
+  // either of them reads is selected here individually and reassembled into
+  // a local `state` below — narrower than the whole store, but still
+  // everything those two helpers actually need.
   const unlocked = useGame(s => s.achievements?.unlocked || {});
-  const found = useGame(s => s.easterEggs?.found || []);
+  const easterEggs = useGame(s => s.easterEggs);
+  const stats = useGame(s => s.stats);
+  const hubs = useGame(s => s.hubs);
+  const trucks = useGame(s => s.trucks);
+  const staff = useGame(s => s.staff);
+  const unlockedCountries = useGame(s => s.unlockedCountries);
+  const corridors = useGame(s => s.corridors);
+  const balance = useGame(s => s.balance);
   const tapStreakEgg = useEasterEggTap('streak_freak', 11);
   const [showAll, setShowAll] = useState(false);
   const weeklyProgress = useGame(s => s.weeklyProgress);
@@ -1980,6 +1991,8 @@ export function RewardsTab({ onOpenGames }) {
   const claimStockRemovalGift = useGame(s => s.claimStockRemovalGift);
   const giftClaimed = useGame(s => s.settings?.stockRemovalGiftClaimed);
   const toast = useToast();
+  const found = easterEggs?.found || [];
+  const state = { stats, trucks, staff, hubs, unlockedCountries, easterEggs, gold, corridors, balance, login };
   const xp = companyXP(state);
   const level = companyLevelOf(xp);
   const nextXp = companyXpForLevel(level + 1);

@@ -3493,8 +3493,25 @@ function BackupTab({ onClose }) {
 // ============ Achievements (Steam-style: tiered tracks with progress) ============
 const TIER_COLORS = ['#8D99AE', '#B08D57', '#8FA6B2', '#E9B949', '#7D3C98'];
 function AchievementsTab() {
-  const state = useGame();
-  const unlocked = state.achievements?.unlocked || {};
+  // Narrow selectors — this used to be `useGame()` with no selector at all,
+  // equivalent to subscribing to the WHOLE store, re-rendering (and
+  // recomputing every achievement's progress) on literally any state change
+  // anywhere in the app while Settings' Achievements tab was open.
+  // achievementValue() takes a full state-shaped object, so every slice it
+  // reads is selected individually and reassembled into a local `state`.
+  const achievements = useGame(s => s.achievements);
+  const stats = useGame(s => s.stats);
+  const trucks = useGame(s => s.trucks);
+  const staff = useGame(s => s.staff);
+  const hubs = useGame(s => s.hubs);
+  const unlockedCountries = useGame(s => s.unlockedCountries);
+  const easterEggs = useGame(s => s.easterEggs);
+  const gold = useGame(s => s.gold);
+  const corridors = useGame(s => s.corridors);
+  const balance = useGame(s => s.balance);
+  const login = useGame(s => s.login);
+  const state = { stats, trucks, staff, hubs, unlockedCountries, easterEggs, gold, corridors, balance, login };
+  const unlocked = achievements?.unlocked || {};
   const fmtVal = (a, v) => a.unit === '₹' ? inrShort(v) : Math.floor(v).toLocaleString();
   const totalTiers = ACHIEVEMENTS.length * ACHIEVEMENT_TIERS.length;
   const doneTiers = Object.keys(unlocked).length;
