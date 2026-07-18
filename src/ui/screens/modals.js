@@ -544,13 +544,24 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
             )}
             {!locked && destCity && <Text style={[FONT.sub, { marginTop: 6 }]}>To: <Text style={{ fontWeight: '800' }}>{destCity.name}, {destCity.state}</Text></Text>}
 
-            {/* Cargo */}
+            {/* Cargo — horizontal card scroller (icon + name + rate at a
+                glance), same pattern as the truck picker above: no dropdown,
+                just scroll and tap. */}
             <Text style={cs.section}>Cargo type{locked ? ' · fixed by contract' : ''}</Text>
-            <DropdownPicker
-              options={CARGO_TYPES.map(ct => ({ key: ct.id, label: ct.name }))}
-              value={cargo} onChange={locked ? () => {} : setCargo}
-              hint={locked ? undefined : 'Tap to open the list, then pick a cargo type for this shipment.'}
-            />
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flexGrow: 0 }} contentContainerStyle={{ paddingRight: 8 }}>
+              {CARGO_TYPES.map(ct => {
+                const sel = ct.id === cargo;
+                const effRate = pricing[ct.id] != null ? pricing[ct.id] : ct.rate;
+                return (
+                  <Pressable key={ct.id} disabled={locked} onPress={() => setCargo(ct.id)}
+                    style={[cs.truckCard, sel && { borderColor: C.blue, backgroundColor: C.blueSoft }, locked && { opacity: 0.55 }]}>
+                    <Icon name={ct.icon} size={22} color={sel ? C.blue : C.text} />
+                    <Text style={[FONT.sub, { fontWeight: '700', marginTop: 4 }]} numberOfLines={1}>{ct.name}</Text>
+                    <Text style={FONT.tiny}>₹{effRate}/km·t</Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
             {(() => {
               const ct = cargoById(cargo);
               if (!ct) return null;

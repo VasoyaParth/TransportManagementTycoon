@@ -160,42 +160,21 @@ export function Pill({ text, color = C.blue, bg = C.blueSoft, icon }) {
 // of pills. Same job as a row of chips, scales cleanly to any option count,
 // and never has the "row too narrow, pills clipped" failure mode a chip row
 // does on a small screen.
-const DROPDOWN_PANEL_MAX = 260;
+// Deliberately NOT a floating/overlay panel — that was tried three different
+// ways (absolute-positioned sibling, absolute + internal ScrollView, a
+// separate Modal anchored via measureInWindow) and every version broke in
+// some real-device way that never showed up in static review here. This
+// version just expands inline, in normal document flow, pushing whatever
+// comes after it down the page — the SAME scroll surface (whatever
+// ScrollView this picker already lives in) handles seeing the full list, so
+// there's no second scrollable surface to fight over a drag gesture, and no
+// coordinate math that can put it in the wrong place.
 export function DropdownPicker({ label, icon, options, value, onChange, style, onHeaderPress, hint }) {
   const [open, setOpen] = useState(false);
-  // Screen-space anchor (measured from the header row) + a height clamped to
-  // whatever room is actually left below it. The options panel renders in
-  // its OWN Modal window (see below) instead of as an absolute sibling
-  // inside whatever ScrollView the picker happens to sit in — that's what
-  // let a long list's drag gesture "leak" through and scroll the page
-  // behind it instead of the dropdown itself. A separate Modal window has
-  // no parent scroll view to leak into.
-  const [anchor, setAnchor] = useState({ top: 0, left: 0, width: 0, maxHeight: DROPDOWN_PANEL_MAX });
-  const anchorRef = useRef(null);
   const current = options.find(o => o.key === value);
-
-  const togglePress = () => {
-    haptic('light'); onHeaderPress && onHeaderPress();
-    if (open) { setOpen(false); return; }
-    if (anchorRef.current && anchorRef.current.measureInWindow) {
-      anchorRef.current.measureInWindow((x, y, width, height) => {
-        const { width: winW, height: winH } = Dimensions.get('window');
-        const roomBelow = winH - (y + height) - 16;
-        // Clamp left so the panel (same width as the header) never renders
-        // past the right edge on a narrow screen or when the header itself
-        // sits close to it.
-        const left = Math.max(8, Math.min(x, winW - width - 8));
-        setAnchor({ top: y + height + 4, left, width, maxHeight: Math.max(120, Math.min(DROPDOWN_PANEL_MAX, roomBelow)) });
-        setOpen(true);
-      });
-    } else {
-      setOpen(true);
-    }
-  };
-
   return (
-    <View ref={anchorRef} style={[{ marginBottom: 10 }, style]}>
-      <Pressable onPress={togglePress}
+    <View style={[{ marginBottom: 10 }, style]}>
+      <Pressable onPress={() => { haptic('light'); onHeaderPress && onHeaderPress(); setOpen(o => !o); }}
         style={{
           flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
           paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: open ? C.blue : C.border,
@@ -211,31 +190,24 @@ export function DropdownPicker({ label, icon, options, value, onChange, style, o
       </Pressable>
       {hint ? <Text style={{ fontSize: 11, color: C.faint, marginTop: 4, marginLeft: 2 }}>{hint}</Text> : null}
       {open && (
-        <RNModal visible transparent animationType="fade" onRequestClose={() => setOpen(false)}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setOpen(false)} />
-          <View style={{
-            position: 'absolute', top: anchor.top, left: anchor.left, width: anchor.width, maxHeight: anchor.maxHeight,
-            borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.md, backgroundColor: '#fff', overflow: 'hidden',
-            shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 12,
-          }}>
-            <ScrollView bounces={false} keyboardShouldPersistTaps="handled" style={{ maxHeight: anchor.maxHeight }}>
-              {options.map((o, i) => {
-                const sel = o.key === value;
-                return (
-                  <Pressable key={o.key} onPress={() => { haptic('light'); play('tap', 0.3); onChange(o.key); setOpen(false); }}
-                    style={{
-                      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-                      paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: C.border,
-                      backgroundColor: sel ? C.blueSoft : '#fff',
-                    }}>
-                    <Text style={{ fontSize: 13, fontWeight: sel ? '700' : '500', color: sel ? C.blue : C.text }}>{o.label}</Text>
-                    {sel ? <Icon name="check" size={15} color={C.blue} /> : null}
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          </View>
-        </RNModal>
+        <View style={{
+          marginTop: 4, borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.md, backgroundColor: '#fff', overflow: 'hidden',
+        }}>
+          {options.map((o, i) => {
+            const sel = o.key === value;
+            return (
+              <Pressable key={o.key} onPress={() => { haptic('light'); play('tap', 0.3); onChange(o.key); setOpen(false); }}
+                style={{
+                  flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                  paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: C.border,
+                  backgroundColor: sel ? C.blueSoft : '#fff',
+                }}>
+                <Text style={{ fontSize: 13, fontWeight: sel ? '700' : '500', color: sel ? C.blue : C.text }}>{o.label}</Text>
+                {sel ? <Icon name="check" size={15} color={C.blue} /> : null}
+              </Pressable>
+            );
+          })}
+        </View>
       )}
     </View>
   );
