@@ -29,6 +29,11 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, pick
   const deliveries = useGame(s => s.deliveries);
   const unlockedCountries = useGame(s => s.unlockedCountries || ['IN']);
   const [ready, setReady] = useState(false);
+  // Discovered-corridor ("past routes") overlay — off by default, matching
+  // the WebView's own default, so only currently-running deliveries show
+  // until the player explicitly asks to see history. RN just mirrors the
+  // toggle for the button's active look; the WebView owns the real state.
+  const [corridorsOn, setCorridorsOn] = useState(false);
 
   const hq = company ? cityById(company.hqCityId) : { lat: 22, lng: 79, name: 'HQ' };
 
@@ -253,16 +258,19 @@ export default function LeafletMap({ pickingMode, onCityPick, onCancelPick, pick
           inject(`window.setPorts(${!on})`);
           tapPortEgg();
         }} />
+        {/* Past-routes overlay — off by default (only live deliveries show);
+            tap to reveal every corridor ever driven, tap again to hide it. */}
+        <Ctl icon="map-marker-path" active={corridorsOn} onPress={() => { setCorridorsOn(o => !o); inject('window.toggleCorridors()'); }} />
       </View>
     </View>
   );
 }
 
-function Ctl({ icon, onPress }) {
+function Ctl({ icon, onPress, active }) {
   // Every map control gives the same light haptic tick as the rest of the UI.
   return (
-    <Pressable onPress={(...a) => { haptic('light'); onPress && onPress(...a); }} style={st.ctl}>
-      <Icon name={icon} size={19} color={C.text} />
+    <Pressable onPress={(...a) => { haptic('light'); onPress && onPress(...a); }} style={[st.ctl, active && st.ctlActive]}>
+      <Icon name={icon} size={19} color={active ? C.blue : C.text} />
     </Pressable>
   );
 }
@@ -274,6 +282,7 @@ const st = StyleSheet.create({
     width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.92)', borderWidth: 1, borderColor: C.border,
   },
+  ctlActive: { backgroundColor: C.blueSoft, borderColor: C.blue },
   legend: {
     position: 'absolute', left: 12, bottom: 12, flexDirection: 'row',
     backgroundColor: 'rgba(255,255,255,0.94)', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6,
