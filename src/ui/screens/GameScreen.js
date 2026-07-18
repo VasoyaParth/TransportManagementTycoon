@@ -289,10 +289,6 @@ export default function GameScreen() {
             </Pressable>
           </Pressable>
         ) : null}
-        {/* Delivery action — matches the map toggle buttons (same size/style) */}
-        <Pressable style={st.fab} onPress={() => { haptic('medium'); openNewDelivery(); }}>
-          <Icon name="truck-plus" size={19} color={C.text} />
-        </Pressable>
       </View>
 
       {/* ---- Bottom nav ---- */}
@@ -457,10 +453,4 @@ const st = StyleSheet.create({
   },
   navItem: { flex: 1, alignItems: 'center', gap: 2, paddingVertical: 2 },
   navTxt: { fontSize: 9.5, fontWeight: '700', color: C.sub },
-  // Delivery button — identical chrome to the map toggle buttons (one right-column set).
-  fab: {
-    position: 'absolute', right: 14, bottom: 84, width: 40, height: 40, borderRadius: 20,
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.94)', borderWidth: 1, borderColor: C.border,
-  },
 });

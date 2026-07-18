@@ -277,7 +277,11 @@ function Ctl({ icon, onPress, active }) {
 
 const st = StyleSheet.create({
   // Small vertical toggle stack on the right, sitting above the Deliver button.
-  controls: { position: 'absolute', right: 14, bottom: 150, alignItems: 'center', gap: 8 },
+  // Was anchored higher (bottom:150) with a separate "New Delivery" FAB
+  // filling the gap below it — that FAB has been removed (redundant with
+  // Fleet/Routes), so this stack now extends down into that space instead
+  // of leaving an orphaned gap above the bottom nav.
+  controls: { position: 'absolute', right: 14, bottom: 84, alignItems: 'center', gap: 8 },
   ctl: {
     width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.92)', borderWidth: 1, borderColor: C.border,
