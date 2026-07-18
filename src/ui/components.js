@@ -279,9 +279,22 @@ function parseHeightPct(height, winH) {
 export function Sheet({ visible, onClose, title, children, height = '82%' }) {
   const winH = Dimensions.get('window').height;
   const initialPct = parseHeightPct(height, winH);
+  // The container is a FIXED height (the global max) for the sheet's whole
+  // lifetime — resizing is done purely with translateY, never by animating
+  // `height` itself. Animating height is a layout property: every setValue
+  // during a drag forces a synchronous full re-layout of everything inside
+  // the sheet on the JS thread, which on a modal with real content (a long
+  // list, several cards) was slow enough to hang and crash the app on a
+  // real device during a fast drag. translateY is a pure GPU transform —
+  // native-driven, zero layout cost, safe at any drag speed.
+  const maxH = SHEET_MAX_PCT * winH;
   const slide = useRef(new Animated.Value(0)).current;
-  const heightAnim = useRef(new Animated.Value(initialPct * winH)).current;
-  const pctRef = useRef(initialPct);
+  // How many px of the fixed-height container are pushed off the bottom of
+  // the screen right now — 0 means "fully expanded to maxH", (maxH-minH)
+  // means "shrunk to the smallest allowed size". Starts each open at
+  // (maxH - default height) so it lands at its own normal size, not maxH.
+  const dragOffset = useRef(new Animated.Value(maxH - initialPct * winH)).current;
+  const curH = useRef(initialPct * winH);
   const dragStartH = useRef(initialPct * winH);
   useEffect(() => {
     Animated.timing(slide, { toValue: visible ? 1 : 0, duration: 260, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
@@ -289,30 +302,33 @@ export function Sheet({ visible, onClose, title, children, height = '82%' }) {
   // Each fresh open starts back at its own default size — a drag on one
   // visit to a modal shouldn't carry over and surprise the next visit.
   useEffect(() => {
-    if (visible) { pctRef.current = initialPct; heightAnim.setValue(initialPct * winH); }
+    if (visible) { curH.current = initialPct * winH; dragOffset.setValue(maxH - initialPct * winH); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
   const pan = useRef(PanResponder.create({
     onStartShouldSetPanResponder: () => true,
     onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 4,
-    onPanResponderGrant: () => { dragStartH.current = pctRef.current * winH; },
+    onPanResponderGrant: () => { dragStartH.current = curH.current; },
     onPanResponderMove: (_, g) => {
       // Dragging UP (negative dy) makes the sheet taller, dragging DOWN shorter.
-      const next = Math.min(SHEET_MAX_PCT * winH, Math.max(SHEET_MIN_PCT * winH, dragStartH.current - g.dy));
-      heightAnim.setValue(next);
+      const desired = Math.min(SHEET_MAX_PCT * winH, Math.max(SHEET_MIN_PCT * winH, dragStartH.current - g.dy));
+      dragOffset.setValue(maxH - desired);
     },
     onPanResponderRelease: (_, g) => {
       // A decisive fast downward flick closes the sheet, same as tapping outside.
       if (g.dy > 160 && g.vy > 0.8) { onClose(); return; }
-      const next = Math.min(SHEET_MAX_PCT * winH, Math.max(SHEET_MIN_PCT * winH, dragStartH.current - g.dy));
-      pctRef.current = next / winH;
-      Animated.spring(heightAnim, { toValue: next, useNativeDriver: false, bounciness: 4 }).start();
+      const desired = Math.min(SHEET_MAX_PCT * winH, Math.max(SHEET_MIN_PCT * winH, dragStartH.current - g.dy));
+      curH.current = desired;
+      Animated.spring(dragOffset, { toValue: maxH - desired, useNativeDriver: true, bounciness: 4 }).start();
     },
   })).current;
   return (
     <RNModal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={st.dim} onPress={onClose} />
-      <Animated.View style={[st.sheet, SHADOW.pop, { height: heightAnim, transform: [{ translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [60, 0] }) }] }]}>
+      <Animated.View style={[st.sheet, SHADOW.pop, {
+        height: maxH,
+        transform: [{ translateY: Animated.add(slide.interpolate({ inputRange: [0, 1], outputRange: [60, 0] }), dragOffset) }],
+      }]}>
         <View {...pan.panHandlers} style={st.dragArea} hitSlop={{ top: 8, bottom: 8 }}>
           <View style={st.dragHandle} />
         </View>
