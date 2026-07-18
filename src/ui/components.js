@@ -179,9 +179,13 @@ export function DropdownPicker({ label, icon, options, value, onChange, style, o
     if (open) { setOpen(false); return; }
     if (anchorRef.current && anchorRef.current.measureInWindow) {
       anchorRef.current.measureInWindow((x, y, width, height) => {
-        const winH = Dimensions.get('window').height;
+        const { width: winW, height: winH } = Dimensions.get('window');
         const roomBelow = winH - (y + height) - 16;
-        setAnchor({ top: y + height + 4, left: x, width, maxHeight: Math.max(120, Math.min(DROPDOWN_PANEL_MAX, roomBelow)) });
+        // Clamp left so the panel (same width as the header) never renders
+        // past the right edge on a narrow screen or when the header itself
+        // sits close to it.
+        const left = Math.max(8, Math.min(x, winW - width - 8));
+        setAnchor({ top: y + height + 4, left, width, maxHeight: Math.max(120, Math.min(DROPDOWN_PANEL_MAX, roomBelow)) });
         setOpen(true);
       });
     } else {
