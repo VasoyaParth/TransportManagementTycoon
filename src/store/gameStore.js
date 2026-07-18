@@ -251,7 +251,7 @@ export const PHASE_LABELS = {
 
 // ---------- Staff mood (derived, not stored) ----------
 // Drivers tire right after a trip and recharge with rest; mechanics get busy
-// whenever the fleet needs fixing. Managers are disabled (see randomCandidates).
+// whenever the fleet needs fixing; managers show how full their roster is.
 export function staffMood(member, { trucks = [], deliveries = [] } = {}, now = Date.now()) {
   if (member.role === 'driver') {
     if (member.truckId && deliveries.some(d => d.truckId === member.truckId)) {
@@ -268,7 +268,25 @@ export function staffMood(member, { trucks = [], deliveries = [] } = {}, now = D
       ? { label: 'Busy fixing', icon: 'wrench-clock', color: '#D97706' }
       : { label: 'Relaxed — chai break', icon: 'coffee', color: '#12A150' };
   }
+  if (member.role === 'manager') {
+    const managed = trucks.filter(t => t.managerId === member.id).length;
+    const cap = managerCapacity(member);
+    if (managed === 0) return { label: 'No trucks assigned', icon: 'briefcase-outline', color: '#64748B' };
+    return managed >= cap
+      ? { label: `Full roster — ${managed}/${cap}`, icon: 'briefcase-check', color: '#12A150' }
+      : { label: `Managing ${managed}/${cap}`, icon: 'briefcase-account', color: '#2563EB' };
+  }
   return { label: 'On duty', icon: 'briefcase-account', color: '#64748B' };
+}
+
+// ---------- Managers ----------
+// A manager oversees a handful of parked trucks — how many depends on their
+// level, same tiering used for salary/skill everywhere else. The instant one
+// of their trucks goes idle (a delivery completes), the manager picks the
+// most profitable reachable job and redispatches it with zero player input.
+export const MANAGER_CAPACITY = { junior: 5, senior: 6, expert: 7 };
+export function managerCapacity(member) {
+  return MANAGER_CAPACITY[member?.level] || MANAGER_CAPACITY.junior;
 }
 
 let idSeq = 1;
@@ -907,10 +925,7 @@ function randomContracts(dayNumber, count = CONTRACTS_PER_DAY) {
 function randomCandidates() {
   const out = [];
   for (let i = 0; i < 8; i++) {
-    // Managers are disabled for now (no gameplay effect yet) — re-add 'manager'
-    // to this pool when a real use for them lands.
-    // const role = ['driver', 'mechanic', 'manager'][Math.floor(Math.random() * 3)];
-    const role = ['driver', 'mechanic'][Math.floor(Math.random() * 2)];
+    const role = ['driver', 'mechanic', 'manager'][Math.floor(Math.random() * 3)];
     const level = STAFF_LEVELS[Math.floor(Math.random() * 3)];
     const gender = Math.random() < 0.65 ? 'm' : 'f';
     const names = STAFF_NAMES[gender];
@@ -2473,6 +2488,13 @@ export const useGame = create(
             }
           }
         }
+        // Managers: if this truck isn't on Autopilot (which already handles
+        // its own re-dispatch above) and is under a manager's supervision,
+        // the manager immediately picks the most profitable reachable job
+        // and redispatches it — zero player input. This runs from the same
+        // completeDelivery() call offline catch-up already uses, so it
+        // resolves correctly even if the app was closed when the truck arrived.
+        if (t && !t.autopilot) get().autoDispatchIfManaged(t.id);
       },
 
       // ---------- Autopilot custom routes ----------
@@ -2670,6 +2692,71 @@ export const useGame = create(
           trucks: s.trucks.map(t => t.id === truckId ? { ...t, driverId: staffId }
             : t.driverId === staffId ? { ...t, driverId: null } : t),
         });
+      },
+
+      // ---------- Managers ----------
+      // Put a truck under a manager's supervision. Capacity is enforced here
+      // (not just cosmetically in the UI) so nothing can end up double-booked.
+      assignManagerToTruck(truckId, managerId) {
+        const s = get();
+        const truck = s.trucks.find(x => x.id === truckId);
+        if (!truck) return { ok: false, err: 'Truck not found' };
+        const mgr = s.staff.find(x => x.id === managerId && x.role === 'manager');
+        if (!mgr) return { ok: false, err: 'Manager not found' };
+        const managed = s.trucks.filter(t => t.managerId === managerId).length;
+        if (truck.managerId !== managerId && managed >= managerCapacity(mgr)) {
+          return { ok: false, err: `${mgr.name} is already handling their full roster (${managed}/${managerCapacity(mgr)})` };
+        }
+        set({ trucks: s.trucks.map(t => t.id === truckId ? { ...t, managerId } : t) });
+        get().notify('system', 'briefcase-account', `${mgr.name} is now managing ${truck.customName || modelById(truck.modelId).name}.`);
+        return { ok: true };
+      },
+      unassignManagerFromTruck(truckId) {
+        set({ trucks: get().trucks.map(t => t.id === truckId ? { ...t, managerId: null } : t) });
+        return { ok: true };
+      },
+      // Called the instant a managed truck goes idle (parked) — picks the
+      // single most profitable reachable job and redispatches immediately,
+      // with zero player input. Candidates are drawn from two bounded, cheap
+      // sources rather than scanning every city on the map: the open
+      // contract board (already profit-priced real work) first, then any
+      // city this truck's corridor history already reaches (so a manager
+      // sticks to routes the company has actually run before). Whichever
+      // reachable option nets the most wins.
+      autoDispatchIfManaged(truckId) {
+        const s = get();
+        const t = s.trucks.find(x => x.id === truckId);
+        if (!t || t.status !== 'parked' || !t.managerId) return;
+        const mgr = s.staff.find(x => x.id === t.managerId && x.role === 'manager');
+        if (!mgr) return;
+        const model = modelById(t.modelId);
+        const candidates = [];
+        (s.contracts || []).filter(c => c.status === 'available' && c.expiresAt > Date.now()).forEach(c => {
+          const p = get().previewDelivery(truckId, c.destCityId, c.cargoType, c.cargoTons);
+          if (!p.err) candidates.push({ toCityId: c.destCityId, cargoType: c.cargoType, cargoTons: c.cargoTons, contractId: c.id, net: p.econ.net });
+        });
+        const seen = new Set(candidates.map(c => c.toCityId));
+        const corridorDests = new Set();
+        (s.corridors || []).forEach(c => {
+          if (c.fromCityId === t.cityId && c.toCityId !== t.cityId) corridorDests.add(c.toCityId);
+          else if (c.toCityId === t.cityId && c.fromCityId !== t.cityId) corridorDests.add(c.fromCityId);
+        });
+        corridorDests.forEach(cityId => {
+          if (seen.has(cityId)) return;
+          const p = get().previewDelivery(truckId, cityId, 'general', Math.min(model.cargo, 10));
+          if (!p.err) candidates.push({ toCityId: cityId, cargoType: 'general', cargoTons: Math.min(model.cargo, 10), contractId: null, net: p.econ.net });
+        });
+        if (!candidates.length) {
+          get().notify('system', 'briefcase-account', `${mgr.name} couldn't find a job for ${t.customName || model.name} at ${cityById(t.cityId)?.name} — parked for now.`);
+          return;
+        }
+        candidates.sort((a, b) => b.net - a.net);
+        const best = candidates[0];
+        const r = get().startDelivery(truckId, best.toCityId, best.cargoType, best.cargoTons, best.contractId);
+        if (r.ok) {
+          set({ stats: { ...get().stats, managerDispatches: (get().stats.managerDispatches || 0) + 1 } });
+          get().notify('system', 'briefcase-account', `${mgr.name} auto-dispatched ${t.customName || model.name} to ${cityById(best.toCityId)?.name} — ${inr(best.net)} projected.`);
+        }
       },
 
       // ---------- marketing ----------

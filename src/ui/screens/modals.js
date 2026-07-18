@@ -7,7 +7,7 @@ import RNShare from 'react-native-share';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider, smartSearch, DropdownPicker, StatusTabs } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST_MIN, LIVERY_COST_MAX, liveryCostFor, FLEET_LIVERY_DISCOUNT, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds, INSURANCE_PLANS, insurancePlanOf, ACADEMY_TIERS } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST_MIN, LIVERY_COST_MAX, liveryCostFor, FLEET_LIVERY_DISCOUNT, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds, INSURANCE_PLANS, insurancePlanOf, ACADEMY_TIERS, MANAGER_CAPACITY, managerCapacity } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
@@ -1589,6 +1589,24 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
           );
         })()}
 
+        {truck.managerId && (() => {
+          const mgr = useGame.getState().staff.find(x => x.id === truck.managerId && x.role === 'manager');
+          if (!mgr) return null;
+          return (
+            <Card style={{ marginTop: 10, borderColor: C.blue, backgroundColor: C.blueSoft }}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Row style={{ flex: 1, marginRight: 8 }}>
+                  <Icon name="briefcase-account" size={16} color={C.blue} />
+                  <Text style={[FONT.tiny, { marginLeft: 8, flex: 1, color: C.text }]}>
+                    Managed by {mgr.name} — auto-dispatches to the best job whenever this truck goes idle.
+                  </Text>
+                </Row>
+                <Btn title="Unassign" kind="soft" small onPress={() => { useGame.getState().unassignManagerFromTruck(truck.id); toast('Removed from manager', 'info'); }} />
+              </Row>
+            </Card>
+          );
+        })()}
+
         <Card style={{ marginTop: 10 }}>
           <Text style={[FONT.h3, { marginBottom: 4 }]}>Specifications</Text>
           <SpecRow icon="speedometer" label="Top speed" value={`${m.speed} km/h`} />
@@ -3011,12 +3029,15 @@ export function MiniGamesModal({ visible, onClose }) {
 // where they've reached, next break, ETA and career stats.
 export function DriverDetailModal({ visible, onClose, staffId, onShowOnMap }) {
   const [driverTimelineOpen, setDriverTimelineOpen] = useState(false);
+  const [assigningTrucks, setAssigningTrucks] = useState(false);
   const toast = useToast();
   const staff = useGame(s => s.staff);
   const trucks = useGame(s => s.trucks);
   const deliveries = useGame(s => s.deliveries);
   const promoteStaff = useGame(s => s.promoteStaff);
   const sendToAcademy = useGame(s => s.sendToAcademy);
+  const assignManagerToTruck = useGame(s => s.assignManagerToTruck);
+  const unassignManagerFromTruck = useGame(s => s.unassignManagerFromTruck);
   const member = staff.find(x => x.id === staffId);
   const truck = member && member.truckId ? trucks.find(t => t.id === member.truckId) : null;
   const d = truck ? deliveries.find(x => x.truckId === truck.id) : null;
@@ -3030,6 +3051,140 @@ export function DriverDetailModal({ visible, onClose, staffId, onShowOnMap }) {
   const now = Date.now();
   const prog = d ? Math.min(100, ((now - d.startedAt) / (d.endsAt - d.startedAt)) * 100) : 0;
   const eta = d ? fmtDur((d.endsAt - now) / 1000) : null;
+
+  // Managers oversee a handful of trucks, not one — a completely different
+  // shape of detail page than a driver/mechanic's single-assignment view,
+  // so it's its own return branch below instead of threading through all
+  // the driver-specific logic above.
+  if (member.role === 'manager') {
+    const cap = managerCapacity(member);
+    const managed = trucks.filter(t => t.managerId === member.id);
+    const onRoad = managed.filter(t => t.status === 'delivering').length;
+    const idle = managed.filter(t => t.status === 'parked').length;
+    const eligible = trucks.filter(t => t.status === 'parked' && t.managerId !== member.id);
+    const ladder = ['junior', 'senior', 'expert'];
+    const idx = ladder.indexOf(member.level);
+    const nextLevel = idx >= 0 && idx < ladder.length - 1 ? STAFF_LEVELS.find(l => l.id === ladder[idx + 1]) : null;
+    return (
+      <Sheet visible={visible} onClose={onClose} title={member.name} height="88%">
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+          <Row style={{ marginBottom: 12 }}>
+            <View style={[cs.heroIcon, { backgroundColor: C.blueSoft }]}><Icon name={avatar} size={34} color={C.blue} /></View>
+            <View style={{ marginLeft: 12, flex: 1 }}>
+              <Text style={FONT.h2}>{member.name}</Text>
+              <Row style={{ marginTop: 4, flexWrap: 'wrap' }}>
+                <Pill text={`${level ? level.name : member.level} ${role ? role.name : member.role}`} icon={role ? role.icon : 'account'} />
+                {(() => { const mood = staffMood(member, { trucks, deliveries }); return (
+                  <View style={{ marginLeft: 6 }}>
+                    <Pill text={mood.label} icon={mood.icon} color={mood.color} bg={mood.color + '22'} />
+                  </View>
+                ); })()}
+              </Row>
+              <Row style={{ marginTop: 6 }}>
+                <Icon name="star" size={13} color={C.amber} />
+                <Text style={[FONT.tiny, { marginLeft: 4 }]}>Skill {member.skill}/100 · {inrShort(member.salary)}/mo</Text>
+              </Row>
+            </View>
+          </Row>
+
+          {(member.promoBoostUntil || 0) > Date.now() && (
+            <Row style={{ backgroundColor: C.amberSoft, borderRadius: RADIUS.md, padding: 10, marginBottom: 12 }}>
+              <Icon name="rocket-launch" size={16} color={C.gold} />
+              <Text style={[FONT.tiny, { marginLeft: 6, flex: 1, color: C.text }]}>Promotion buzz active — 2× dispatch efficiency for {fmtDur((member.promoBoostUntil - Date.now()) / 1000)} more.</Text>
+            </Row>
+          )}
+          {nextLevel && (
+            <Btn
+              title={`Promote to ${nextLevel.name} (${inrShort(Math.max(member.salary * 1.1, nextLevel.salary[0]))}–${inrShort(nextLevel.salary[1])}/mo) — handles ${MANAGER_CAPACITY[nextLevel.id]} trucks`}
+              kind="green" icon="account-arrow-up" style={{ marginBottom: 12 }}
+              onPress={() => {
+                const r = promoteStaff(member.id);
+                toast(r.ok ? `Promoted to ${r.level} — now handles up to ${MANAGER_CAPACITY[r.level]} trucks!` : r.err, r.ok ? 'success' : 'error');
+              }}
+            />
+          )}
+
+          {/* Manager Insight — live snapshot of this manager's roster. */}
+          <Card style={{ marginBottom: 12 }}>
+            <Text style={[FONT.h3, { marginBottom: 8 }]}>Manager Insight</Text>
+            <Row style={{ justifyContent: 'space-between', marginBottom: 6 }}>
+              <Text style={FONT.sub}>Roster capacity</Text>
+              <Text style={[FONT.body, { fontWeight: '800' }]}>{managed.length}/{cap}</Text>
+            </Row>
+            <Progress pct={cap ? (managed.length / cap) * 100 : 0} color={managed.length >= cap ? C.green : C.blue} />
+            <Row style={{ justifyContent: 'space-between', marginTop: 10 }}>
+              <PreviewStat icon="truck-fast" label="On the road" value={onRoad} />
+              <PreviewStat icon="parking" label="Idle" value={idle} />
+              <PreviewStat icon="account-tie" label="Level" value={level ? level.name : member.level} />
+            </Row>
+            <Text style={[FONT.tiny, { marginTop: 10 }]}>
+              Every truck assigned below auto-dispatches to the most profitable reachable job the instant it goes idle — no manual dispatch needed.
+            </Text>
+          </Card>
+
+          <Row style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <Text style={FONT.h3}>Managed Trucks</Text>
+            {managed.length < cap && (
+              <Btn title="+ Assign a truck" kind="soft" small icon="plus" onPress={() => setAssigningTrucks(true)} />
+            )}
+          </Row>
+          {managed.length === 0 ? (
+            <Card style={{ alignItems: 'center', padding: 20 }}>
+              <Icon name="briefcase-outline" size={30} color={C.faint} />
+              <Text style={[FONT.sub, { marginTop: 8, textAlign: 'center' }]}>No trucks assigned yet — assign one below to put it on auto-pilot dispatch.</Text>
+            </Card>
+          ) : managed.map(t => {
+            const mm = modelById(t.modelId);
+            const meta = statusMeta[t.status];
+            return (
+              <Card key={t.id} style={{ marginBottom: 8 }}>
+                <Row style={{ justifyContent: 'space-between' }}>
+                  <Row style={{ flex: 1, marginRight: 8 }}>
+                    <TruckArtBadge model={mm} color={t.color} accent={t.accentColor} logoIcon={t.logoIcon}
+                      pattern={t.pattern} booster={t.booster} rimColor={t.rimColor} size={44} bg={meta.bg} />
+                    <View style={{ marginLeft: 8, flex: 1 }}>
+                      <Text style={[FONT.body, { fontWeight: '700' }]} numberOfLines={1}>{t.customName || mm.name}</Text>
+                      <Pill text={meta.label} icon={meta.icon} color={meta.color} bg={meta.bg} />
+                    </View>
+                  </Row>
+                  <Pressable onPress={() => { unassignManagerFromTruck(t.id); toast(`${mm.name} unassigned`, 'info'); }} hitSlop={6}>
+                    <Icon name="close-circle-outline" size={20} color={C.red} />
+                  </Pressable>
+                </Row>
+              </Card>
+            );
+          })}
+        </ScrollView>
+
+        <Sheet visible={assigningTrucks} onClose={() => setAssigningTrucks(false)} title={`Assign trucks — ${member.name}`} height="70%">
+          <Text style={[FONT.tiny, { marginBottom: 10 }]}>{cap - managed.length} slot{cap - managed.length === 1 ? '' : 's'} free · only parked trucks not already managed by someone else can be assigned.</Text>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {eligible.length === 0 ? (
+              <Card style={{ alignItems: 'center', padding: 20 }}>
+                <Icon name="truck-alert-outline" size={30} color={C.amber} />
+                <Text style={[FONT.sub, { marginTop: 8, textAlign: 'center' }]}>No free parked truck available to assign right now.</Text>
+              </Card>
+            ) : eligible.map(t => {
+              const mm = modelById(t.modelId);
+              return (
+                <Pressable key={t.id} onPress={() => {
+                  const r = assignManagerToTruck(t.id, member.id);
+                  toast(r.ok ? `${mm.name} assigned to ${member.name}!` : r.err, r.ok ? 'success' : 'error');
+                  if (r.ok && managed.length + 1 >= cap) setAssigningTrucks(false);
+                }} style={[cs.resRow, { marginBottom: 8 }]}>
+                  <Icon name={mm.icon} size={20} color={C.blue} />
+                  <View style={{ marginLeft: 8, flex: 1 }}>
+                    <Text style={[FONT.body, { fontWeight: '700' }]}>{t.customName || mm.name}</Text>
+                    <Text style={FONT.tiny}>Parked at {cityById(t.cityId)?.name}{t.managerId ? ' · currently managed by another manager' : ''}</Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        </Sheet>
+      </Sheet>
+    );
+  }
 
   return (
     <Sheet visible={visible} onClose={onClose} title={member.name} height="88%">

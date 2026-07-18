@@ -16,7 +16,7 @@ import {
   DAILY_JACKPOT, DAILY_CHALLENGE_COUNT,
   STREAK_REWARDS, streakRewardFor,
   pledgedTruckIds, pledgedHubCityIds, collateralTotalValue, COLLATERAL_COVERAGE, MISSED_STREAK_FOR_REPO,
-  LOAN_EMI_INTERVAL_DAYS,
+  LOAN_EMI_INTERVAL_DAYS, managerCapacity,
 } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { CAMPAIGNS, CARGO_TYPES } from '../../data/trucks';
@@ -727,6 +727,9 @@ function StaffCard({ member, trucks, onAssign, onFire, onOpen, onPromote }) {
             kind="soft" small
             onPress={() => setPickerOpen(o => !o)}
           />
+        ) : member.role === 'manager' ? (
+          <Btn title={`${trucks.filter(t => t.managerId === member.id).length}/${managerCapacity(member)} trucks`}
+            icon="briefcase-account" kind="soft" small onPress={() => onOpen && onOpen(member)} />
         ) : null}
       </Row>
       {pickerOpen && member.role === 'driver' ? (
@@ -774,12 +777,11 @@ export function StaffTab({ onOpenDriver }) {
   const [hireQuery, setHireQuery] = useState('');
   const [hireSort, setHireSort] = useState('skill');
 
-  // Managers are disabled for now (no gameplay use yet).
   const counts = useMemo(() => ({
     salary: staff.reduce((a, x) => a + x.salary, 0),
   }), [staff]);
 
-  const activeStaff = useMemo(() => staff.filter(x => x.role !== 'manager'), [staff]);
+  const activeStaff = staff;
   const roleTabs = useMemo(() => {
     const now = Date.now();
     const training = activeStaff.filter(x => (x.academyUntil || 0) > now).length;
@@ -787,6 +789,7 @@ export function StaffTab({ onOpenDriver }) {
       { key: 'all', label: 'All', count: activeStaff.length },
       { key: 'driver', label: 'Drivers', count: activeStaff.filter(x => x.role === 'driver').length },
       { key: 'mechanic', label: 'Mechanics', count: activeStaff.filter(x => x.role === 'mechanic').length },
+      { key: 'manager', label: 'Managers', count: activeStaff.filter(x => x.role === 'manager').length },
       { key: 'training', label: 'In Training', count: training },
     ];
   }, [activeStaff]);
@@ -806,9 +809,7 @@ export function StaffTab({ onOpenDriver }) {
   const shown = roster.slice(0, page * STAFF_PAGE);
 
   const filteredCandidates = useMemo(() => {
-    // managers filtered out while the role is disabled
     const arr = candidates.filter(x => {
-      if (x.role === 'manager') return false;
       const role = STAFF_ROLES.find(r => r.id === x.role);
       const level = STAFF_LEVELS.find(l => l.id === x.level);
       const text = [x.name, role?.name, level?.name].filter(Boolean).join(' ').toLowerCase();
