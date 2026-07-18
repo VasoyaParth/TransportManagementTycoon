@@ -294,15 +294,56 @@ export function Skeleton({ w = '100%', h = 14, r = 6, style }) {
 }
 
 // ---------- Modal sheet ----------
+// height accepts '82%' or a raw pixel number — either way it's just the
+// STARTING size. Every Sheet is resizable: drag the handle bar up to make it
+// taller, down to make it shorter, clamped between SHEET_MIN_PCT and
+// SHEET_MAX_PCT of the actual device screen height so it always fits.
+const SHEET_MIN_PCT = 0.32, SHEET_MAX_PCT = 0.94;
+function parseHeightPct(height, winH) {
+  if (typeof height === 'string' && height.endsWith('%')) return parseFloat(height) / 100;
+  if (typeof height === 'number') return height / winH;
+  return 0.82;
+}
 export function Sheet({ visible, onClose, title, children, height = '82%' }) {
+  const winH = Dimensions.get('window').height;
+  const initialPct = parseHeightPct(height, winH);
   const slide = useRef(new Animated.Value(0)).current;
+  const heightAnim = useRef(new Animated.Value(initialPct * winH)).current;
+  const pctRef = useRef(initialPct);
+  const dragStartH = useRef(initialPct * winH);
   useEffect(() => {
     Animated.timing(slide, { toValue: visible ? 1 : 0, duration: 260, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
   }, [visible, slide]);
+  // Each fresh open starts back at its own default size — a drag on one
+  // visit to a modal shouldn't carry over and surprise the next visit.
+  useEffect(() => {
+    if (visible) { pctRef.current = initialPct; heightAnim.setValue(initialPct * winH); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+  const pan = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 4,
+    onPanResponderGrant: () => { dragStartH.current = pctRef.current * winH; },
+    onPanResponderMove: (_, g) => {
+      // Dragging UP (negative dy) makes the sheet taller, dragging DOWN shorter.
+      const next = Math.min(SHEET_MAX_PCT * winH, Math.max(SHEET_MIN_PCT * winH, dragStartH.current - g.dy));
+      heightAnim.setValue(next);
+    },
+    onPanResponderRelease: (_, g) => {
+      // A decisive fast downward flick closes the sheet, same as tapping outside.
+      if (g.dy > 160 && g.vy > 0.8) { onClose(); return; }
+      const next = Math.min(SHEET_MAX_PCT * winH, Math.max(SHEET_MIN_PCT * winH, dragStartH.current - g.dy));
+      pctRef.current = next / winH;
+      Animated.spring(heightAnim, { toValue: next, useNativeDriver: false, bounciness: 4 }).start();
+    },
+  })).current;
   return (
     <RNModal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <Pressable style={st.dim} onPress={onClose} />
-      <Animated.View style={[st.sheet, SHADOW.pop, { height, transform: [{ translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [60, 0] }) }] }]}>
+      <Animated.View style={[st.sheet, SHADOW.pop, { height: heightAnim, transform: [{ translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [60, 0] }) }] }]}>
+        <View {...pan.panHandlers} style={st.dragArea} hitSlop={{ top: 8, bottom: 8 }}>
+          <View style={st.dragHandle} />
+        </View>
         <View style={st.sheetHead}>
           <Text style={FONT.h2}>{title}</Text>
           <IconBtn name="close" onPress={onClose} />
@@ -528,8 +569,13 @@ const st = StyleSheet.create({
   dim: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(11,15,20,0.45)' },
   sheet: {
     position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: C.bg,
-    borderTopLeftRadius: RADIUS.xl, borderTopRightRadius: RADIUS.xl, padding: 16, paddingBottom: 24,
+    borderTopLeftRadius: RADIUS.xl, borderTopRightRadius: RADIUS.xl, paddingHorizontal: 16, paddingBottom: 24,
   },
+  // Drag anywhere in this row (bigger than the visible bar itself, via
+  // hitSlop) to resize the sheet taller/shorter — every Sheet gets this for
+  // free since it's the shared low-level modal every screen builds on.
+  dragArea: { alignItems: 'center', paddingTop: 8, paddingBottom: 6 },
+  dragHandle: { width: 38, height: 5, borderRadius: 3, backgroundColor: C.border },
   sheetHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
   // Very top of the window, above the floating header pill. On Android
   // SafeAreaView doesn't inset, so add the status-bar height manually.

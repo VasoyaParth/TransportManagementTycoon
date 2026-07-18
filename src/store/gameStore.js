@@ -465,30 +465,6 @@ export const driverLevel = xp => Math.min(10, Math.floor(Math.sqrt((xp || 0) / 2
 export const driverXpForLevel = l => l * l * 250;
 export const driverPerkIds = m => { const l = driverLevel(m?.xp); return DRIVER_PERKS.filter(p => p.level <= l).map(p => p.id); };
 
-// ---------- Heavy Vehicle Licensing (v10.18.0) ----------
-// Real commercial licensing, mirrored, kept simple: a brand-new driver
-// (level 0-1) can only drive Standard trucks; reach level 2 and they're
-// Premium Heavy certified for everything, including the mega-haulers.
-// Gated purely by cargo tonnage against the driver's level (see driverLevel
-// above), checked once at startDelivery() — this is what actually stops a
-// fresh hire from being handed the keys to a 250-tonne mega-hauler on day one.
-export const LICENSE_TIERS = [
-  { id: 'standard', name: 'Standard License', minCargo: 0, minDriverLevel: 0, icon: 'card-account-details-outline' },
-  { id: 'heavy', name: 'Premium Heavy License', minCargo: 20, minDriverLevel: 2, icon: 'card-account-details-star' },
-];
-export function licenseRequiredFor(cargo) {
-  let req = LICENSE_TIERS[0];
-  for (const tier of LICENSE_TIERS) if ((cargo || 0) >= tier.minCargo) req = tier;
-  return req;
-}
-// Highest license tier a driver currently qualifies for, by level.
-export function licenseHeldBy(xp) {
-  const lvl = driverLevel(xp);
-  let held = LICENSE_TIERS[0];
-  for (const tier of LICENSE_TIERS) if (lvl >= tier.minDriverLevel) held = tier;
-  return held;
-}
-
 // ---------- Regional weather ----------
 // Real weather only where it actually happens: each game day a deterministic
 // hash picks 3–5 zones from a plausibility catalog (snow in the Himalayas &
@@ -946,17 +922,41 @@ function randomCandidates() {
   return out;
 }
 
-// Truck Auctions: a fresh batch of used, discounted rigs every real week
-// (see the isoWeekId check in dailyTick). Priced well below list — the
-// trade-off is used condition and pre-existing wear (km, deliveries).
-function randomAuctionListings(count = 6) {
+// Truck Auctions: a live bidding session that resets every 12 real hours
+// (see AUCTION_SESSION_MS in dailyTick). Each listing opens at a low
+// starting bid, closes at its own staggered time within the session, and
+// climbs on its own via a pre-rolled schedule of "bot" bids — deterministic
+// timestamps rather than a live random tick, so it resolves correctly even
+// after the app was closed and reopened hours later (resolveAuctions() just
+// replays whatever scheduled bids are now in the past).
+const AUCTION_SESSION_MS = 12 * 3600 * 1000;
+function generateAuctionListings(startedAt, count = 6) {
   const out = [];
   for (let i = 0; i < count; i++) {
     const model = TRUCK_MODELS[Math.floor(Math.random() * TRUCK_MODELS.length)];
     const condition = Math.round(35 + Math.random() * 55); // 35-90%
     const km = Math.round((100 - condition) * 2500 + Math.random() * 15000);
-    const price = Math.round(model.price * (0.3 + (condition / 100) * 0.35));
-    out.push({ id: uid('auc'), modelId: model.id, condition, km, price });
+    const basePrice = Math.round(model.price * (0.16 + (condition / 100) * 0.18)); // low opening bid — bidding does the rest
+    // Stagger each listing's close time across the session (30%-100% of the
+    // window) so they don't all slam shut at once.
+    const endsAt = startedAt + Math.round(AUCTION_SESSION_MS * (0.3 + Math.random() * 0.7));
+    // Pre-roll 3-8 bot bids spread across the open window, each raising the
+    // price 4-15% — this is the "random bot puts bids" behaviour, just
+    // computed up front instead of live so offline catch-up just works.
+    const bidCount = 3 + Math.floor(Math.random() * 6);
+    let price = basePrice;
+    const schedule = [];
+    for (let b = 0; b < bidCount; b++) {
+      const ts = Math.min(endsAt - 5000, startedAt + Math.round((endsAt - startedAt) * ((b + 1) / (bidCount + 1)) * (0.85 + Math.random() * 0.3)));
+      price = Math.round(price * (1.04 + Math.random() * 0.11));
+      schedule.push({ ts, amount: price });
+    }
+    schedule.sort((a, b) => a.ts - b.ts);
+    out.push({
+      id: uid('auc'), modelId: model.id, condition, km, basePrice,
+      currentBid: basePrice, currentBidder: null, bidCount: 0,
+      schedule, appliedCount: 0, endsAt, closed: false,
+    });
   }
   return out;
 }
@@ -986,8 +986,10 @@ const initialState = {
   hubs: [], // {cityId, name, hq, since} — HQ + purchased garages/hubs
   corridors: [], // {id, fromCityId, toCityId, points} — unlocked/highlighted routes
   customRoutes: [], // {id, name, cityIds:[from,...via,to], color, cargoType, cargoTons, createdAt} — saved Autopilot routes
-  auctionListings: [], // {id, modelId, condition, km, price} — this week's discounted used-truck stock
-  auctionWeek: '', // isoWeekId() the current auctionListings were rolled for
+  // Live-bidding Truck Auction session — resets every 12 real hours (see
+  // AUCTION_SESSION_MS). listings: {id, modelId, condition, km, basePrice,
+  // currentBid, currentBidder:'you'|'bot'|null, schedule, appliedCount, endsAt, closed}
+  auctionSession: { startedAt: 0, listings: [] },
   contracts: [],
   unlockedCountries: ['IN'], // v1.4.0: neighbouring countries unlock in-game
   campaigns: [], // {id, campaignId, startedAt, endsAt}
@@ -1435,12 +1437,14 @@ export const useGame = create(
             if (s.weekly) get().notify('system', 'calendar-week', 'New weekly challenges are live — big bonus for a clean sweep!');
           }
         }
-        // Truck Auctions: a fresh discounted used-truck stock every real week.
+        // Truck Auctions: a fresh live-bidding session every 12 real hours.
         {
-          const wid = isoWeekId();
-          if (s.auctionWeek !== wid) {
-            set({ auctionWeek: wid, auctionListings: randomAuctionListings() });
-            if (s.auctionWeek) get().notify('system', 'gavel', 'Fresh stock just rolled into the Truck Auction — used rigs, well below list price.');
+          const session = s.auctionSession;
+          if (!session || now - session.startedAt >= AUCTION_SESSION_MS) {
+            set({ auctionSession: { startedAt: now, listings: generateAuctionListings(now) } });
+            if (session && session.startedAt) get().notify('system', 'gavel', 'A new Truck Auction just opened — bidding closes in stages over the next 12 hours.');
+          } else {
+            get().resolveAuctions();
           }
         }
         // Daily challenges: roll a fresh set when the real calendar day changes.
@@ -1840,32 +1844,91 @@ export const useGame = create(
         return { ok: true, value };
       },
 
-      // ---------- Truck Auctions ----------
-      // Buy a used, discounted truck straight from this week's stock.
-      buyAuctionListing(listingId) {
+      // ---------- Truck Auctions (live bidding) ----------
+      // Minimum next bid on a listing — a flat step over whatever the
+      // current high bid is, so it's always a real raise, never a token one.
+      minAuctionBid(listing) {
+        return Math.round(listing.currentBid * 1.06) + 2000;
+      },
+      // Player places a bid — just records it as the new high bid; funds and
+      // fleet capacity are only actually checked (and spent) when the
+      // listing's own close time arrives in resolveAuctions(), since a bot
+      // may still outbid you before then.
+      placeBid(listingId, amount) {
         const s = get();
-        const listing = (s.auctionListings || []).find(l => l.id === listingId);
+        const session = s.auctionSession;
+        const listing = session?.listings.find(l => l.id === listingId);
         if (!listing) return { ok: false, err: 'Listing no longer available' };
-        const model = modelById(listing.modelId);
-        const cap = get().fleetCapacity();
-        if (s.trucks.length >= cap.total) {
-          return { ok: false, err: `Fleet capacity reached (${cap.total}/${cap.total}) — upgrade your HQ or open/upgrade a garage to grow.` };
-        }
-        if (s.balance < listing.price) return { ok: false, err: 'Insufficient funds' };
-        const hq = cityById(s.company.hqCityId);
-        const truck = {
-          id: uid('t'), modelId: listing.modelId, status: 'parked',
-          lat: hq.lat, lng: hq.lng, cityId: hq.id, fuelPct: 40 + Math.floor(Math.random() * 40),
-          km: listing.km, deliveries: Math.round(listing.km / 250), driverId: null, condition: listing.condition,
-        };
+        if (listing.closed || listing.endsAt <= Date.now()) return { ok: false, err: 'Bidding has closed on this listing' };
+        const minBid = get().minAuctionBid(listing);
+        if (amount < minBid) return { ok: false, err: `Bid must be at least ${inr(minBid)}` };
+        if (s.balance < amount) return { ok: false, err: 'Insufficient funds for that bid' };
         set({
-          balance: s.balance - listing.price,
-          trucks: [...s.trucks, truck],
-          auctionListings: s.auctionListings.filter(l => l.id !== listingId),
+          auctionSession: {
+            ...session,
+            listings: session.listings.map(l => l.id === listingId
+              ? { ...l, currentBid: amount, currentBidder: 'you', bidCount: (l.bidCount || 0) + 1 } : l),
+          },
         });
-        get().logLedger('truck', 'gavel', `Auction win — ${model.name}`, -listing.price);
-        get().notify('truck', 'gavel', `Won the auction for a used ${model.name} — ${inr(listing.price)}, ${listing.condition}% condition, ready to drive.`);
+        play('tap', 0.4);
+        get().notify('system', 'gavel', `You're the high bidder on the ${modelById(listing.modelId).name} at ${inr(amount)}.`);
         return { ok: true };
+      },
+      // Applies any bot bids whose scheduled time has now passed, and settles
+      // any listing whose close time has arrived — called every tick
+      // (dailyTick, ~1/sec) so it also catches up correctly after the app
+      // was closed and reopened past a listing's close time.
+      resolveAuctions() {
+        const s = get();
+        const session = s.auctionSession;
+        if (!session || !session.listings.length) return;
+        const now = Date.now();
+        let changed = false;
+        let cashDelta = 0;
+        const newTrucks = [];
+        const hq = s.company ? cityById(s.company.hqCityId) : null;
+        const cap = get().fleetCapacity();
+        let fleetRoom = cap.total - s.trucks.length;
+        const listings = session.listings.map(l => {
+          if (l.closed) return l;
+          let cur = l;
+          while (cur.appliedCount < cur.schedule.length && cur.schedule[cur.appliedCount].ts <= now) {
+            const next = cur.schedule[cur.appliedCount];
+            if (next.amount > cur.currentBid) {
+              cur = { ...cur, currentBid: next.amount, currentBidder: 'bot', bidCount: (cur.bidCount || 0) + 1 };
+              changed = true;
+            }
+            cur = { ...cur, appliedCount: cur.appliedCount + 1 };
+          }
+          if (!cur.closed && cur.endsAt <= now) {
+            cur = { ...cur, closed: true };
+            changed = true;
+            const model = modelById(cur.modelId);
+            if (cur.currentBidder === 'you') {
+              if (s.balance + cashDelta >= cur.currentBid && fleetRoom > 0 && hq) {
+                newTrucks.push({
+                  id: uid('t'), modelId: cur.modelId, status: 'parked',
+                  lat: hq.lat, lng: hq.lng, cityId: hq.id, fuelPct: 40 + Math.floor(Math.random() * 40),
+                  km: cur.km, deliveries: Math.round(cur.km / 250), driverId: null, condition: cur.condition,
+                });
+                cashDelta -= cur.currentBid;
+                fleetRoom -= 1;
+                get().logLedger('truck', 'gavel', `Auction win — ${model.name}`, -cur.currentBid);
+                get().notify('truck', 'gavel', `Auction won! ${model.name} — ${inr(cur.currentBid)}, ${cur.condition}% condition, delivered to HQ.`);
+              } else {
+                get().notify('system', 'gavel', `Won the ${model.name} auction but couldn't complete it (funds or fleet capacity) — no charge.`);
+              }
+            }
+          }
+          return cur;
+        });
+        if (changed) {
+          set({
+            auctionSession: { ...session, listings },
+            trucks: newTrucks.length ? [...s.trucks, ...newTrucks] : s.trucks,
+            balance: s.balance + cashDelta,
+          });
+        }
       },
       // Sell an owned truck INTO the auction instead of a normal trade-in —
       // a simulated bidding war pays a bonus over the usual resale value.
@@ -2187,34 +2250,12 @@ export const useGame = create(
         };
       },
 
-      // Whether this truck's assigned (or best available) driver meets its
-      // licensing requirement — lets the UI warn BEFORE the player taps
-      // Start, instead of only failing inside startDelivery() itself.
-      truckLicenseStatus(truckId) {
-        const s = get();
-        const t = s.trucks.find(x => x.id === truckId);
-        if (!t) return null;
-        const model = modelById(t.modelId);
-        const license = licenseRequiredFor(model?.cargo);
-        const assigned = s.staff.find(x => x.id === t.driverId && x.role === 'driver');
-        const bestFree = s.staff.filter(x => x.role === 'driver' && (!x.truckId || x.truckId === truckId))
-          .slice().sort((a, b) => driverLevel(b.xp) - driverLevel(a.xp))[0];
-        const driver = assigned || bestFree || null;
-        const qualified = license.minDriverLevel === 0 || (!!driver && driverLevel(driver.xp) >= license.minDriverLevel);
-        return { license, driver, qualified };
-      },
-
       startDelivery(truckId, toCityId, cargoType, cargoTons, contractId = null) {
         const s = get();
         const t = s.trucks.find(x => x.id === truckId);
         if (!t || t.status !== 'parked') return { ok: false, err: 'Truck is not available' };
-        const model = modelById(t.modelId);
-        const license = licenseRequiredFor(model?.cargo);
         // A driver is required. Use the one already assigned, else grab the
-        // most experienced free driver — picking by level first means an
-        // auto-assign quietly satisfies a license requirement whenever a
-        // qualified driver is actually available, instead of failing on
-        // whichever free driver happened to be first in the list.
+        // most experienced free driver.
         let driverId = t.driverId;
         let driver = s.staff.find(x => x.id === driverId && x.role === 'driver' && (x.academyUntil || 0) <= Date.now());
         if (!driver) {
@@ -2222,9 +2263,6 @@ export const useGame = create(
           if (!free.length) return { ok: false, err: 'No available driver — hire, free up, or wait for a driver in training first' };
           driver = free.slice().sort((a, b) => driverLevel(b.xp) - driverLevel(a.xp))[0];
           driverId = driver.id;
-        }
-        if (license.minDriverLevel > 0 && driverLevel(driver.xp) < license.minDriverLevel) {
-          return { ok: false, err: `${license.name} required for this truck — driver level ${license.minDriverLevel}+ needed (${driver.name} is level ${driverLevel(driver.xp)}). Train up a driver on smaller runs first.` };
         }
         const p = get().previewDelivery(truckId, toCityId, cargoType, cargoTons);
         if (p.err) return { ok: false, err: p.err };
