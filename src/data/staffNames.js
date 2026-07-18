@@ -24,10 +24,10 @@ export const STAFF_NAMES = {
 export const STAFF_ROLES = [
   { id: 'driver', name: 'Driver', icon: 'steering' },
   { id: 'mechanic', name: 'Mechanic', icon: 'wrench' },
-  // Managers are disabled for now — no gameplay effect yet. Uncomment (and the
-  // matching spots in gameStore.randomCandidates + tabs.js StaffTab) when a
-  // real use for managers is designed.
-  // { id: 'manager', name: 'Manager', icon: 'briefcase-account' },
+  // Managers oversee a handful of parked trucks each and auto-dispatch them
+  // to the most profitable reachable job the instant they go idle — see
+  // MANAGER_CAPACITY / autoDispatchIfManaged in gameStore.js.
+  { id: 'manager', name: 'Manager', icon: 'briefcase-account' },
 ];
 
 // Monthly salary and skill ranges per level (SRS §7.3)

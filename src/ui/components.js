@@ -279,23 +279,30 @@ function parseHeightPct(height, winH) {
 export function Sheet({ visible, onClose, title, children, height = '82%' }) {
   const winH = Dimensions.get('window').height;
   const initialPct = parseHeightPct(height, winH);
-  // The container's real height only ever changes ONCE per drag — on
-  // release, via this plain useState (one clean layout pass, trivially
-  // cheap). Two earlier designs both broke on a real device: animating
-  // `height` on every touch-move forced dozens of full re-layouts per
-  // second and could hang/crash the app; a fixed-oversized container
-  // revealed via translateY avoided that crash but left a permanently
-  // unreachable strip of content below the visible fold (scrolling could
-  // never bring it into view unless the sheet happened to already be at
-  // max size) — content really does need to be laid out at exactly its
-  // displayed size for scrolling to reach the true end. This is the only
-  // design that's correct on both counts: cheap (one layout per gesture,
-  // not per frame) and correct (displayed size == laid-out size, always).
+  const maxH = SHEET_MAX_PCT * winH;
+  const minH = SHEET_MIN_PCT * winH;
+  // The container's real `height` (a layout property) only ever changes
+  // TWICE per drag gesture — once at grant, once at release — never on
+  // every touch-move. Two earlier designs both broke on a real device:
+  // animating `height` on every move forced dozens of full re-layouts per
+  // second and could hang/crash the app; a permanently max-height container
+  // avoided that crash but left a strip of content permanently below the
+  // visible fold at the sheet's normal size (scrolling could never reach
+  // it). This design gets both right: while a drag is active the container
+  // sits at the fixed `maxH` (one layout pass, at grant) so the full drag
+  // range has real content to reveal, and the LIVE feedback during the
+  // drag itself is 100% `translateY` — a transform, not a layout property,
+  // updated via plain `.setValue()` on every move exactly like this file's
+  // own ToastItem swipe-to-dismiss already does safely. On release it
+  // commits back down to the exact final size (a second, last layout pass),
+  // so once you're not dragging, displayed size always equals laid-out
+  // size and scrolling reaches the true end.
   const [curH, setCurH] = useState(() => initialPct * winH);
   const curHRef = useRef(curH);
   const slide = useRef(new Animated.Value(0)).current;
-  // Purely decorative, native-driven feedback that a drag is in progress —
-  // a tiny transform on the handle bar itself, not the sheet's real layout.
+  // How far the (possibly max-height) container is pushed down so its top
+  // edge lands at the right place — 0 while idle at its committed curH.
+  const dragOffset = useRef(new Animated.Value(0)).current;
   const handleScale = useRef(new Animated.Value(1)).current;
   const dragStartH = useRef(curH);
   useEffect(() => {
@@ -304,7 +311,7 @@ export function Sheet({ visible, onClose, title, children, height = '82%' }) {
   // Each fresh open starts back at its own default size — a drag on one
   // visit to a modal shouldn't carry over and surprise the next visit.
   useEffect(() => {
-    if (visible) { const h = initialPct * winH; curHRef.current = h; setCurH(h); }
+    if (visible) { const h = initialPct * winH; curHRef.current = h; setCurH(h); dragOffset.setValue(0); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
   const pan = useRef(PanResponder.create({
@@ -313,14 +320,25 @@ export function Sheet({ visible, onClose, title, children, height = '82%' }) {
     onPanResponderGrant: () => {
       dragStartH.current = curHRef.current;
       Animated.spring(handleScale, { toValue: 1.5, useNativeDriver: true, speed: 20 }).start();
+      // Expand the real container to maxH once (single layout pass) so
+      // there's real content to reveal anywhere in the drag range, and
+      // immediately compensate with an equal translateY push so nothing
+      // visually jumps — the on-screen top edge stays exactly where it was.
+      curHRef.current = maxH;
+      dragOffset.setValue(maxH - dragStartH.current);
+      setCurH(maxH);
+    },
+    onPanResponderMove: (_, g) => {
+      const desired = Math.min(maxH, Math.max(minH, dragStartH.current - g.dy));
+      dragOffset.setValue(maxH - desired);
     },
     onPanResponderRelease: (_, g) => {
       Animated.spring(handleScale, { toValue: 1, useNativeDriver: true, speed: 20 }).start();
       // A decisive fast downward flick closes the sheet, same as tapping outside.
       if (g.dy > 160 && g.vy > 0.8) { onClose(); return; }
-      // Dragging UP (negative dy) makes the sheet taller, dragging DOWN shorter.
-      const desired = Math.min(SHEET_MAX_PCT * winH, Math.max(SHEET_MIN_PCT * winH, dragStartH.current - g.dy));
+      const desired = Math.min(maxH, Math.max(minH, dragStartH.current - g.dy));
       curHRef.current = desired;
+      dragOffset.setValue(0);
       setCurH(desired);
     },
   })).current;
@@ -329,7 +347,7 @@ export function Sheet({ visible, onClose, title, children, height = '82%' }) {
       <Pressable style={st.dim} onPress={onClose} />
       <Animated.View style={[st.sheet, SHADOW.pop, {
         height: curH,
-        transform: [{ translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [60, 0] }) }],
+        transform: [{ translateY: Animated.add(slide.interpolate({ inputRange: [0, 1], outputRange: [60, 0] }), dragOffset) }],
       }]}>
         <View {...pan.panHandlers} style={st.dragArea} hitSlop={{ top: 8, bottom: 8 }}>
           <Animated.View style={[st.dragHandle, { transform: [{ scaleX: handleScale }] }]} />
