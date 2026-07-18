@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, FlatList, Pressable, StyleSheet, TextInput } from 'react-native';
 import { C, FONT, RADIUS } from '../theme';
 import {
-  Card, Btn, IconBtn, Pill, statusMeta, Progress, Money, Stat, Row, Icon, useToast, relTime, GameSlider, Sheet, useEasterEggTap, smartSearch, DropdownPicker,
+  Card, Btn, IconBtn, Pill, statusMeta, Progress, Money, Stat, Row, Icon, useToast, relTime, GameSlider, Sheet, useEasterEggTap, smartSearch, DropdownPicker, StatusTabs,
 } from '../components';
 import Svg from 'react-native-svg';
 import {
@@ -123,28 +123,39 @@ export function FleetTab({ onTruckPress, onBuyTruck, onOpenFleetLivery }) {
   const hasLive = trucks.some(t => t.status === 'delivering' || t.status === 'building');
   const now = useNow(hasLive);
   const [query, setQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all'); // all | parked | delivering | building | broken
   const [page, setPage] = useState(1);
-  useEffect(() => { setPage(1); }, [query]);
+  useEffect(() => { setPage(1); }, [query, statusFilter]);
 
   const counts = useMemo(() => {
     const c = { delivering: 0, parked: 0, building: 0, broken: 0 };
     trucks.forEach(t => { c[t.status] = (c[t.status] || 0) + 1; });
     return c;
   }, [trucks]);
+
+  const statusTabs = useMemo(() => ([
+    { key: 'all', label: 'All', count: trucks.length },
+    { key: 'parked', label: 'Parked', count: counts.parked },
+    { key: 'delivering', label: 'Delivering', count: counts.delivering },
+    { key: 'building', label: 'Building', count: counts.building },
+    { key: 'broken', label: 'Broken', count: counts.broken },
+  ]), [trucks.length, counts]);
   // Hero metrics: whole-fleet health at a glance.
   const fleetAvgFuel = trucks.length ? Math.round(trucks.reduce((a, t) => a + (t.fuelPct || 0), 0) / trucks.length) : 0;
   const fleetAvgCond = trucks.length ? Math.round(trucks.reduce((a, t) => a + (t.condition == null ? 100 : t.condition), 0) / trucks.length) : 0;
   const fleetKm = trucks.reduce((a, t) => a + (t.km || 0), 0);
 
-  // Search replaces the old status filter chips — matches name/model/brand/
-  // status as text, and tonnage/speed/condition%/fuel% as numbers (so "45"
-  // with nothing exactly at 45t still surfaces the trucks around it).
+  // Status tabs pick the bucket (Parked/Delivering/...); search narrows
+  // further within it — matches name/model/brand/status as text, and
+  // tonnage/speed/condition%/fuel% as numbers (so "45" with nothing exactly
+  // at 45t still surfaces the trucks around it).
   const filtered = useMemo(() => trucks.filter(t => {
+    if (statusFilter !== 'all' && t.status !== statusFilter) return false;
     const model = modelById(t.modelId);
     const meta = statusMeta[t.status] || statusMeta.parked;
     const text = [t.customName, model?.name, model?.brand, meta.label].filter(Boolean).join(' ').toLowerCase();
     return smartSearch(query, text, [model?.cargo, model?.speed, t.condition, t.fuelPct]);
-  }), [trucks, query]);
+  }), [trucks, query, statusFilter]);
   const visible = filtered.slice(0, page * FLEET_PAGE);
 
   const renderTruck = ({ item: t }) => {
@@ -266,6 +277,7 @@ export function FleetTab({ onTruckPress, onBuyTruck, onOpenFleetLivery }) {
               )}
             </Row>
           </Card>
+          {trucks.length > 0 && <StatusTabs tabs={statusTabs} value={statusFilter} onChange={setStatusFilter} />}
           <Row style={{ marginBottom: 10, borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.md, paddingHorizontal: 10 }}>
             <Icon name="magnify" size={16} color={C.faint} />
             <TextInput
@@ -288,7 +300,7 @@ export function FleetTab({ onTruckPress, onBuyTruck, onOpenFleetLivery }) {
             action={<Btn title="Buy Truck" icon="plus" small onPress={() => onBuyTruck && onBuyTruck()} />}
           />
         ) : (
-          <EmptyState icon="truck-outline" title="No matches" sub={`No trucks match "${query}".`} />
+          <EmptyState icon="truck-outline" title="No matches" sub={query ? `No trucks match "${query}".` : 'No trucks in this status.'} />
         )
       }
     />
@@ -758,8 +770,9 @@ export function StaffTab({ onOpenDriver }) {
   const toast = useToast();
 
   const [query, setQuery] = useState('');
+  const [roleFilter, setRoleFilter] = useState('all'); // all | driver | mechanic | training
   const [page, setPage] = useState(1);
-  useEffect(() => { setPage(1); }, [query]);
+  useEffect(() => { setPage(1); }, [query, roleFilter]);
 
   const [hireQuery, setHireQuery] = useState('');
   const [hireSort, setHireSort] = useState('skill');
@@ -769,16 +782,30 @@ export function StaffTab({ onOpenDriver }) {
     salary: staff.reduce((a, x) => a + x.salary, 0),
   }), [staff]);
 
-  // Search replaces the old role filter chips — matches name/role/level as
-  // text, and driver level/skill/salary as numbers (numeric fallback range
-  // means "45" with nothing exactly at 45 skill still shows what's close).
-  const roster = useMemo(() => staff.filter(x => {
-    if (x.role === 'manager') return false;
+  const activeStaff = useMemo(() => staff.filter(x => x.role !== 'manager'), [staff]);
+  const roleTabs = useMemo(() => {
+    const now = Date.now();
+    const training = activeStaff.filter(x => (x.academyUntil || 0) > now).length;
+    return [
+      { key: 'all', label: 'All', count: activeStaff.length },
+      { key: 'driver', label: 'Drivers', count: activeStaff.filter(x => x.role === 'driver').length },
+      { key: 'mechanic', label: 'Mechanics', count: activeStaff.filter(x => x.role === 'mechanic').length },
+      { key: 'training', label: 'In Training', count: training },
+    ];
+  }, [activeStaff]);
+
+  // Tabs pick the bucket (role / in-training); search narrows further within
+  // it — matches name/role/level as text, and driver level/skill/salary as
+  // numbers (numeric fallback range means "45" with nothing exactly at 45
+  // skill still shows what's close).
+  const roster = useMemo(() => activeStaff.filter(x => {
+    if (roleFilter === 'training') { if ((x.academyUntil || 0) <= Date.now()) return false; }
+    else if (roleFilter !== 'all' && x.role !== roleFilter) return false;
     const role = STAFF_ROLES.find(r => r.id === x.role);
     const level = STAFF_LEVELS.find(l => l.id === x.level);
     const text = [x.name, role?.name, level?.name, x.role === 'driver' ? `level ${driverLevel(x.xp)}` : ''].filter(Boolean).join(' ').toLowerCase();
     return smartSearch(query, text, [x.skill, x.salary, x.role === 'driver' ? driverLevel(x.xp) : null]);
-  }), [staff, query]);
+  }), [activeStaff, query, roleFilter]);
   const shown = roster.slice(0, page * STAFF_PAGE);
 
   const filteredCandidates = useMemo(() => {
@@ -839,6 +866,7 @@ export function StaffTab({ onOpenDriver }) {
           </Row>
           <Btn title="Hire Staff" icon="account-plus" kind="blue" small style={{ marginTop: 10 }} onPress={() => setScreen('hire')} />
         </Card>
+        {activeStaff.length > 0 && <StatusTabs tabs={roleTabs} value={roleFilter} onChange={setRoleFilter} />}
         <Row style={{ marginBottom: 10, borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.md, paddingHorizontal: 10 }}>
           <Icon name="magnify" size={16} color={C.faint} />
           <TextInput
@@ -853,7 +881,7 @@ export function StaffTab({ onOpenDriver }) {
           <EmptyState icon="account-group-outline" title="No staff yet" sub="Hire drivers and mechanics to grow your team."
             action={<Btn title="Hire Staff" icon="account-plus" small onPress={() => setScreen('hire')} />} />
         ) : roster.length === 0 ? (
-          <EmptyState icon="account-search-outline" title="No matches" sub={`No staff match "${query}".`} />
+          <EmptyState icon="account-search-outline" title="No matches" sub={query ? `No staff match "${query}".` : 'No staff in this filter.'} />
         ) : (
           <>
             {shown.map(m => (
