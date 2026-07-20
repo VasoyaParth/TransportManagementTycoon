@@ -7,7 +7,7 @@ import RNShare from 'react-native-share';
 import Svg, { Polyline, Circle, Path, G, Text as SvgText } from 'react-native-svg';
 import { C, FONT, RADIUS } from '../theme';
 import { Card, Btn, IconBtn, Pill, Progress, Money, Stat, Row, Icon, useToast, relTime, Sheet, statusMeta, Skeleton, useEasterEggTap, GameSlider, smartSearch, DropdownPicker, StatusTabs } from '../components';
-import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST_MIN, LIVERY_COST_MAX, liveryCostFor, FLEET_LIVERY_DISCOUNT, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds, INSURANCE_PLANS, insurancePlanOf, ACADEMY_TIERS, MANAGER_CAPACITY, managerCapacity } from '../../store/gameStore';
+import { useGame, modelById, cargoById, hubCostForCity, hubMaintForCity, GAME_HOUR_MS, GOLD_TO_CASH, LIVERY_COST_MIN, LIVERY_COST_MAX, liveryCostFor, FLEET_LIVERY_DISCOUNT, ROULETTE_SEGMENTS, DAILY_PLAYS, SLOT_SYMBOLS, TOLL_LANES, EASTER_EGGS, incidentMeta, deliveryPhase, PHASE_LABELS, ACHIEVEMENTS, ACHIEVEMENT_TIERS, ACHIEVEMENT_TIER_GOLD, achievementValue, staffMood, WEATHER_KINDS, weatherRadiusAt, fuelFactorForDay, companyXP, companyLevelOf, companyXpForLevel, companyTitleOf, creditScoreOf, driverLevel, truckDealFor, dealPriceFor, pledgedHubCityIds, INSURANCE_PLANS, insurancePlanOf, MANAGER_CAPACITY, managerCapacity } from '../../store/gameStore';
 import { haptic } from '../../engine/haptics';
 import { play } from '../../engine/sound';
 import { cityById, suggestDestinations, routeCities } from '../../engine/routing';
@@ -29,7 +29,7 @@ import { BrandEmblem } from '../BrandLogo';
 // badge overlaid in the corner — both purely cosmetic, set via the Livery
 // modal, and rendered here so every place this badge appears (fleet list,
 // truck detail, livery preview) reflects a repaint instantly.
-function TruckArtBadge({ model, color, accent, logoIcon, pattern, booster, rimColor, size = 56, bg }) {
+export function TruckArtBadge({ model, color, accent, logoIcon, pattern, booster, rimColor, size = 56, bg }) {
   const bt = bodyTypeFor(model);
   const body = color || defaultBodyColor(model);
   const trim = accent || '#9DB2D6';
@@ -411,14 +411,17 @@ function SpecRow({ icon, label, value }) {
 }
 
 // ============ New Delivery ============
-export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, contract, onPickOnMap }) {
+export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, contract, onPickOnMap, onOpenAutopilot }) {
   const toast = useToast();
   const trucks = useGame(s => s.trucks);
+  const staff = useGame(s => s.staff);
   const startDelivery = useGame(s => s.startDelivery);
+  const quickHireDriver = useGame(s => s.quickHireDriver);
   const previewDelivery = useGame(s => s.previewDelivery);
   const pricing = useGame(s => s.pricing);
   const unlockedCountries = useGame(s => s.unlockedCountries || ['IN']);
   const parked = trucks.filter(t => t.status === 'parked');
+  const [hiring, setHiring] = useState(false);
   const [truckId, setTruckId] = useState(presetTruckId);
   const [dest, setDest] = useState(presetDest);
   const [query, setQuery] = useState('');
@@ -465,6 +468,15 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
     return previewDelivery(truckId, dest, cargo, clampTons);
   }, [truckId, dest, cargo, clampTons]);
 
+  // Mirrors startDelivery's own driver lookup (assigned driver, else the
+  // most experienced free one) so the sheet can warn — and offer a fix —
+  // before the player even taps Start, instead of just failing.
+  const hasDriver = useMemo(() => {
+    if (!truck) return true;
+    if (staff.some(x => x.id === truck.driverId && x.role === 'driver')) return true;
+    return staff.some(x => x.role === 'driver' && (!x.truckId || x.truckId === truck.id));
+  }, [staff, truck]);
+
   if (!visible) return <Sheet visible={false} onClose={onClose} title="New Delivery" height="88%"><View /></Sheet>;
   const destCity = dest ? cityById(dest) : null;
 
@@ -472,6 +484,13 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
     const r = startDelivery(truckId, dest, cargo, clampTons, contract?.id);
     if (r.ok) { toast('Delivery started!', 'success'); onClose(); }
     else toast(r.err, 'error');
+  };
+
+  const quickHire = () => {
+    setHiring(true);
+    const r = quickHireDriver(truckId);
+    setHiring(false);
+    toast(r.ok ? `${r.name} joined and is ready to drive!` : r.err, r.ok ? 'success' : 'error');
   };
 
   return (
@@ -493,7 +512,8 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
                 return (
                   <Pressable key={t.id} onPress={() => setTruckId(t.id)}
                     style={[cs.truckCard, sel && { borderColor: C.blue, backgroundColor: C.blueSoft }]}>
-                    <Icon name={m.icon} size={22} color={sel ? C.blue : C.text} />
+                    <TruckArtBadge model={m} color={t.color} accent={t.accentColor} logoIcon={t.logoIcon}
+                      pattern={t.pattern} booster={t.booster} rimColor={t.rimColor} size={40} />
                     <Text style={[FONT.sub, { fontWeight: '700', marginTop: 4 }]} numberOfLines={1}>{m.name}</Text>
                     <Text style={FONT.tiny}>{m.cargo}t · {m.range}km</Text>
                   </Pressable>
@@ -501,8 +521,33 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
               })}
             </ScrollView>
 
+            {/* No driver for the selected truck — offer a one-tap fix right
+                here instead of only failing on Start, keeping every other
+                selection (truck/destination/cargo) exactly as picked. */}
+            {!hasDriver && (
+              <Card style={{ marginTop: 10, borderColor: C.amber, backgroundColor: C.amberSoft }}>
+                <Row>
+                  <Icon name="account-alert" size={18} color={C.amber} />
+                  <View style={{ marginLeft: 8, flex: 1 }}>
+                    <Text style={[FONT.sub, { fontWeight: '700', color: C.text }]}>No driver available for this truck</Text>
+                    <Text style={[FONT.tiny, { marginTop: 2 }]}>Every driver is out on the road or already assigned elsewhere. Quick-hire one now to keep this delivery moving.</Text>
+                  </View>
+                </Row>
+                <Btn title={hiring ? 'Hiring…' : 'Quick Hire a Driver'} kind="soft" icon="account-plus" small
+                  style={{ marginTop: 10, backgroundColor: '#fff' }} disabled={hiring} onPress={quickHire} />
+              </Card>
+            )}
+
             {/* Destination */}
-            <Text style={cs.section}>Destination</Text>
+            <Row style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text style={cs.section}>Destination</Text>
+              {!locked && onOpenAutopilot && (
+                <Pressable onPress={onOpenAutopilot} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 6 }}>
+                  <Icon name="map-marker-path" size={14} color={C.blue} />
+                  <Text style={{ color: C.blue, fontWeight: '700', fontSize: 12, marginLeft: 4 }}>Run this route on repeat? Use Custom Route</Text>
+                </Pressable>
+              )}
+            </Row>
             {locked ? (
               <Row style={{ backgroundColor: C.greenSoft, borderRadius: RADIUS.md, padding: 10 }}>
                 <Icon name="file-lock" size={16} color={C.green} />
@@ -670,8 +715,8 @@ export function NewDeliveryModal({ visible, onClose, presetTruckId, presetDest, 
               </Card>
             )}
 
-            <Btn title="Start Delivery" kind="green" icon="truck-fast" style={{ marginTop: 14, marginBottom: 30 }}
-              disabled={!preview || !!preview.err} onPress={confirm} />
+            <Btn title={hasDriver ? 'Start Delivery' : 'Hire a driver above to continue'} kind="green" icon="truck-fast" style={{ marginTop: 14, marginBottom: 30 }}
+              disabled={!preview || !!preview.err || !hasDriver} onPress={confirm} />
           </>
         )}
       </ScrollView>
@@ -796,9 +841,12 @@ export function AutopilotModal({ visible, onClose, onPickOnMap, pickResult }) {
     setPage('list');
   };
 
+  // Any parked truck not already on (or queued for) Autopilot can be
+  // assigned — one already sitting at an endpoint starts immediately, any
+  // other one first repositions there (assignAutopilot handles the leg),
+  // so the player never has to manually shuttle a truck into place first.
   const eligibleTrucks = assigningRoute
-    ? trucks.filter(t => t.status === 'parked' && !t.autopilot
-      && (t.cityId === assigningRoute.cityIds[0] || t.cityId === assigningRoute.cityIds[assigningRoute.cityIds.length - 1]))
+    ? trucks.filter(t => t.status === 'parked' && !t.autopilot && !t.autopilotPending)
     : [];
 
   return (
@@ -924,24 +972,25 @@ export function AutopilotModal({ visible, onClose, onPickOnMap, pickResult }) {
           {eligibleTrucks.length === 0 ? (
             <Card style={{ alignItems: 'center', padding: 20 }}>
               <Icon name="truck-alert-outline" size={30} color={C.amber} />
-              <Text style={[FONT.sub, { marginTop: 8, textAlign: 'center' }]}>
-                No free parked truck is standing at either endpoint of this route ({assigningRoute ? `${cityById(assigningRoute.cityIds[0])?.name} or ${cityById(assigningRoute.cityIds[assigningRoute.cityIds.length - 1])?.name}` : ''}). Park a truck there first.
-              </Text>
+              <Text style={[FONT.sub, { marginTop: 8, textAlign: 'center' }]}>No free parked truck available to assign right now.</Text>
             </Card>
           ) : eligibleTrucks.map(t => {
             const m = modelById(t.modelId);
+            const atEndpoint = assigningRoute && (t.cityId === assigningRoute.cityIds[0] || t.cityId === assigningRoute.cityIds[assigningRoute.cityIds.length - 1]);
             return (
               <Pressable key={t.id} onPress={() => {
                 const r = assignAutopilot(t.id, assigningRoute.id);
                 if (!r.ok) { toast(r.err, 'error'); return; }
-                toast('Autopilot engaged!', 'success');
+                toast(r.repositioning ? `Repositioning to ${cityById(r.toCityId)?.name} — Autopilot starts on arrival.` : 'Autopilot engaged!', 'success');
                 setAssigningRoute(null);
               }} style={[cs.resRow, { marginBottom: 8 }]}>
-                <Icon name={m.icon} size={20} color={C.blue} />
+                <TruckArtBadge model={m} color={t.color} accent={t.accentColor} logoIcon={t.logoIcon}
+                  pattern={t.pattern} booster={t.booster} rimColor={t.rimColor} size={40} />
                 <View style={{ marginLeft: 8, flex: 1 }}>
                   <Text style={[FONT.body, { fontWeight: '700' }]}>{t.customName || m.name}</Text>
                   <Text style={FONT.tiny}>Parked at {cityById(t.cityId)?.name} · {m.cargo}t capacity</Text>
                 </View>
+                {!atEndpoint && <Pill text="Will reposition first" icon="map-marker-path" color={C.amber} bg={C.amberSoft} />}
               </Pressable>
             );
           })}
@@ -1584,6 +1633,23 @@ export function TruckDetailModal({ visible, onClose, truckId, onNewDelivery, onS
                   </Text>
                 </Row>
                 <Btn title="Stop" kind="soft" small onPress={() => { useGame.getState().unassignAutopilot(truck.id); toast('Autopilot stopped', 'info'); }} />
+              </Row>
+            </Card>
+          );
+        })()}
+
+        {truck.autopilotPending && !truck.autopilot && (() => {
+          const route = useGame.getState().customRoutes.find(r => r.id === truck.autopilotPending.routeId);
+          return (
+            <Card style={{ marginTop: 10, borderColor: C.amber, backgroundColor: C.amberSoft }}>
+              <Row style={{ justifyContent: 'space-between' }}>
+                <Row style={{ flex: 1, marginRight: 8 }}>
+                  <Icon name="map-marker-path" size={16} color={C.amber} />
+                  <Text style={[FONT.tiny, { marginLeft: 8, flex: 1, color: C.text }]}>
+                    Repositioning to start Autopilot on "{route ? route.name : 'a saved route'}" — engages the moment it arrives.
+                  </Text>
+                </Row>
+                <Btn title="Cancel" kind="soft" small onPress={() => { useGame.getState().unassignAutopilot(truck.id); toast('Autopilot cancelled', 'info'); }} />
               </Row>
             </Card>
           );
@@ -2475,13 +2541,14 @@ export function PowerupsModal({ visible, onClose, onOpenGames }) {
               {expand === p.id && (
                 <View style={{ marginTop: 10, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 10 }}>
                   <Text style={[FONT.tiny, { marginBottom: 6 }]}>SELECT TRUCK</Text>
-                  {eligible(p.id).map(t => (
+                  {eligible(p.id).map(t => { const tm = modelById(t.modelId); return (
                     <Pressable key={t.id} onPress={() => activate(p, t.id)} style={cs.resRow}>
-                      <Icon name={modelById(t.modelId).icon} size={16} color={C.text} />
-                      <Text style={[FONT.body, { marginLeft: 8, flex: 1 }]}>{modelById(t.modelId).name}</Text>
+                      <TruckArtBadge model={tm} color={t.color} accent={t.accentColor} logoIcon={t.logoIcon}
+                        pattern={t.pattern} booster={t.booster} rimColor={t.rimColor} size={36} />
+                      <Text style={[FONT.body, { marginLeft: 8, flex: 1 }]}>{t.customName || tm.name}</Text>
                       <Icon name="chevron-right" size={18} color={C.faint} />
                     </Pressable>
-                  ))}
+                  ); })}
                 </View>
               )}
             </Card>
@@ -3035,7 +3102,6 @@ export function DriverDetailModal({ visible, onClose, staffId, onShowOnMap }) {
   const trucks = useGame(s => s.trucks);
   const deliveries = useGame(s => s.deliveries);
   const promoteStaff = useGame(s => s.promoteStaff);
-  const sendToAcademy = useGame(s => s.sendToAcademy);
   const assignManagerToTruck = useGame(s => s.assignManagerToTruck);
   const unassignManagerFromTruck = useGame(s => s.unassignManagerFromTruck);
   const member = staff.find(x => x.id === staffId);
@@ -3172,7 +3238,8 @@ export function DriverDetailModal({ visible, onClose, staffId, onShowOnMap }) {
                   toast(r.ok ? `${mm.name} assigned to ${member.name}!` : r.err, r.ok ? 'success' : 'error');
                   if (r.ok && managed.length + 1 >= cap) setAssigningTrucks(false);
                 }} style={[cs.resRow, { marginBottom: 8 }]}>
-                  <Icon name={mm.icon} size={20} color={C.blue} />
+                  <TruckArtBadge model={mm} color={t.color} accent={t.accentColor} logoIcon={t.logoIcon}
+                    pattern={t.pattern} booster={t.booster} rimColor={t.rimColor} size={40} />
                   <View style={{ marginLeft: 8, flex: 1 }}>
                     <Text style={[FONT.body, { fontWeight: '700' }]}>{t.customName || mm.name}</Text>
                     <Text style={FONT.tiny}>Parked at {cityById(t.cityId)?.name}{t.managerId ? ' · currently managed by another manager' : ''}</Text>
@@ -3234,38 +3301,6 @@ export function DriverDetailModal({ visible, onClose, staffId, onShowOnMap }) {
             />
           );
         })()}
-
-        {/* Driver Academy — buy XP with time + cash instead of only earning
-            it on the road. Drivers only; mechanics have no XP/level track. */}
-        {member.role === 'driver' && (
-          (member.academyUntil || 0) > Date.now() ? (
-            <Card style={{ marginBottom: 12, borderColor: C.blue, backgroundColor: C.blueSoft }}>
-              <Row>
-                <Icon name="school" size={16} color={C.blue} />
-                <Text style={[FONT.tiny, { marginLeft: 8, flex: 1, color: C.text }]}>
-                  In training ({ACADEMY_TIERS.find(t => t.id === member.academyTier)?.name || 'Course'}) — back in {fmtDur((member.academyUntil - Date.now()) / 1000)}, +{(member.academyGain || 0).toLocaleString('en-IN')} XP on graduation.
-                </Text>
-              </Row>
-            </Card>
-          ) : (
-            <Card style={{ marginBottom: 12 }}>
-              <Text style={[FONT.body, { fontWeight: '700', marginBottom: 8 }]}>Driver Academy</Text>
-              <Text style={[FONT.tiny, { marginBottom: 10 }]}>Send {member.name} off the road for real-world training — a lump XP bonus waiting when they graduate.</Text>
-              {ACADEMY_TIERS.map(tier => (
-                <Row key={tier.id} style={{ justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6 }}>
-                  <View style={{ flex: 1, marginRight: 8 }}>
-                    <Text style={[FONT.sub, { fontWeight: '700' }]}>{tier.name}</Text>
-                    <Text style={FONT.tiny}>{tier.hours}h · +{tier.xpGain.toLocaleString('en-IN')} XP</Text>
-                  </View>
-                  <Btn title={inr(tier.cost)} kind="soft" small onPress={() => {
-                    const r = sendToAcademy(member.id, tier.id);
-                    toast(r.ok ? `${member.name} left for training!` : r.err, r.ok ? 'success' : 'error');
-                  }} />
-                </Row>
-              ))}
-            </Card>
-          )
-        )}
 
         {/* Current delivery */}
         {d && m ? (
@@ -3755,8 +3790,6 @@ const ROADMAP_ITEMS = [
     desc: 'Trucks following actual highway geometry bend by bend. Already LIVE in the private beta build — graduating here soon.' },
   { icon: 'shield-home', title: 'Garage Upgrades', status: 'exploring',
     desc: 'Level up garages: bigger fuel discounts, faster loading, covered parking that slows condition wear.' },
-  { icon: 'school', title: 'Driver Academy', status: 'shipped',
-    desc: 'SHIPPED — open any driver\'s detail page: send them off the road for real-world training, buying a lump XP bonus with time and cash instead of only earning it on the road.' },
   { icon: 'camera', title: 'Photo Mode — Empire Report Card', status: 'shipped',
     desc: 'SHIPPED — open from Company Insights (tap your profile pill): a trophy-style stats card with records (longest haul, best trip) and one-tap share.' },
   { icon: 'music', title: 'Sound & Music Pass', status: 'someday',
@@ -4459,7 +4492,8 @@ export function HubsModal({ visible, onClose, onShowOnMap }) {
                         toast(r.ok ? `Moved to ${c.name} for ${inr(r.fee)}` : r.err, r.ok ? 'success' : 'error');
                         if (r.ok) setTravelFor(null);
                       }}>
-                        <Icon name={m.icon} size={16} color={C.sub} />
+                        <TruckArtBadge model={m} color={t.color} accent={t.accentColor} logoIcon={t.logoIcon}
+                          pattern={t.pattern} booster={t.booster} rimColor={t.rimColor} size={32} />
                         <Text style={[FONT.body, { flex: 1, marginLeft: 8 }]} numberOfLines={1}>{t.customName || m.name}</Text>
                         <Text style={FONT.tiny}>{from?.name}</Text>
                       </Pressable>
@@ -4681,7 +4715,8 @@ export function HubInfoModal({ visible, onClose, cityId, onNewDelivery, onOpenTr
             <Card key={t.id} style={{ marginBottom: 8, padding: 12 }}>
               <Row style={{ justifyContent: 'space-between' }}>
                 <Pressable style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }} onPress={() => onOpenTruck && onOpenTruck(t.id)}>
-                  <Icon name={m.icon} size={20} color={C.blue} />
+                  <TruckArtBadge model={m} color={t.color} accent={t.accentColor} logoIcon={t.logoIcon}
+                    pattern={t.pattern} booster={t.booster} rimColor={t.rimColor} size={40} />
                   <View style={{ marginLeft: 8, flex: 1 }}>
                     <Text style={FONT.body} numberOfLines={1}>{t.customName || m.name}</Text>
                     <Text style={FONT.tiny}>Fuel {Math.round(t.fuelPct)}% · condition {Math.round(t.condition == null ? 100 : t.condition)}%</Text>
@@ -4708,7 +4743,8 @@ export function HubInfoModal({ visible, onClose, cityId, onNewDelivery, onOpenTr
                   toast(r.ok ? `Moved to ${city.name} for ${inr(r.fee)}` : r.err, r.ok ? 'success' : 'error');
                   if (r.ok) setTravelOpen(false);
                 }}>
-                  <Icon name={m.icon} size={16} color={C.sub} />
+                  <TruckArtBadge model={m} color={t.color} accent={t.accentColor} logoIcon={t.logoIcon}
+                    pattern={t.pattern} booster={t.booster} rimColor={t.rimColor} size={32} />
                   <Text style={[FONT.body, { flex: 1, marginLeft: 8 }]} numberOfLines={1}>{t.customName || m.name}</Text>
                   <Text style={FONT.tiny}>{from?.name}</Text>
                 </Pressable>
@@ -5556,6 +5592,85 @@ export function FinaleModal({ visible, onClose }) {
           </Row>
         </Card>
         <Btn title="Onward!" kind="green" icon="rocket-launch" style={{ marginTop: 18, alignSelf: 'stretch' }} onPress={onClose} />
+      </ScrollView>
+    </Sheet>
+  );
+}
+
+// ============ Offline Insights ("Hey boss, here's what happened") ============
+// Shown once whenever the player returns from a real background gap (see
+// markBackgrounded/settleOffline in gameStore.js) — never for time spent
+// actively playing. gameStore already filtered history/notifications down
+// to exactly what landed inside that gap, so this is pure presentation.
+const OFFLINE_EVENTS_PAGE = 6;
+export function OfflineInsightsModal({ visible, onClose }) {
+  const digest = useGame(s => s.offlineDigest);
+  const company = useGame(s => s.company);
+  const [page, setPage] = useState(1);
+  useEffect(() => { if (visible) setPage(1); }, [visible, digest?.from]);
+  if (!visible || !digest) return <Sheet visible={false} onClose={onClose} title="Welcome Back" height="70%"><View /></Sheet>;
+
+  const shownEvents = digest.events.slice(0, page * OFFLINE_EVENTS_PAGE);
+  const net = digest.earned || 0;
+
+  return (
+    <Sheet visible={visible} onClose={onClose} title="Welcome Back" height="82%">
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+        <Card style={{ backgroundColor: '#0F172A', borderColor: '#1E293B', alignItems: 'center', paddingVertical: 22 }}>
+          <View style={{ width: 68, height: 68, borderRadius: 34, backgroundColor: 'rgba(59,130,246,0.18)', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+            <Icon name="briefcase-clock" size={34} color="#60A5FA" />
+          </View>
+          <Text style={[FONT.h2, { color: '#F8FAFC', textAlign: 'center' }]}>Hey boss, welcome back!</Text>
+          <Text style={[FONT.tiny, { color: '#94A3B8', marginTop: 6, textAlign: 'center' }]}>
+            You were away {fmtDur(digest.gapMs / 1000)} — here's everything {company?.name || 'the company'} got done while you were gone.
+          </Text>
+        </Card>
+
+        <Row style={{ marginTop: 12 }}>
+          <Card style={{ flex: 1, alignItems: 'center', marginRight: 6 }}>
+            <Icon name="package-variant-closed-check" size={20} color={C.blue} />
+            <Text style={[FONT.h3, { marginTop: 6 }]}>{digest.deliveries}</Text>
+            <Text style={FONT.tiny}>deliveries</Text>
+          </Card>
+          <Card style={{ flex: 1, alignItems: 'center', marginHorizontal: 6 }}>
+            <Icon name="cash-multiple" size={20} color={C.green} />
+            <Text style={[FONT.h3, { marginTop: 6, color: net >= 0 ? C.green : C.red }]}>{inrShort(net)}</Text>
+            <Text style={FONT.tiny}>earned</Text>
+          </Card>
+          <Card style={{ flex: 1, alignItems: 'center', marginLeft: 6 }}>
+            <Icon name="map-marker-distance" size={20} color={C.amber} />
+            <Text style={[FONT.h3, { marginTop: 6 }]}>{digest.km.toLocaleString('en-IN')}</Text>
+            <Text style={FONT.tiny}>km driven</Text>
+          </Card>
+        </Row>
+
+        <Text style={[FONT.h3, { marginTop: 18, marginBottom: 8 }]}>What happened</Text>
+        {digest.events.length === 0 ? (
+          <Card style={{ alignItems: 'center', padding: 20 }}>
+            <Icon name="weather-night" size={28} color={C.faint} />
+            <Text style={[FONT.sub, { marginTop: 8, textAlign: 'center' }]}>Quiet while you were away — no notable events.</Text>
+          </Card>
+        ) : (
+          <>
+            {shownEvents.map(e => (
+              <Row key={e.id} style={{ alignItems: 'flex-start', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: C.border }}>
+                <View style={cs.notifIcon}><Icon name={e.icon || 'information'} size={16} color={C.blue} /></View>
+                <View style={{ marginLeft: 10, flex: 1 }}>
+                  <Text style={FONT.sub}>{e.message}</Text>
+                  <Text style={[FONT.tiny, { marginTop: 2, color: C.faint }]}>{fmtWhen(e.ts)}</Text>
+                </View>
+              </Row>
+            ))}
+            {shownEvents.length < digest.events.length && (
+              <Pressable onPress={() => setPage(p => p + 1)} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12 }}>
+                <Icon name="chevron-down" size={16} color={C.blue} />
+                <Text style={{ color: C.blue, fontWeight: '700', marginLeft: 4 }}>View more ({digest.events.length - shownEvents.length})</Text>
+              </Pressable>
+            )}
+          </>
+        )}
+
+        <Btn title="Back to it" kind="blue" icon="steering" style={{ marginTop: 18 }} onPress={onClose} />
       </ScrollView>
     </Sheet>
   );

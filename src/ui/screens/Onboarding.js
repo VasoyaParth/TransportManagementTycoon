@@ -10,6 +10,7 @@ import { useGame } from '../../store/gameStore';
 import { TRUCK_MODELS, LOGOS, AVATARS, COMPANY_NAME_IDEAS } from '../../data/trucks';
 import { CITIES, STATES } from '../../data/cities';
 import { inr, inrShort } from '../../engine/economy';
+import { TruckArtBadge } from './modals';
 
 const STARTING_CAPITAL = 5000000;
 
@@ -334,9 +335,7 @@ export default function Onboarding({ onDone }) {
                   <Pressable key={m.id} onPress={() => setTruckId(m.id)}>
                     <Card style={[st.truckCard, sel && { borderColor: C.blue, borderWidth: 2 }]}>
                       <Row style={{ justifyContent: 'space-between' }}>
-                        <View style={st.truckIconWrap}>
-                          <Icon name={m.icon} size={30} color={sel ? C.blue : C.text} />
-                        </View>
+                        <TruckArtBadge model={m} size={48} bg={sel ? C.blueSoft : C.bgSoft} />
                         {sel ? <Icon name="check-circle" size={22} color={C.blue} /> : null}
                       </Row>
                       <Text style={[FONT.h3, { marginTop: 10 }]}>{m.name}</Text>
