@@ -25,9 +25,9 @@ const pushFlavor = (kind, vars) => { const f = flavor(kind, vars); pushNow(f.tit
 
 export const GAME_HOUR_MS = 3600000; // 1 in-game hour = 1 real minute -> 1 day = 24 min
 // Offline Insights: shortest real-world background gap worth a "while you
-// were away" digest — long enough to skip trivial app-switcher blips, short
-// enough that a genuine ~10 minute break still gets reported.
-export const OFFLINE_DIGEST_MIN_GAP_MS = 60 * 1000;
+// were away" digest — long enough to skip a literal instant app-switcher
+// flicker, short enough that even a ~1 minute break reliably gets reported.
+export const OFFLINE_DIGEST_MIN_GAP_MS = 20 * 1000;
 const SALARY_EVERY_DAYS = 30;
 const CONTRACTS_PER_DAY = 6;
 // Fresh contracts land on the board every ~2–4 hours (not just at day rollover).
@@ -1186,22 +1186,42 @@ export const useGame = create(
         // above (finished builds/deliveries/dailyTick) already ran, so
         // history + notifications are fully caught up. Filtering by
         // timestamp instead of array length keeps this correct even though
-        // both arrays are capped.
+        // both arrays are capped. Always shown once the gap clears the
+        // threshold — a quiet trip (0 deliveries, nobody home) is still a
+        // real answer to "what happened", not a reason to skip the card.
         if (gapStart && now - gapStart >= OFFLINE_DIGEST_MIN_GAP_MS) {
           const s2 = get();
           const trips = s2.history.filter(h => h.ts >= gapStart);
           const events = s2.notifications.filter(n => n.ts >= gapStart);
-          if (trips.length || events.length) {
-            set({
-              offlineDigest: {
-                from: gapStart, to: now, gapMs: now - gapStart,
-                deliveries: trips.length,
-                earned: trips.reduce((a, h) => a + h.net, 0),
-                km: Math.round(trips.reduce((a, h) => a + h.km, 0)),
-                events: events.slice().reverse().map(e => ({ id: e.id, icon: e.icon, message: e.message, ts: e.ts, type: e.type })),
-              },
-            });
-          }
+          // Trucks still out on the road (didn't finish during the gap) —
+          // how far each one moved specifically within [gapStart, now], so a
+          // long-haul mid-trip still reads as real progress, not silence.
+          const inProgress = s2.deliveries.map(d => {
+            const t = s2.trucks.find(x => x.id === d.truckId);
+            if (!t) return null;
+            const total = d.endsAt - d.startedAt;
+            if (total <= 0) return null;
+            const elapsedNow = Math.min(Math.max(now - d.startedAt, 0), total);
+            const elapsedAtGap = Math.min(Math.max(gapStart - d.startedAt, 0), total);
+            const kmDuringGap = Math.round(d.route.roadKm * (elapsedNow - elapsedAtGap) / total);
+            if (kmDuringGap <= 0) return null;
+            return {
+              truckId: t.id, truckName: t.customName || modelById(t.modelId).name,
+              fromCityId: d.fromCityId, toCityId: d.toCityId,
+              kmDuringGap, progressPct: Math.round((elapsedNow / total) * 100),
+              etaMs: Math.max(0, d.endsAt - now),
+            };
+          }).filter(Boolean);
+          set({
+            offlineDigest: {
+              from: gapStart, to: now, gapMs: now - gapStart,
+              deliveries: trips.length,
+              earned: trips.reduce((a, h) => a + h.net, 0),
+              km: Math.round(trips.reduce((a, h) => a + h.km, 0)),
+              inProgress,
+              events: events.slice().reverse().map(e => ({ id: e.id, icon: e.icon, message: e.message, ts: e.ts, type: e.type })),
+            },
+          });
         }
         set({ backgroundedAt: 0 });
       },
