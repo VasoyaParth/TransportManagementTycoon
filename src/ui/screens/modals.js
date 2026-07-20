@@ -5612,6 +5612,7 @@ export function OfflineInsightsModal({ visible, onClose }) {
 
   const shownEvents = digest.events.slice(0, page * OFFLINE_EVENTS_PAGE);
   const net = digest.earned || 0;
+  const inProgress = digest.inProgress || [];
 
   return (
     <Sheet visible={visible} onClose={onClose} title="Welcome Back" height="82%">
@@ -5624,6 +5625,10 @@ export function OfflineInsightsModal({ visible, onClose }) {
           <Text style={[FONT.tiny, { color: '#94A3B8', marginTop: 6, textAlign: 'center' }]}>
             You were away {fmtDur(digest.gapMs / 1000)} — here's everything {company?.name || 'the company'} got done while you were gone.
           </Text>
+          <Row style={{ marginTop: 10, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: RADIUS.md, paddingHorizontal: 10, paddingVertical: 6 }}>
+            <Icon name="clock-time-four-outline" size={13} color="#94A3B8" />
+            <Text style={{ fontSize: 12, color: '#CBD5E1', marginLeft: 6, fontWeight: '600' }}>{fmtWhen(digest.from)} → {fmtWhen(digest.to)}</Text>
+          </Row>
         </Card>
 
         <Row style={{ marginTop: 12 }}>
@@ -5643,6 +5648,29 @@ export function OfflineInsightsModal({ visible, onClose }) {
             <Text style={FONT.tiny}>km driven</Text>
           </Card>
         </Row>
+
+        {inProgress.length > 0 && (
+          <>
+            <Text style={[FONT.h3, { marginTop: 18, marginBottom: 8 }]}>Still on the road</Text>
+            {inProgress.map(ip => {
+              const from = cityById(ip.fromCityId), to = cityById(ip.toCityId);
+              return (
+                <Card key={ip.truckId} style={{ marginBottom: 8 }}>
+                  <Row style={{ justifyContent: 'space-between' }}>
+                    <Text style={[FONT.body, { fontWeight: '700', flex: 1, marginRight: 8 }]} numberOfLines={1}>{ip.truckName}</Text>
+                    <Text style={[FONT.tiny, { color: C.blue, fontWeight: '700' }]}>{ip.progressPct}% there</Text>
+                  </Row>
+                  <Text style={[FONT.tiny, { marginTop: 2 }]}>{from?.name || '—'} → {to?.name || '—'}</Text>
+                  <Progress pct={ip.progressPct} color={C.blue} style={{ marginTop: 8 }} />
+                  <Row style={{ justifyContent: 'space-between', marginTop: 6 }}>
+                    <Text style={FONT.tiny}>+{ip.kmDuringGap.toLocaleString('en-IN')} km while you were away</Text>
+                    <Text style={FONT.tiny}>ETA {fmtDur(ip.etaMs / 1000)}</Text>
+                  </Row>
+                </Card>
+              );
+            })}
+          </>
+        )}
 
         <Text style={[FONT.h3, { marginTop: 18, marginBottom: 8 }]}>What happened</Text>
         {digest.events.length === 0 ? (
