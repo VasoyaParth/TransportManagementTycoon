@@ -13,7 +13,7 @@ import {
   NewDeliveryModal, TruckDetailModal, TruckCustomizeModal, BuyTruckModal, ContractsModal,
   PowerupsModal, NotificationsModal, SettingsModal, HubsModal, DriverDetailModal, CountriesModal, MiniGamesModal, HubInfoModal,
   BuildingCustomizeModal, CompanyInsightsModal, NewsModal, PhotoModeModal, FinaleModal, FleetLiveryModal, IndustryRankingsModal,
-  AutopilotModal, AuctionsModal, InsuranceModal,
+  AutopilotModal, AuctionsModal, InsuranceModal, OfflineInsightsModal,
 } from './modals';
 import { haptic } from '../../engine/haptics';
 import Tutorial from './Tutorial';
@@ -59,6 +59,12 @@ export default function GameScreen() {
       }
     } catch (e) { /* never block the game on a celebration screen */ }
   }, [finaleSeen, finaleModalShown]);
+
+  // Offline Insights: settleOffline() (in the tick effect below) builds this
+  // once a real background gap is found — pop it the moment it appears.
+  const offlineDigest = useGame(s => s.offlineDigest);
+  useEffect(() => { if (offlineDigest) setModal({ kind: 'offlineInsights' }); }, [offlineDigest]);
+  const closeOfflineInsights = () => { useGame.getState().dismissOfflineDigest(); setModal(null); };
   // Lazy modal mounting: every modal used to render (hidden) on first paint,
   // which made app start-up do the work of ten sheets. Instead a modal only
   // mounts once its kind has been opened, then stays mounted so the Sheet's
@@ -114,9 +120,6 @@ export default function GameScreen() {
       for (const d of g.deliveries) {
         if (d.endsAt <= now) g.completeDelivery(d.id);
       }
-      for (const m of g.staff) {
-        if (m.academyUntil && m.academyUntil <= now) g.finishAcademyIfDue(m.id);
-      }
       g.dailyTick();
       // PERF: the header only shows day + real-world minute, so only trigger a
       // React re-render when either actually changes — the whole GameScreen
@@ -127,7 +130,7 @@ export default function GameScreen() {
         ? prev : { ...gd, _m: minute });
     };
     const start = () => { if (!iv) { useGame.getState().settleOffline(); tick(); iv = setInterval(tick, 1000); } };
-    const stop = () => { if (iv) { clearInterval(iv); iv = null; } };
+    const stop = () => { if (iv) { clearInterval(iv); iv = null; } useGame.getState().markBackgrounded(); };
     start();
     const sub = AppState.addEventListener('change', st => (st === 'active' ? start() : stop()));
     return () => { stop(); sub.remove(); };
@@ -345,6 +348,7 @@ export default function GameScreen() {
         presetDest={modal?.dest}
         contract={modal?.contract}
         onPickOnMap={() => { setPicking({ kind: 'delivery', truckId: modal?.truckId, contract: modal?.contract }); setModal(null); }}
+        onOpenAutopilot={() => setModal({ kind: 'autopilot' })}
       />}
       {mounted('truck') && <TruckDetailModal
         visible={modal?.kind === 'truck'} onClose={() => setModal(null)} truckId={modal?.truckId}
@@ -394,6 +398,7 @@ export default function GameScreen() {
       {mounted('photomode') && <PhotoModeModal visible={modal?.kind === 'photomode'} onClose={() => setModal(null)} />}
       {mounted('news') && <NewsModal visible={modal?.kind === 'news'} onClose={() => setModal(null)} />}
       {mounted('finale') && <FinaleModal visible={modal?.kind === 'finale'} onClose={() => setModal(null)} />}
+      {mounted('offlineInsights') && <OfflineInsightsModal visible={modal?.kind === 'offlineInsights'} onClose={closeOfflineInsights} />}
 
       {/* First-time guided tour */}
       {settings.tutorialSeen !== true && (

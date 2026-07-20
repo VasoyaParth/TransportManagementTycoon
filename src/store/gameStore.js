@@ -24,6 +24,10 @@ import { writeAutoBackup } from '../engine/backup';
 const pushFlavor = (kind, vars) => { const f = flavor(kind, vars); pushNow(f.title, f.body); };
 
 export const GAME_HOUR_MS = 3600000; // 1 in-game hour = 1 real minute -> 1 day = 24 min
+// Offline Insights: shortest real-world background gap worth a "while you
+// were away" digest — long enough to skip trivial app-switcher blips, short
+// enough that a genuine ~10 minute break still gets reported.
+export const OFFLINE_DIGEST_MIN_GAP_MS = 60 * 1000;
 const SALARY_EVERY_DAYS = 30;
 const CONTRACTS_PER_DAY = 6;
 // Fresh contracts land on the board every ~2–4 hours (not just at day rollover).
@@ -58,13 +62,6 @@ export function insurancePlanOf(truck) {
   const id = truck.insurancePlan || (truck.insured ? 'basic' : null);
   return id ? INSURANCE_PLANS.find(p => p.id === id) || null : null;
 }
-// Driver Academy: pay cash + take a driver off the road for real hours,
-// come back with a lump XP bonus — buying XP with time instead of km.
-export const ACADEMY_TIERS = [
-  { id: 'basic', name: 'Basic Course', hours: 2, cost: 50000, xpGain: 400 },
-  { id: 'advanced', name: 'Advanced Course', hours: 6, cost: 150000, xpGain: 1500 },
-  { id: 'master', name: 'Master Class', hours: 12, cost: 400000, xpGain: 4000 },
-];
 // Gold → cash exchange rate (₹ per Gold). Gold is premium, so it converts rich.
 export const GOLD_TO_CASH = 50000;
 
@@ -1049,6 +1046,16 @@ const initialState = {
   achievements: { unlocked: {} }, // {"road_warrior:2": ts} — track:tierIndex reached (persisted)
   lastBackupAt: 0, // real ms of the last rolling auto-backup
   login: { lastDay: '', streak: 0, bestStreak: 0 }, // daily login gold streak (real calendar days)
+  // Offline Insights (v10.34.0): real ms the app last actually left the
+  // foreground (0 = currently foregrounded / already reported). Measuring
+  // the gap strictly between two background<->foreground transitions means
+  // active play time is never counted as "away" time — see markBackgrounded()
+  // and settleOffline() below.
+  backgroundedAt: 0,
+  // Built once by settleOffline() when a real gap is found; shown as the
+  // "hey boss, here's your insight" modal, then cleared by
+  // dismissOfflineDigest() so it's reported exactly once per gap.
+  offlineDigest: null,
 };
 
 export const useGame = create(
@@ -1135,6 +1142,17 @@ export const useGame = create(
         set({ ...initialState, phase: 'splash' });
       },
 
+      // Called the instant the app leaves the foreground (screen off, home
+      // button, app-switched-away) — stamps when this background stretch
+      // began so settleOffline() can measure the *real* away-gap once the
+      // player returns, without ever counting active on-screen playtime.
+      markBackgrounded() {
+        if (get().phase !== 'game') return;
+        set({ backgroundedAt: Date.now() });
+      },
+
+      dismissOfflineDigest() { set({ offlineDigest: null }); },
+
       // Settle everything that finished while app was closed (offline progress)
       settleOffline() {
         const s = get();
@@ -1143,6 +1161,7 @@ export const useGame = create(
         setNotificationsEnabled(s.settings?.notif?.delivery !== false || s.settings?.notif?.truck !== false);
         initNotifications();
         const now = Date.now();
+        const gapStart = s.backgroundedAt;
         let changed = false;
         // finished builds
         const trucks = s.trucks.map(t => {
@@ -1158,12 +1177,33 @@ export const useGame = create(
         for (const d of [...s.deliveries]) {
           if (d.endsAt <= now) get().completeDelivery(d.id, true);
         }
-        // finished academy courses
-        for (const m of [...get().staff]) {
-          if (m.academyUntil && m.academyUntil <= now) get().finishAcademyIfDue(m.id);
-        }
         // expired campaigns just fall out of the active filter naturally
         get().dailyTick();
+
+        // ---------- Offline Insights digest ----------
+        // Build the "while you were away" summary from exactly what landed
+        // between gapStart (last real backgrounding) and now — everything
+        // above (finished builds/deliveries/dailyTick) already ran, so
+        // history + notifications are fully caught up. Filtering by
+        // timestamp instead of array length keeps this correct even though
+        // both arrays are capped.
+        if (gapStart && now - gapStart >= OFFLINE_DIGEST_MIN_GAP_MS) {
+          const s2 = get();
+          const trips = s2.history.filter(h => h.ts >= gapStart);
+          const events = s2.notifications.filter(n => n.ts >= gapStart);
+          if (trips.length || events.length) {
+            set({
+              offlineDigest: {
+                from: gapStart, to: now, gapMs: now - gapStart,
+                deliveries: trips.length,
+                earned: trips.reduce((a, h) => a + h.net, 0),
+                km: Math.round(trips.reduce((a, h) => a + h.km, 0)),
+                events: events.slice().reverse().map(e => ({ id: e.id, icon: e.icon, message: e.message, ts: e.ts, type: e.type })),
+              },
+            });
+          }
+        }
+        set({ backgroundedAt: 0 });
       },
 
       // Award any achievement tiers newly reached — one-time gold + a notify
@@ -2279,10 +2319,10 @@ export const useGame = create(
         // A driver is required. Use the one already assigned, else grab the
         // most experienced free driver.
         let driverId = t.driverId;
-        let driver = s.staff.find(x => x.id === driverId && x.role === 'driver' && (x.academyUntil || 0) <= Date.now());
+        let driver = s.staff.find(x => x.id === driverId && x.role === 'driver');
         if (!driver) {
-          const free = s.staff.filter(x => x.role === 'driver' && (!x.truckId || x.truckId === truckId) && (x.academyUntil || 0) <= Date.now());
-          if (!free.length) return { ok: false, err: 'No available driver — hire, free up, or wait for a driver in training first' };
+          const free = s.staff.filter(x => x.role === 'driver' && (!x.truckId || x.truckId === truckId));
+          if (!free.length) return { ok: false, err: 'No available driver — hire one or free up an existing driver first' };
           driver = free.slice().sort((a, b) => driverLevel(b.xp) - driverLevel(a.xp))[0];
           driverId = driver.id;
         }
@@ -2488,6 +2528,15 @@ export const useGame = create(
             }
           }
         }
+        // Autopilot repositioning hand-off: this delivery was just the "get
+        // to an endpoint" leg queued by assignAutopilot() for a truck that
+        // wasn't already sitting at one — now that it's parked there, hand
+        // straight back to assignAutopilot to start the route for real.
+        if (t && t.autopilotPending && !t.autopilot) {
+          const pending = t.autopilotPending;
+          set({ trucks: get().trucks.map(x => x.id === t.id ? { ...x, autopilotPending: null } : x) });
+          get().assignAutopilot(t.id, pending.routeId);
+        }
         // Managers: if this truck isn't on Autopilot (which already handles
         // its own re-dispatch above) and is under a manager's supervision,
         // the manager immediately picks the most profitable reachable job
@@ -2548,13 +2597,18 @@ export const useGame = create(
       deleteCustomRoute(id) {
         set({
           customRoutes: get().customRoutes.filter(r => r.id !== id),
-          trucks: get().trucks.map(x => x.autopilot?.routeId === id ? { ...x, autopilot: null } : x),
+          trucks: get().trucks.map(x => x.autopilot?.routeId === id ? { ...x, autopilot: null }
+            : x.autopilotPending?.routeId === id ? { ...x, autopilotPending: null } : x),
         });
         return { ok: true };
       },
-      // Only a truck already parked at one of the route's two endpoints can
-      // start it, so the very first leg is always exact — no silent detour
-      // from wherever the truck happens to be sitting.
+      // A truck already parked at one of the route's two endpoints starts it
+      // immediately. A truck parked anywhere else first runs one ordinary
+      // repositioning delivery to whichever endpoint is closer — carrying the
+      // route's own cargo, so it's a real paid trip, not a freebie — and gets
+      // tagged `autopilotPending`; the instant that leg completes,
+      // completeDelivery() hands it straight back to this function, which by
+      // then finds it parked at the endpoint and starts the route for real.
       assignAutopilot(truckId, routeId) {
         const s = get();
         const t = s.trucks.find(x => x.id === truckId);
@@ -2565,7 +2619,22 @@ export const useGame = create(
         const seq = route.cityIds;
         const startIdx = t.cityId === seq[0] ? 0 : t.cityId === seq[seq.length - 1] ? seq.length - 1 : -1;
         if (startIdx === -1) {
-          return { ok: false, err: `Truck must be parked at ${cityById(seq[0])?.name} or ${cityById(seq[seq.length - 1])?.name} to start this route` };
+          const endA = seq[0], endB = seq[seq.length - 1];
+          const pA = get().previewDelivery(truckId, endA, route.cargoType, route.cargoTons);
+          const pB = get().previewDelivery(truckId, endB, route.cargoType, route.cargoTons);
+          const target = !pA.err && (pB.err || pA.route.roadKm <= pB.route.roadKm) ? { cityId: endA, p: pA }
+            : !pB.err ? { cityId: endB, p: pB } : null;
+          if (!target) {
+            return { ok: false, err: `${cityById(endA)?.name} and ${cityById(endB)?.name} are both unreachable from here right now` };
+          }
+          set({ trucks: get().trucks.map(x => x.id === truckId ? { ...x, autopilotPending: { routeId } } : x) });
+          const r = get().startDelivery(truckId, target.cityId, route.cargoType, route.cargoTons);
+          if (!r.ok) {
+            set({ trucks: get().trucks.map(x => x.id === truckId ? { ...x, autopilotPending: null } : x) });
+            return r;
+          }
+          get().notify('truck', 'map-marker-path', `${modelById(t.modelId).name} is repositioning to ${cityById(target.cityId)?.name} — Autopilot on "${route.name}" starts the moment it arrives.`);
+          return { ok: true, repositioning: true, toCityId: target.cityId };
         }
         const dir = startIdx === 0 ? 1 : -1;
         set({ trucks: s.trucks.map(x => x.id === truckId ? { ...x, autopilot: { routeId, pos: startIdx, dir } } : x) });
@@ -2577,7 +2646,7 @@ export const useGame = create(
         return { ok: true };
       },
       unassignAutopilot(truckId) {
-        set({ trucks: get().trucks.map(x => x.id === truckId ? { ...x, autopilot: null } : x) });
+        set({ trucks: get().trucks.map(x => x.id === truckId ? { ...x, autopilot: null, autopilotPending: null } : x) });
         return { ok: true };
       },
 
@@ -2628,43 +2697,6 @@ export const useGame = create(
         return { ok: true, fee, newSalary, newSkill, level: next.name };
       },
 
-      // ---------- Driver Academy ----------
-      // Pay cash + take a driver off the road for real hours; they come back
-      // with a lump XP bonus — buying XP with time instead of km driven.
-      sendToAcademy(staffId, tierId) {
-        const s = get();
-        const m = s.staff.find(x => x.id === staffId);
-        if (!m || m.role !== 'driver') return { ok: false, err: 'Driver not found' };
-        if ((m.academyUntil || 0) > Date.now()) return { ok: false, err: `${m.name} is already in training` };
-        const assignedTruck = m.truckId ? s.trucks.find(t => t.id === m.truckId) : null;
-        if (assignedTruck && assignedTruck.status === 'delivering') {
-          return { ok: false, err: `${m.name} is out on delivery — wait until they return.` };
-        }
-        const tier = ACADEMY_TIERS.find(x => x.id === tierId);
-        if (!tier) return { ok: false, err: 'Unknown course' };
-        if (s.balance < tier.cost) return { ok: false, err: 'Insufficient funds for this course' };
-        set({
-          balance: s.balance - tier.cost,
-          staff: s.staff.map(x => x.id === staffId
-            ? { ...x, academyUntil: Date.now() + tier.hours * 3600 * 1000, academyGain: tier.xpGain, academyTier: tier.id }
-            : x),
-        });
-        get().logLedger('staff', 'school', `${tier.name} · ${m.name}`, -tier.cost);
-        get().notify('system', 'school', `${m.name} left for the ${tier.name} — back in ${tier.hours}h with a big XP boost.`);
-        return { ok: true };
-      },
-      // Called from the 1s tick (mirrors finishBuildIfDue) once a driver's
-      // training period has elapsed — awards the XP and clears the flags.
-      finishAcademyIfDue(staffId) {
-        const s = get();
-        const m = s.staff.find(x => x.id === staffId);
-        if (m && m.academyUntil && m.academyUntil <= Date.now()) {
-          const gain = m.academyGain || 0;
-          set({ staff: s.staff.map(x => x.id === staffId ? { ...x, xp: (x.xp || 0) + gain, academyUntil: null, academyGain: null, academyTier: null } : x) });
-          get().notify('system', 'school', `${m.name} graduated from the academy! +${gain.toLocaleString('en-IN')} XP.`);
-        }
-      },
-
       hire(candId) {
         const s = get();
         const c = s.candidates.find(x => x.id === candId);
@@ -2679,6 +2711,37 @@ export const useGame = create(
         get().notify('system', 'account-plus', `${c.name} joined as ${c.level} ${c.role}.`);
         return { ok: true };
       },
+      // Quick Hire — used from the New Delivery sheet's "No driver available"
+      // prompt. Grabs the best driver already sitting on the candidate board;
+      // if none rolled this cycle, conjures a fresh junior driver on the spot
+      // so the player is never blocked from dispatching just because the
+      // board happened to have zero drivers. Assigns straight onto the truck
+      // that triggered it, if given, so the pending delivery can proceed.
+      quickHireDriver(truckId) {
+        const s = get();
+        const truck = truckId ? s.trucks.find(t => t.id === truckId) : null;
+        let cand = s.candidates.filter(c => c.role === 'driver').sort((a, b) => b.skill - a.skill)[0];
+        if (!cand) {
+          const level = STAFF_LEVELS.find(l => l.id === 'junior') || STAFF_LEVELS[0];
+          const gender = Math.random() < 0.65 ? 'm' : 'f';
+          const names = STAFF_NAMES[gender];
+          const name = names[Math.floor(Math.random() * names.length)];
+          const salary = Math.round((level.salary[0] + Math.random() * (level.salary[1] - level.salary[0])) / 500) * 500;
+          const skill = Math.round(level.skill[0] + Math.random() * (level.skill[1] - level.skill[0]));
+          cand = { id: uid('cand'), name, gender, role: 'driver', level: level.id, salary, skill, bonus: salary * 2 };
+        }
+        if (s.balance < cand.bonus) return { ok: false, err: `Need ${inr(cand.bonus)} for a hiring bonus — balance too low` };
+        set({
+          balance: s.balance - cand.bonus,
+          staff: [...s.staff, { ...cand, hiredAt: Date.now(), truckId: truck ? truck.id : null }],
+          candidates: s.candidates.filter(x => x.id !== cand.id),
+          trucks: truck ? s.trucks.map(t => t.id === truck.id ? { ...t, driverId: cand.id } : t) : s.trucks,
+        });
+        get().logLedger('staff', 'account-plus', `Signing bonus · ${cand.name}`, -cand.bonus);
+        get().notify('system', 'account-plus', `${cand.name} joined as ${cand.level} driver${truck ? ` and was assigned to ${modelById(truck.modelId).name}` : ''}.`);
+        return { ok: true, name: cand.name };
+      },
+
       fire(staffId) {
         const s = get();
         const m = s.staff.find(x => x.id === staffId);

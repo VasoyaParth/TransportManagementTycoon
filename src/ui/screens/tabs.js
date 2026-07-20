@@ -18,6 +18,7 @@ import {
   pledgedTruckIds, pledgedHubCityIds, collateralTotalValue, COLLATERAL_COVERAGE, MISSED_STREAK_FOR_REPO,
   LOAN_EMI_INTERVAL_DAYS, managerCapacity,
 } from '../../store/gameStore';
+import { TruckArtBadge } from './modals';
 import { haptic } from '../../engine/haptics';
 import { CAMPAIGNS, CARGO_TYPES } from '../../data/trucks';
 import { STAFF_ROLES, STAFF_LEVELS, STAFF_AVATAR } from '../../data/staffNames';
@@ -116,6 +117,7 @@ const FLEET_PAGE = 8;
 export function FleetTab({ onTruckPress, onBuyTruck, onOpenFleetLivery }) {
   const trucks = useGame(s => s.trucks);
   const deliveries = useGame(s => s.deliveries);
+  const lifetimeKm = useGame(s => s.stats.km);
   const fleetCapacity = useGame(s => s.fleetCapacity);
   const cap = fleetCapacity();
   const loansForPledge = useGame(s => s.loans);
@@ -143,7 +145,10 @@ export function FleetTab({ onTruckPress, onBuyTruck, onOpenFleetLivery }) {
   // Hero metrics: whole-fleet health at a glance.
   const fleetAvgFuel = trucks.length ? Math.round(trucks.reduce((a, t) => a + (t.fuelPct || 0), 0) / trucks.length) : 0;
   const fleetAvgCond = trucks.length ? Math.round(trucks.reduce((a, t) => a + (t.condition == null ? 100 : t.condition), 0) / trucks.length) : 0;
-  const fleetKm = trucks.reduce((a, t) => a + (t.km || 0), 0);
+  // Lifetime counter (never drops when a truck is sold), not a live sum of
+  // current-fleet odometers — a sold truck's km stays part of the company's
+  // history.
+  const fleetKm = lifetimeKm || 0;
 
   // Status tabs pick the bucket (Parked/Delivering/...); search narrows
   // further within it — matches name/model/brand/status as text, and
@@ -744,8 +749,9 @@ function StaffCard({ member, trucks, onAssign, onFire, onOpen, onPromote }) {
                 style={st.pickerRow}
                 onPress={() => { onAssign(member, t); setPickerOpen(false); }}
               >
-                <Icon name={m.icon} size={16} color={C.sub} style={{ marginRight: 8 }} />
-                <Text style={[FONT.body, { flex: 1 }]}>{m.name}</Text>
+                <TruckArtBadge model={m} color={t.color} accent={t.accentColor} logoIcon={t.logoIcon}
+                  pattern={t.pattern} booster={t.booster} rimColor={t.rimColor} size={32} />
+                <Text style={[FONT.body, { flex: 1, marginLeft: 8 }]}>{t.customName || m.name}</Text>
                 {member.truckId === t.id ? <Icon name="check" size={16} color={C.green} /> : null}
               </Pressable>
             );
@@ -770,7 +776,7 @@ export function StaffTab({ onOpenDriver }) {
   const toast = useToast();
 
   const [query, setQuery] = useState('');
-  const [roleFilter, setRoleFilter] = useState('all'); // all | driver | mechanic | training
+  const [roleFilter, setRoleFilter] = useState('all'); // all | driver | mechanic | manager
   const [page, setPage] = useState(1);
   useEffect(() => { setPage(1); }, [query, roleFilter]);
 
@@ -783,24 +789,20 @@ export function StaffTab({ onOpenDriver }) {
 
   const activeStaff = staff;
   const roleTabs = useMemo(() => {
-    const now = Date.now();
-    const training = activeStaff.filter(x => (x.academyUntil || 0) > now).length;
     return [
       { key: 'all', label: 'All', count: activeStaff.length },
       { key: 'driver', label: 'Drivers', count: activeStaff.filter(x => x.role === 'driver').length },
       { key: 'mechanic', label: 'Mechanics', count: activeStaff.filter(x => x.role === 'mechanic').length },
       { key: 'manager', label: 'Managers', count: activeStaff.filter(x => x.role === 'manager').length },
-      { key: 'training', label: 'In Training', count: training },
     ];
   }, [activeStaff]);
 
-  // Tabs pick the bucket (role / in-training); search narrows further within
-  // it — matches name/role/level as text, and driver level/skill/salary as
-  // numbers (numeric fallback range means "45" with nothing exactly at 45
-  // skill still shows what's close).
+  // Tabs pick the bucket (role); search narrows further within it — matches
+  // name/role/level as text, and driver level/skill/salary as numbers
+  // (numeric fallback range means "45" with nothing exactly at 45 skill
+  // still shows what's close).
   const roster = useMemo(() => activeStaff.filter(x => {
-    if (roleFilter === 'training') { if ((x.academyUntil || 0) <= Date.now()) return false; }
-    else if (roleFilter !== 'all' && x.role !== roleFilter) return false;
+    if (roleFilter !== 'all' && x.role !== roleFilter) return false;
     const role = STAFF_ROLES.find(r => r.id === x.role);
     const level = STAFF_LEVELS.find(l => l.id === x.level);
     const text = [x.name, role?.name, level?.name, x.role === 'driver' ? `level ${driverLevel(x.xp)}` : ''].filter(Boolean).join(' ').toLowerCase();
